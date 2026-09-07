@@ -14,7 +14,7 @@ axum-login = "=0.18.0"
 console_error_panic_hook = "=0.1.7"
 leptos = "=0.8.20"
 leptos_axum = "=0.8.10"
-rust_decimal = "=1.43.0"
+rust_decimal = { version = "=1.43.0", features = ["serde"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 sqlx = { version = "=0.8.6", default-features = false }
 tokio = "=1.49.0"
