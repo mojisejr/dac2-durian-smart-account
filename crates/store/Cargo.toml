@@ -7,5 +7,7 @@ rust-version.workspace = true
 [dependencies]
 argon2.workspace = true
 axum-login.workspace = true
+calc = { path = "../calc" }
+rust_decimal.workspace = true
 serde.workspace = true
-sqlx = { workspace = true, features = ["macros", "migrate", "postgres", "runtime-tokio-rustls"] }
+sqlx = { workspace = true, features = ["macros", "migrate", "postgres", "runtime-tokio-rustls", "rust_decimal"] }

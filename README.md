@@ -5,10 +5,10 @@ is a Rust workspace: a pure calculation crate, a PostgreSQL store, and one
 Leptos SSR plus hydration web crate.
 
 This repository is being built in owner-reviewed slices. Slice 1 proved that
-the chosen stack compiles and connects. Slice 2 adds the pure calculation
-engine, its owner-editable input types, a sample derived from the source
-workbook, and deterministic local tests. Persistence and interface behaviour
-remain later slices.
+the chosen stack compiles and connects. Slice 2 added the pure calculation
+engine and its deterministic local tests. Slice 3 adds PostgreSQL persistence,
+owner-scoped access, closed-plan enforcement, and independent season
+duplication. Interface behaviour remains a later slice.
 
 ## Calculation proof
 
@@ -22,6 +22,25 @@ tax methods, the 25-cell scenario matrix, health scores, and completeness.
 cargo test -p calc
 cargo build -p calc --target wasm32-unknown-unknown
 ```
+
+## Persistence proof
+
+The store saves one complete `calc::Plan` aggregate into section-specific
+tables. Every plan query carries its owner ID, every replacement is atomic, and
+a closed plan rejects update, close, and delete operations. Duplicating a plan
+creates a new open aggregate, including when the source season is closed.
+
+The integration tests use SQLx-managed isolated databases on the real local
+PostgreSQL container. Start the database, then run:
+
+```bash
+docker compose up -d --wait
+./scripts/test-store.sh
+```
+
+The suite proves lossless complete and empty-plan round trips, every exposed
+operation under the wrong owner, every mutation of a closed plan, and
+independence after a deep duplicate is edited.
 
 ## Local stack proof
 
