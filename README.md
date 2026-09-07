@@ -4,11 +4,11 @@ A local-first Thai durian-orchard business planning calculator. The application
 is a Rust workspace: a pure calculation crate, a PostgreSQL store, and one
 Leptos SSR plus hydration web crate.
 
-This repository is being built in owner-reviewed slices. Slice 1 proved that
-the chosen stack compiles and connects. Slice 2 added the pure calculation
-engine and its deterministic local tests. Slice 3 adds PostgreSQL persistence,
-owner-scoped access, closed-plan enforcement, and independent season
-duplication. Interface behaviour remains a later slice.
+This repository is being built in owner-reviewed slices. Slices 1–3 proved the
+stack, calculation engine, and PostgreSQL persistence. Slice 4 adds the first
+usable interface: local account registration, email verification, login,
+logout, and password reset. The screen keeps user information to the email
+address only; there is no profile image, avatar, or social login.
 
 ## Calculation proof
 
@@ -42,7 +42,28 @@ The suite proves lossless complete and empty-plan round trips, every exposed
 operation under the wrong owner, every mutation of a closed plan, and
 independence after a deep duplicate is edited.
 
-## Local stack proof
+## Account and trust proof
+
+Registration compares trimmed email addresses without ASCII case distinctions,
+while retaining the original spelling for display and mail. PostgreSQL is the
+final duplicate guard. Passwords use Argon2id and accounts remain unable to log
+in until the single-use verification link has been opened.
+
+Mailpit is the local SMTP destination and inbox. Mail is available only at
+<http://127.0.0.1:8025>; this slice uses no SaaS and sends nothing to a real mail
+provider. Run the complete account suite with:
+
+```bash
+./scripts/test-auth.sh
+```
+
+That command starts PostgreSQL and Mailpit, then runs the account database,
+session HTTP, and mail-delivery integration suites. It covers canonical and
+concurrent duplicates, token expiry and single use, verified activation,
+session rotation, protected routes, server-side logout, and session invalidation
+after a password reset.
+
+## Run locally
 
 Prerequisites are Rust 1.88, `wasm32-unknown-unknown`, Docker, and
 `cargo-leptos` 0.3.7.
@@ -55,11 +76,23 @@ published Rust 1.82 minimum. That affects installation of the build tool, not
 this workspace, which is pinned and checked with Rust 1.88.
 
 ```bash
+cp .env.example .env
+# Fill DATABASE_URL, SESSION_KEY (at least 64 bytes), and the local mail values.
+# Keep .env on this machine; it is ignored by Git.
+set -a
+source .env
+set +a
 docker compose up -d --wait
-DATABASE_URL=postgres://postgres@127.0.0.1:54329/dac2 cargo sqlx migrate run
-DATABASE_URL=postgres://postgres@127.0.0.1:54329/dac2 cargo leptos build
-DATABASE_URL=postgres://postgres@127.0.0.1:54329/dac2 cargo leptos serve
+cargo sqlx migrate run
+cargo leptos build
+cargo leptos serve
 ```
+
+Open the application at <http://127.0.0.1:3000>. After registration, open the
+message in Mailpit and follow its verification link before logging in. The
+cookie is intentionally non-Secure only for this localhost workflow. A network
+deployment requires the deferred rate limiting, real SMTP, HTTPS, and Secure
+cookie gate first.
 
 The database is bound to localhost and uses PostgreSQL trust authentication for
 this local compile proof only. No deployment configuration exists.

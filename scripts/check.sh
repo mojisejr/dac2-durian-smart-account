@@ -4,6 +4,8 @@ set -euo pipefail
 
 cargo fmt --all -- --check
 cargo test -p calc
+cargo test -p store --lib
+cargo test -p web --lib --features ssr
 SQLX_OFFLINE=true cargo check --workspace --all-targets --all-features
 SQLX_OFFLINE=true cargo clippy --workspace --all-targets --all-features -- -D warnings
 SQLX_OFFLINE=true cargo leptos build
@@ -15,7 +17,7 @@ if grep -Eiq 'sqlx|axum|leptos|tokio' <<<"$calc_tree"; then
   exit 1
 fi
 
-hydrate_tree=$(cargo tree -p web --target wasm32-unknown-unknown --no-default-features --features hydrate)
+hydrate_tree=$(cargo tree -p web --target wasm32-unknown-unknown --no-default-features --features hydrate --edges normal)
 if grep -Eiq 'sqlx' <<<"$hydrate_tree"; then
   echo "hydrate dependency graph contains sqlx" >&2
   exit 1

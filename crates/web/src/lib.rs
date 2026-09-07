@@ -2,8 +2,10 @@
 
 pub mod app;
 
-#[cfg(feature = "ssr")]
 pub mod auth;
+
+#[cfg(feature = "ssr")]
+pub mod mail;
 
 #[cfg(feature = "hydrate")]
 #[wasm_bindgen::prelude::wasm_bindgen]

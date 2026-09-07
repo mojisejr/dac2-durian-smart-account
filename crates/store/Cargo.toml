@@ -8,6 +8,12 @@ rust-version.workspace = true
 argon2.workspace = true
 axum-login.workspace = true
 calc = { path = "../calc" }
+email_address.workspace = true
+rand.workspace = true
 rust_decimal.workspace = true
 serde.workspace = true
+sha2.workspace = true
 sqlx = { workspace = true, features = ["macros", "migrate", "postgres", "runtime-tokio-rustls", "rust_decimal"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
