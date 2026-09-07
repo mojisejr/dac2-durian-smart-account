@@ -4,11 +4,7 @@ ALTER TABLE users
     ADD COLUMN email_verified_at TIMESTAMPTZ;
 
 UPDATE users
-SET email_canonical = TRANSLATE(
-    BTRIM(email),
-    'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-    'abcdefghijklmnopqrstuvwxyz'
-);
+SET email_canonical = LOWER(BTRIM(email));
 
 ALTER TABLE users
     ALTER COLUMN email_canonical SET NOT NULL,
