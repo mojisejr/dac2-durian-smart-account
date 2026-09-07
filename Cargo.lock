@@ -308,6 +308,7 @@ name = "calc"
 version = "0.1.0"
 dependencies = [
  "rust_decimal",
+ "serde",
 ]
 
 [[package]]

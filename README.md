@@ -4,8 +4,24 @@ A local-first Thai durian-orchard business planning calculator. The application
 is a Rust workspace: a pure calculation crate, a PostgreSQL store, and one
 Leptos SSR plus hydration web crate.
 
-This repository is being built in owner-reviewed slices. Slice 1 proves only
-that the chosen stack compiles and connects; it contains no product behaviour.
+This repository is being built in owner-reviewed slices. Slice 1 proved that
+the chosen stack compiles and connects. Slice 2 adds the pure calculation
+engine, its owner-editable input types, a sample derived from the source
+workbook, and deterministic local tests. Persistence and interface behaviour
+remain later slices.
+
+## Calculation proof
+
+The calculation crate has no I/O dependency and exposes one deterministic
+entry point, `analyze(&Plan) -> Analysis`. Its module unit tests cover formula
+branches and invalid or missing inputs; one golden regression test checks the
+workbook sample across revenue, costs, business analysis, all nine KPIs, both
+tax methods, the 25-cell scenario matrix, health scores, and completeness.
+
+```bash
+cargo test -p calc
+cargo build -p calc --target wasm32-unknown-unknown
+```
 
 ## Local stack proof
 
@@ -35,4 +51,3 @@ proof runs without a database connection:
 ```bash
 ./scripts/check.sh
 ```
-Local-first Thai durian orchard business planning calculator built with Rust and Leptos

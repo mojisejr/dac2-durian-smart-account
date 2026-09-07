@@ -3,6 +3,7 @@
 set -euo pipefail
 
 cargo fmt --all -- --check
+cargo test -p calc
 SQLX_OFFLINE=true cargo check --workspace --all-targets --all-features
 SQLX_OFFLINE=true cargo clippy --workspace --all-targets --all-features -- -D warnings
 SQLX_OFFLINE=true cargo leptos build
