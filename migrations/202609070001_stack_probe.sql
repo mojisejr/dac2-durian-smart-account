@@ -1,0 +1,4 @@
+CREATE TABLE stack_probe (
+    id BIGSERIAL PRIMARY KEY,
+    observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
