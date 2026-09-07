@@ -1,0 +1,54 @@
+[package]
+name = "web"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+calc = { path = "../calc" }
+leptos.workspace = true
+axum = { workspace = true, optional = true }
+axum-login = { workspace = true, optional = true }
+console_error_panic_hook = { workspace = true, optional = true }
+leptos_axum = { workspace = true, optional = true }
+store = { path = "../store", optional = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"], optional = true }
+tower-sessions = { workspace = true, optional = true }
+tower-sessions-sqlx-store = { workspace = true, features = ["postgres"], optional = true }
+wasm-bindgen = { workspace = true, optional = true }
+
+[features]
+default = []
+hydrate = [
+  "leptos/hydrate",
+  "dep:console_error_panic_hook",
+  "dep:wasm-bindgen",
+]
+ssr = [
+  "dep:axum",
+  "dep:axum-login",
+  "dep:leptos_axum",
+  "dep:store",
+  "dep:tokio",
+  "dep:tower-sessions",
+  "dep:tower-sessions-sqlx-store",
+  "leptos/ssr",
+]
+
+[package.metadata.leptos]
+output-name = "dac2"
+site-root = "target/site"
+site-pkg-dir = "pkg"
+style-file = "../../style/main.css"
+assets-dir = "../../public"
+site-addr = "127.0.0.1:3000"
+reload-port = 3001
+browserquery = "defaults"
+bin-features = ["ssr"]
+bin-default-features = false
+lib-features = ["hydrate"]
+lib-default-features = false
+lib-profile-release = "wasm-release"
