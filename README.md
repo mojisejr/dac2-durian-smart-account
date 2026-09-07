@@ -12,6 +12,13 @@ that the chosen stack compiles and connects; it contains no product behaviour.
 Prerequisites are Rust 1.88, `wasm32-unknown-unknown`, Docker, and
 `cargo-leptos` 0.3.7.
 
+Use the official prebuilt binary from the
+[`cargo-leptos` v0.3.7 release](https://github.com/leptos-rs/cargo-leptos/releases/tag/v0.3.7).
+On 2026-09-07, compiling that CLI from source with Rust 1.88 and `--locked`
+resolved transitive packages requiring Rust 1.89 and 1.90, despite the crate's
+published Rust 1.82 minimum. That affects installation of the build tool, not
+this workspace, which is pinned and checked with Rust 1.88.
+
 ```bash
 docker compose up -d --wait
 DATABASE_URL=postgres://postgres@127.0.0.1:54329/dac2 cargo sqlx migrate run
