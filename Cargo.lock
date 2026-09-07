@@ -2605,6 +2605,7 @@ dependencies = [
  "memchr",
  "once_cell",
  "percent-encoding",
+ "rust_decimal",
  "rustls",
  "serde",
  "serde_json",
@@ -2688,6 +2689,7 @@ dependencies = [
  "percent-encoding",
  "rand 0.8.8",
  "rsa",
+ "rust_decimal",
  "serde",
  "sha1",
  "sha2",
@@ -2726,6 +2728,7 @@ dependencies = [
  "memchr",
  "once_cell",
  "rand 0.8.8",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sha2",
@@ -2775,6 +2778,8 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "axum-login",
+ "calc",
+ "rust_decimal",
  "serde",
  "sqlx",
 ]

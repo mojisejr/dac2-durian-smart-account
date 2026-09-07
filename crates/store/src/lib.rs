@@ -6,6 +6,9 @@ use axum_login::{AuthUser, AuthnBackend, UserId};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
+pub mod plans;
+pub mod users;
+
 pub async fn connect(database_url: &str) -> Result<PgPool, sqlx::Error> {
     sqlx::postgres::PgPoolOptions::new()
         .max_connections(5)
@@ -13,7 +16,7 @@ pub async fn connect(database_url: &str) -> Result<PgPool, sqlx::Error> {
         .await
 }
 
-/// Runs the one migration and query that make the slice-1 database proof real.
+/// Runs all migrations, then repeats the original slice-1 connectivity probe.
 pub async fn migrate_and_probe(pool: &PgPool) -> Result<i64, sqlx::Error> {
     sqlx::migrate!("../../migrations").run(pool).await?;
     sqlx::query_scalar!(r#"SELECT COUNT(*) AS "count!" FROM stack_probe"#)
