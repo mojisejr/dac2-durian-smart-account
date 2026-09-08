@@ -4,6 +4,12 @@ pub mod app;
 
 pub mod auth;
 
+pub mod plan_form;
+
+pub mod plans;
+
+pub mod plan_ui;
+
 #[cfg(feature = "ssr")]
 pub mod mail;
 

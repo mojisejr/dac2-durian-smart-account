@@ -6,9 +6,9 @@ use leptos_router::{
 };
 
 use crate::auth::{
-    Login, Logout, Register, RequestPasswordReset, ResendVerification, ResetPassword, VerifyEmail,
-    current_user_email,
+    Login, Register, RequestPasswordReset, ResendVerification, ResetPassword, VerifyEmail,
 };
+use crate::plan_ui::{PlanHubPage, PlanSectionRoute, PlansPage};
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -26,6 +26,8 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("forgot-password") view=ForgotPasswordPage/>
                     <Route path=path!("reset-password") view=ResetPasswordPage/>
                     <Route path=path!("plans") view=PlansPage/>
+                    <Route path=path!("plans/:id") view=PlanHubPage/>
+                    <Route path=path!("plans/:id/:section") view=PlanSectionRoute/>
                 </Routes>
             </main>
         </Router>
@@ -179,31 +181,6 @@ fn ResetPasswordPage() -> impl IntoView {
             </ActionForm>
             <ActionMessage action=action/>
             <p class="alternate"><A href="/login">"กลับไปเข้าสู่ระบบ"</A></p>
-        </section>
-    }
-}
-
-#[component]
-fn PlansPage() -> impl IntoView {
-    let logout = ServerAction::<Logout>::new();
-    let user = Resource::new(|| (), |_| current_user_email());
-
-    view! {
-        <section class="card">
-            <p class="eyebrow">"พื้นที่ส่วนตัว"</p>
-            <h1>"แผนของฉัน"</h1>
-            <Suspense fallback=move || view! { <p>"กำลังอ่านบัญชี…"</p> }>
-                {move || {
-                    user.get().map(|result| match result {
-                        Ok(Some(email)) => view! { <p class="user-email">{email}</p> }.into_any(),
-                        _ => view! { <p>"ไม่พบบัญชีที่เข้าสู่ระบบ"</p> }.into_any(),
-                    })
-                }}
-            </Suspense>
-            <p>"พื้นที่สร้างและแก้ไขแผนจะมาใน Batch 2"</p>
-            <ActionForm action=logout>
-                <button class="secondary" type="submit">"ออกจากระบบ"</button>
-            </ActionForm>
         </section>
     }
 }

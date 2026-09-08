@@ -16,7 +16,10 @@ axum-login = { workspace = true, optional = true }
 console_error_panic_hook = { workspace = true, optional = true }
 leptos_axum = { workspace = true, optional = true }
 lettre = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
+rust_decimal.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx = { workspace = true, features = ["runtime-tokio", "postgres"], optional = true }
 store = { path = "../store", optional = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"], optional = true }
 tower-sessions = { workspace = true, optional = true }
@@ -35,8 +38,8 @@ ssr = [
   "dep:axum-login",
   "dep:leptos_axum",
   "dep:lettre",
-  "dep:serde",
   "dep:store",
+  "dep:sqlx",
   "dep:tokio",
   "dep:tower-sessions",
   "dep:tower-sessions-sqlx-store",
