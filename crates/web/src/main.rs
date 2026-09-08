@@ -1,7 +1,7 @@
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use axum::Router;
+    use axum::{Router, middleware, routing::get};
     use axum_login::{AuthManagerLayerBuilder, tower_sessions::SessionManagerLayer};
     use leptos::prelude::*;
     use leptos_axum::{LeptosRoutes, generate_route_list};
@@ -15,8 +15,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let session_store = PostgresStore::new(pool.clone());
     session_store.migrate().await?;
-    let session_layer = SessionManagerLayer::new(session_store).with_secure(false);
-    let auth_backend = store::StackAuthBackend::new(pool);
+    let session_key = std::env::var("SESSION_KEY")?;
+    let session_key = tower_sessions::cookie::Key::try_from(session_key.as_bytes())
+        .map_err(|error| format!("SESSION_KEY must contain at least 64 bytes: {error}"))?;
+    let session_layer = SessionManagerLayer::new(session_store)
+        .with_http_only(true)
+        .with_same_site(tower_sessions::cookie::SameSite::Lax)
+        .with_secure(false)
+        .with_signed(session_key);
+    let auth_backend = store::AuthBackend::new(pool);
     let auth_layer = AuthManagerLayerBuilder::new(auth_backend, session_layer).build();
 
     let configuration = get_configuration(Some("crates/web/Cargo.toml"))?;
@@ -24,11 +31,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options = configuration.leptos_options;
     let routes = generate_route_list(App);
     let app = Router::new()
+        .route("/auth/verify-email", get(web::auth::verify_email_link))
         .leptos_routes(&options, routes, {
             let options = options.clone();
             move || shell(options.clone())
         })
         .fallback(leptos_axum::file_and_error_handler(shell))
+        .route_layer(middleware::from_fn(web::auth::require_login))
         .layer(auth_layer)
         .with_state(options);
 
