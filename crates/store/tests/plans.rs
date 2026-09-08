@@ -137,3 +137,28 @@ async fn duplicate_is_a_deep_independent_copy(pool: PgPool) -> Result<(), StoreE
     assert_ne!(reloaded_original.plan, reloaded_duplicate.plan);
     Ok(())
 }
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn list_returns_only_the_owners_plans_and_closed_state(
+    pool: PgPool,
+) -> Result<(), StoreError> {
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let other = users::create(&pool, "other@example.test").await?;
+    let first = plans::create(&pool, owner.id, &calc::Plan::default()).await?;
+    let named = calc::Plan {
+        name: "ฤดูกาลล่าสุด".into(),
+        ..calc::Plan::default()
+    };
+    let latest = plans::create(&pool, owner.id, &named).await?;
+    plans::close(&pool, owner.id, first.id).await?;
+    plans::create(&pool, other.id, &workbook_sample()).await?;
+
+    let summaries = plans::list(&pool, owner.id).await?;
+    assert_eq!(summaries.len(), 2);
+    assert_eq!(summaries[0].id, latest.id);
+    assert_eq!(summaries[0].name, "ฤดูกาลล่าสุด");
+    assert!(!summaries[0].closed);
+    assert_eq!(summaries[1].id, first.id);
+    assert!(summaries[1].closed);
+    Ok(())
+}

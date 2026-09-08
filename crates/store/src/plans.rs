@@ -3,12 +3,32 @@ mod read;
 mod types;
 mod write;
 
-pub use types::{PlanId, StoreError, StoredPlan};
+pub use types::{PlanId, PlanSummary, StoreError, StoredPlan};
 
 use calc::Plan;
 use sqlx::{PgConnection, PgPool, Row};
 
 use crate::users::UserId;
+
+pub async fn list(pool: &PgPool, owner_id: UserId) -> Result<Vec<PlanSummary>, StoreError> {
+    let rows = sqlx::query(
+        "SELECT id, name, closed_at IS NOT NULL AS closed FROM plans \
+         WHERE owner_id = $1 ORDER BY id DESC",
+    )
+    .bind(owner_id)
+    .fetch_all(pool)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok(PlanSummary {
+                id: row.try_get("id")?,
+                name: row.try_get("name")?,
+                closed: row.try_get("closed")?,
+            })
+        })
+        .collect()
+}
 
 pub async fn create(
     pool: &PgPool,

@@ -6,6 +6,13 @@ use crate::users::UserId;
 
 pub type PlanId = i64;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlanSummary {
+    pub id: PlanId,
+    pub name: String,
+    pub closed: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct StoredPlan {
     pub id: PlanId,

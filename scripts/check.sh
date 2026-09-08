@@ -6,6 +6,7 @@ cargo fmt --all -- --check
 cargo test -p calc
 cargo test -p store --lib
 cargo test -p web --lib --features ssr
+cargo test -p web --test plan_ssr --features ssr
 SQLX_OFFLINE=true cargo check --workspace --all-targets --all-features
 SQLX_OFFLINE=true cargo clippy --workspace --all-targets --all-features -- -D warnings
 SQLX_OFFLINE=true cargo leptos build

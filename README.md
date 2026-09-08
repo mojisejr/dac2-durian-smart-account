@@ -5,10 +5,12 @@ is a Rust workspace: a pure calculation crate, a PostgreSQL store, and one
 Leptos SSR plus hydration web crate.
 
 This repository is being built in owner-reviewed slices. Slices 1–3 proved the
-stack, calculation engine, and PostgreSQL persistence. Slice 4 adds the first
-usable interface: local account registration, email verification, login,
-logout, and password reset. The screen keeps user information to the email
-address only; there is no profile image, avatar, or social login.
+stack, calculation engine, and PostgreSQL persistence. Slice 4 adds local
+account registration and recovery. Slice 5 adds the usable plan workspace: six
+Thai input sections, the workbook sample, a one-action clear flow, season
+duplication and close, and live in-browser totals. The screen keeps user
+information to the email address only; there is no profile image, avatar, or
+social login.
 
 ## Calculation proof
 
@@ -93,6 +95,27 @@ message in Mailpit and follow its verification link before logging in. The
 cookie is intentionally non-Secure only for this localhost workflow. A network
 deployment requires the deferred rate limiting, real SMTP, HTTPS, and Secure
 cookie gate first.
+
+## Plan workspace proof
+
+The browser retains raw field text while the owner types, then maps it into the
+same `calc::Plan` contract used by the calculation engine. Invalid numbers stay
+visible for correction, percentages are converted only at the boundary, and a
+grade mix is accepted only when its entered shares total 100%. Closed seasons
+render as text rather than disabled form controls; the PostgreSQL store remains
+the final read-only enforcement.
+
+Run the plan-specific unit, SSR smoke, PostgreSQL store, and authenticated plan
+operation suites with:
+
+```bash
+docker compose up -d --wait
+./scripts/test-plans.sh
+```
+
+The six section routes are server rendered and hydrated. Sarabun font files are
+served by the application itself under the SIL Open Font License; no font CDN
+or other runtime SaaS is used.
 
 The database is bound to localhost and uses PostgreSQL trust authentication for
 this local compile proof only. No deployment configuration exists.
