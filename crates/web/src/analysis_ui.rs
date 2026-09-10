@@ -557,7 +557,7 @@ fn ScenarioPanel(scenario: calc::ScenarioAnalysis) -> impl IntoView {
                         <caption>"กำไรสุทธิ บาท ตามผลผลิตและราคาที่เปลี่ยนไป"</caption>
                         <thead>
                             <tr>
-                                <th scope="col">"ผลผลิต \\ ราคา"</th>
+                                <th scope="col">"ผลผลิต ลง · ราคา ขวา"</th>
                                 {price_changes.into_iter().map(|change| view! {
                                     <th scope="col">{percent(Some(change))}</th>
                                 }).collect_view()}

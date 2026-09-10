@@ -91,6 +91,35 @@ cases, all six completeness rules with the routes that would fix them, both tax
 methods with the cheaper one marked and the disclaimer present, and all
 twenty-five scenario cells including the centre the sliders start from.
 
+## Layout proof
+
+The Rust suites render components to an HTML string. That can prove what a
+screen says and never what it does on a phone, which is how the analysis screens
+shipped a table that widened every page to 705 pixels while a passing test
+asserted all twenty-five of its cells were present. The markup was correct; the
+scroll container never scrolled, and layout is not in a string.
+
+`scripts/check-responsive.sh` drives real Chrome at 320, 360, 393, and 412
+pixels, opens every explanation and every tab in turn, and asserts three
+properties:
+
+- No page is wider than the device, and content may not push the layout viewport
+  out to absorb an overflow.
+- No interactive label is clipped by its own box. Scrolling and an ellipsis are
+  deliberate and pass; silent clipping does not.
+- Every activation target meets the 48-pixel minimum of `DESIGN.md` rule 1,
+  measured on the label that activates a wrapped control, and nothing that must
+  be tapped stays covered by the sticky bars once scrolled to.
+
+```bash
+npm install
+./scripts/check-responsive.sh
+```
+
+It requires Node and Docker and starts the application itself. It is deliberately
+not part of `scripts/check.sh`, which stays the compile and dependency-boundary
+proof that runs without a database.
+
 ## Run locally
 
 Prerequisites are Rust 1.88, `wasm32-unknown-unknown`, Docker, and
