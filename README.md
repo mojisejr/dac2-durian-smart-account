@@ -8,7 +8,10 @@ This repository is being built in owner-reviewed slices. Slices 1–3 proved the
 stack, calculation engine, and PostgreSQL persistence. Slice 4 adds local
 account registration and recovery. Slice 5 adds the usable plan workspace: six
 Thai input sections, the workbook sample, a one-action clear flow, season
-duplication and close, and live in-browser totals. The screen keeps user
+duplication and close, and live in-browser totals. Slice 6 adds the analysis
+experience: a dashboard, nine efficiency KPIs against owner-set targets, the six
+completeness rules, both preliminary tax methods, and the price-by-yield scenario
+matrix. The screen keeps user
 information to the email address only; there is no profile image, avatar, or
 social login.
 
@@ -64,6 +67,29 @@ session HTTP, and mail-delivery integration suites. It covers canonical and
 concurrent duplicates, token expiry and single use, verified activation,
 session rotation, protected routes, server-side logout, and session invalidation
 after a password reset.
+
+## Analysis proof
+
+The analysis screens add no arithmetic. They read the `Analysis` the calculation
+crate already produces and decide only how a figure is named, formatted, and
+withheld. A figure the engine cannot compute is shown as `ยังไม่มีข้อมูล`, never
+as zero, and a KPI whose target the owner has not set shows `ยังไม่ได้ตั้งเป้า`
+with a route to the targets screen rather than a verdict nobody chose.
+
+Every panel is server rendered with the inactive ones carrying `hidden`, so the
+whole analysis reaches the reader in the first response and the tests below read
+what the server actually sends.
+
+```bash
+cargo test -p web --test analysis_ssr --features ssr
+```
+
+The suite proves the dashboard against the workbook's own cached business
+figures, the empty-plan state that names what is missing instead of showing a
+number, all nine KPI rows with their explanations, the graded and ungraded target
+cases, all six completeness rules with the routes that would fix them, both tax
+methods with the cheaper one marked and the disclaimer present, and all
+twenty-five scenario cells including the centre the sliders start from.
 
 ## Run locally
 

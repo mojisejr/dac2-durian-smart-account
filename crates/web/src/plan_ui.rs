@@ -3,6 +3,7 @@ use leptos::{form::ActionForm, prelude::*};
 use leptos_router::{components::A, hooks::use_params_map};
 
 use crate::{
+    analysis_ui::{PlanAnalysisView, PlanDashboardView},
     auth::{Logout, current_user_email},
     plan_form::{FixedCostForm, GradeForm, PlanForm, VariableCostForm},
     plans::{
@@ -122,6 +123,14 @@ fn PlanHub(record: PlanRecord) -> impl IntoView {
                 <div class="closed-banner" role="status">"ฤดูกาลนี้ปิดแล้ว · แก้ไขไม่ได้"</div>
             </Show>
             <section class="section-list">
+                <A attr:class="section-card" href=format!("/plans/{id}/dashboard")>
+                    <span><strong>"หน้าแรก"</strong><small>"ตัวเลขสรุปของฤดูกาลนี้"</small></span>
+                    <span class="status muted">"เปิด"</span>
+                </A>
+                <A attr:class="section-card" href=format!("/plans/{id}/analysis")>
+                    <span><strong>"วิเคราะห์"</strong><small>"ประสิทธิภาพ ตรวจสอบ ภาษี สถานการณ์"</small></span>
+                    <span class="status muted">"เปิด"</span>
+                </A>
                 {SECTIONS.into_iter().map(|(slug, title, description)| {
                     let complete = form.section_complete(slug);
                     view! {
@@ -185,6 +194,10 @@ pub fn PlanSectionRoute() -> impl IntoView {
             {move || record.get().map(|result| {
                 let (_, section) = key();
                 match result {
+                    Ok(Some(record)) if section == "dashboard" =>
+                        view! { <PlanDashboardView record/> }.into_any(),
+                    Ok(Some(record)) if section == "analysis" =>
+                        view! { <PlanAnalysisView record/> }.into_any(),
                     Ok(Some(record)) if SECTIONS.iter().any(|(slug, _, _)| *slug == section) =>
                         view! { <PlanSectionView record section/> }.into_any(),
                     _ => view! { <section class="card"><h1>"ไม่พบส่วนนี้"</h1><A href="/plans">"กลับไปแผนของฉัน"</A></section> }.into_any(),
@@ -377,14 +390,21 @@ fn LiveTotal(form: RwSignal<PlanForm>) -> impl IntoView {
 }
 
 #[component]
-fn BottomNav(plan_id: Option<i64>) -> impl IntoView {
+pub(crate) fn BottomNav(plan_id: Option<i64>) -> impl IntoView {
     let input_href = plan_id
         .map(|id| format!("/plans/{id}"))
         .unwrap_or_else(|| "/plans".into());
+    let home_href = plan_id
+        .map(|id| format!("/plans/{id}/dashboard"))
+        .unwrap_or_else(|| "/plans".into());
+    let analysis_href = plan_id.map(|id| format!("/plans/{id}/analysis"));
     view! { <nav class="bottom-nav" aria-label="เมนูหลัก">
-        <A href="/plans">"หน้าแรก"</A>
+        <A href=home_href>"หน้าแรก"</A>
         <A href=input_href>"กรอกข้อมูล"</A>
-        <span class="nav-disabled">"วิเคราะห์"</span>
+        {match analysis_href {
+            Some(href) => view! { <A href=href>"วิเคราะห์"</A> }.into_any(),
+            None => view! { <span class="nav-disabled">"วิเคราะห์"</span> }.into_any(),
+        }}
         <A href="/plans">"บัญชี"</A>
     </nav> }
 }
@@ -408,7 +428,7 @@ fn route_plan_id() -> impl Fn() -> Option<i64> + Copy {
     move || params.with(|params| params.get("id").and_then(|id| id.parse().ok()))
 }
 
-fn money(value: rust_decimal::Decimal) -> String {
+pub(crate) fn money(value: rust_decimal::Decimal) -> String {
     let plain = format!("{value:.2}");
     let (integer, fraction) = plain.split_once('.').unwrap_or((&plain, "00"));
     let (sign, digits) = integer

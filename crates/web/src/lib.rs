@@ -1,8 +1,12 @@
 #![forbid(unsafe_code)]
 
+pub mod analysis_ui;
+
 pub mod app;
 
 pub mod auth;
+
+pub mod explanations;
 
 pub mod plan_form;
 

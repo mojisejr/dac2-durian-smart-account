@@ -141,3 +141,49 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0s !important; }
 }
+
+.hero-card { display: grid; gap: 0.35rem; }
+.hero-value { display: block; font-size: clamp(1.9rem, 9vw, 2.6rem); font-variant-numeric: tabular-nums; line-height: 1.25; overflow-wrap: anywhere; }
+.figure-grid { display: grid; gap: 0.7rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.figure-tile { display: grid; gap: 0.3rem; }
+.figure-tile strong { font-size: 1.15rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.figure-list { display: grid; gap: 0.2rem; }
+.figure-row, .kpi-row { align-items: center; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: space-between; min-height: 48px; padding: 0.5rem 0; }
+.figure-list .figure-row:first-of-type, .kpi-list .kpi-row:first-of-type { border-top: 0; }
+.figure-label { align-items: center; display: flex; gap: 0.35rem; }
+.figure-value { font-variant-numeric: tabular-nums; text-align: right; }
+.figure-value .status { margin-left: 0.5rem; }
+.kpi-row { position: relative; }
+.kpi-actual { font-variant-numeric: tabular-nums; font-weight: 650; margin-left: auto; }
+.kpi-target { color: var(--muted); font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+.kpi-no-target { align-content: center; color: var(--primary); font-size: 0.82rem; min-height: 48px; }
+.incomplete-state { display: grid; gap: 0.8rem; }
+
+.figure-explanation { border: 0; padding: 0; position: relative; }
+.figure-explanation summary { align-items: center; color: var(--muted); display: flex; font-size: 1.05rem; justify-content: center; list-style: none; min-height: 48px; min-width: 48px; }
+.figure-explanation summary::-webkit-details-marker { display: none; }
+.figure-explanation[open] div { background: var(--surface); border: 1px solid var(--border); border-radius: 0.8rem; left: 0; max-height: 60vh; overflow: auto; padding: 1rem; position: absolute; top: 48px; width: min(22rem, 78vw); z-index: 6; }
+.figure-explanation h3 { font-size: 0.95rem; margin-bottom: 0.2rem; }
+.figure-explanation p { font-size: 0.9rem; margin-bottom: 0.7rem; }
+
+.segmented { display: grid; gap: 0.3rem; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.segment { background: var(--surface); border: 1px solid var(--border); color: var(--text); font-size: 0.86rem; min-height: 48px; padding: 0 0.2rem; }
+.segment.selected { background: var(--primary); border-color: var(--primary); color: var(--primary-text); font-weight: 650; }
+.kpi-list { display: grid; gap: 0.2rem; }
+
+.tax-methods { display: grid; gap: 0.7rem; }
+.tax-method { display: grid; gap: 0.1rem; }
+.tax-method.cheaper { border-color: var(--good); }
+.tax-method h3 { font-size: 1rem; margin: 0; }
+.caption { color: var(--muted); font-size: 0.82rem; }
+.tax-disclaimer { margin-bottom: 0; margin-top: 0.8rem; }
+
+.scenario-card { display: grid; gap: 0.7rem; }
+.slider-field { display: grid; gap: 0.4rem; }
+.slider-field input[type="range"] { min-height: 48px; width: 100%; }
+.scenario-table summary { align-content: center; color: var(--primary); font-weight: 650; min-height: 48px; }
+.table-scroll { overflow-x: auto; }
+.table-scroll table { border-collapse: collapse; font-variant-numeric: tabular-nums; min-width: 34rem; }
+.table-scroll caption { color: var(--muted); font-size: 0.82rem; padding-bottom: 0.5rem; text-align: left; }
+.table-scroll th, .table-scroll td { border: 1px solid var(--border); padding: 0.5rem 0.6rem; text-align: right; white-space: nowrap; }
+.table-scroll thead th:first-child, .table-scroll tbody th { background: var(--surface); left: 0; position: sticky; text-align: left; }
