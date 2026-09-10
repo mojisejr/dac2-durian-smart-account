@@ -1,0 +1,9 @@
+{
+  "name": "dac2-responsive-proof",
+  "private": true,
+  "type": "module",
+  "description": "Browser-level layout proof for the DESIGN.md rules a rendered HTML string cannot carry.",
+  "devDependencies": {
+    "playwright": "1.49.1"
+  }
+}

@@ -8,7 +8,10 @@ This repository is being built in owner-reviewed slices. Slices 1–3 proved the
 stack, calculation engine, and PostgreSQL persistence. Slice 4 adds local
 account registration and recovery. Slice 5 adds the usable plan workspace: six
 Thai input sections, the workbook sample, a one-action clear flow, season
-duplication and close, and live in-browser totals. The screen keeps user
+duplication and close, and live in-browser totals. Slice 6 adds the analysis
+experience: a dashboard, nine efficiency KPIs against owner-set targets, the six
+completeness rules, both preliminary tax methods, and the price-by-yield scenario
+matrix. The screen keeps user
 information to the email address only; there is no profile image, avatar, or
 social login.
 
@@ -64,6 +67,66 @@ session HTTP, and mail-delivery integration suites. It covers canonical and
 concurrent duplicates, token expiry and single use, verified activation,
 session rotation, protected routes, server-side logout, and session invalidation
 after a password reset.
+
+## Analysis proof
+
+The analysis screens add no arithmetic. They read the `Analysis` the calculation
+crate already produces and decide only how a figure is named, formatted, and
+withheld. A figure the engine cannot compute is shown as `ยังไม่มีข้อมูล`, never
+as zero, and a KPI whose target the owner has not set shows `ยังไม่ได้ตั้งเป้า`
+with a route to the targets screen rather than a verdict nobody chose.
+
+Every panel is server rendered with the inactive ones carrying `hidden`, so the
+whole analysis reaches the reader in the first response and the tests below read
+what the server actually sends.
+
+```bash
+cargo test -p web --test analysis_ssr --features ssr
+```
+
+The suite proves the dashboard against the workbook's own cached business
+figures, the empty-plan state that names what is missing instead of showing a
+number, all nine KPI rows with their explanations, the graded and ungraded target
+cases, all six completeness rules with the routes that would fix them, both tax
+methods with the cheaper one marked and the disclaimer present, and all
+twenty-five scenario cells including the centre the sliders start from.
+
+## Layout proof
+
+The Rust suites render components to an HTML string. That can prove what a
+screen says and never what it does on a phone, which is how the analysis screens
+shipped a table that widened every page to 705 pixels while a passing test
+asserted all twenty-five of its cells were present. The markup was correct; the
+scroll container never scrolled, and layout is not in a string.
+
+`scripts/check-responsive.sh` drives real Chrome at 320, 360, 393, and 412
+pixels, opens every explanation and every tab in turn, and asserts three
+properties:
+
+- No page is wider than the device, and content may not push the layout viewport
+  out to absorb an overflow.
+- No interactive label is clipped by its own box. Scrolling and an ellipsis are
+  deliberate and pass; silent clipping does not.
+- Every activation target meets the 48-pixel minimum of `DESIGN.md` rule 1,
+  measured on the label that activates a wrapped control, and nothing that must
+  be tapped stays covered by the sticky bars once scrolled to.
+- Every text colour clears 6:1 against the surface behind it, which is
+  `DESIGN.md` rule 2. It is as measurable as the 48-pixel rule and went
+  unmeasured until a sheet rendered its text at 1.04:1 and still passed.
+- An open explanation lies wholly within the screen, closes by a control of its
+  own that meets the same 48-pixel rule, and can be scrolled when its text is
+  longer than the room it has. Measured at 320 pixels, every explanation is
+  taller than half the screen and six are taller than all of it, so this is the
+  assertion that decides the pattern rather than a preference about it.
+
+```bash
+npm install
+./scripts/check-responsive.sh
+```
+
+It requires Node and Docker and starts the application itself. It is deliberately
+not part of `scripts/check.sh`, which stays the compile and dependency-boundary
+proof that runs without a database.
 
 ## Run locally
 
