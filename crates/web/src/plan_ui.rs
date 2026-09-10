@@ -141,7 +141,9 @@ fn PlanHub(record: PlanRecord) -> impl IntoView {
                     }
                 }).collect_view()}
             </section>
-            <LiveTotal form=RwSignal::new(form.clone())/>
+            // No live total here. The bar exists so a figure moves while the
+            // owner types, and nothing on this page is typed; it only covered
+            // the cards below it. The dashboard carries the figure instead.
             <section class="card plan-actions">
                 <h2>"จัดการฤดูกาล"</h2>
                 <ActionForm action=duplicate>
