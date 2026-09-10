@@ -74,6 +74,51 @@ async function inspect(page, intendedWidth) {
       }
     }
 
+    // DESIGN.md rule 2: every text colour clears 6:1 against the surface behind
+    // it. It is as measurable as the 48px rule and was never measured, which is
+    // how a sheet came to render its text at 1.04:1 and still pass.
+    const parse = (value) => {
+      const parts = value.match(/[\d.]+/g);
+      return parts ? parts.slice(0, 3).map(Number) : null;
+    };
+    const alpha = (value) => {
+      const parts = value.match(/[\d.]+/g);
+      return parts && parts.length > 3 ? Number(parts[3]) : 1;
+    };
+    const luminance = ([r, g, b]) => {
+      const channel = (c) => {
+        const v = c / 255;
+        return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+      };
+      return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+    };
+    const behind = (el) => {
+      for (let node = el; node; node = node.parentElement) {
+        const bg = getComputedStyle(node).backgroundColor;
+        if (alpha(bg) > 0.95) return parse(bg);
+      }
+      return [255, 255, 255];
+    };
+    const lowContrast = [];
+    for (const el of document.querySelectorAll('p, h1, h2, h3, span, strong, small, a, button, summary, label, th, td, caption, legend')) {
+      if (!visible(el)) continue;
+      const text = Array.from(el.childNodes)
+        .filter((node) => node.nodeType === 3)
+        .map((node) => node.textContent.trim())
+        .join('');
+      if (!text) continue;
+      const style = getComputedStyle(el);
+      const front = parse(style.color);
+      const back = behind(el);
+      if (!front || !back) continue;
+      const lighter = Math.max(luminance(front), luminance(back));
+      const darker = Math.min(luminance(front), luminance(back));
+      const ratio = (lighter + 0.05) / (darker + 0.05);
+      if (ratio < 6) {
+        lowContrast.push({ el: name(el), ratio: ratio.toFixed(2), text: text.slice(0, 34) });
+      }
+    }
+
     const scrollTop = window.scrollY;
     const small = [];
     const covered = [];
@@ -134,6 +179,7 @@ async function inspect(page, intendedWidth) {
     }
 
     return {
+      lowContrast,
       sheets,
       laidOutAt: window.innerWidth,
       documentWidth: document.documentElement.scrollWidth,
@@ -163,6 +209,9 @@ function assess(where, report, intendedWidth) {
   }
   for (const item of report.covered.slice(0, 4)) {
     fail(where, `${item.el} is covered by ${item.by} and cannot be tapped — "${item.text}"`);
+  }
+  for (const item of report.lowContrast.slice(0, 4)) {
+    fail(where, `${item.el} reads at ${item.ratio}:1, under the 6:1 rule — "${item.text}"`);
   }
   for (const sheet of report.sheets) {
     if (sheet.outside) {

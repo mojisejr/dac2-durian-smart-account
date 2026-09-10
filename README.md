@@ -110,6 +110,9 @@ properties:
 - Every activation target meets the 48-pixel minimum of `DESIGN.md` rule 1,
   measured on the label that activates a wrapped control, and nothing that must
   be tapped stays covered by the sticky bars once scrolled to.
+- Every text colour clears 6:1 against the surface behind it, which is
+  `DESIGN.md` rule 2. It is as measurable as the 48-pixel rule and went
+  unmeasured until a sheet rendered its text at 1.04:1 and still passed.
 - An open explanation lies wholly within the screen, closes by a control of its
   own that meets the same 48-pixel rule, and can be scrolled when its text is
   longer than the room it has. Measured at 320 pixels, every explanation is

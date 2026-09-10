@@ -205,11 +205,14 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 .figure-explanation summary::-webkit-details-marker { display: none; }
 .figure-explanation > .sheet, .figure-explanation > .sheet-backdrop { display: none; }
 .figure-explanation[open] > .sheet-backdrop { background: rgb(0 0 0 / 45%); display: block; inset: 0; position: fixed; z-index: 20; }
-.figure-explanation[open] > .sheet { background: var(--surface); border-radius: 1rem 1rem 0 0; bottom: 0; box-shadow: 0 -8px 28px rgb(0 0 0 / 28%); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; left: 50%; max-height: 90vh; max-width: 30rem; position: fixed; transform: translateX(-50%); width: 100%; z-index: 21; }
+/* The bar sets a light foreground for its dark ground, and a sheet opened from
+   inside it inherited that onto a light surface: 1.04:1, invisible. A sheet
+   states its own colours rather than trusting whatever it opens from. */
+.figure-explanation[open] > .sheet { color: var(--text); background: var(--surface); border-radius: 1rem 1rem 0 0; bottom: 0; box-shadow: 0 -8px 28px rgb(0 0 0 / 28%); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; left: 50%; max-height: 90vh; max-width: 30rem; position: fixed; transform: translateX(-50%); width: 100%; z-index: 21; }
 .sheet-head { border-bottom: 1px solid var(--border); padding: 0.9rem 1rem; }
 .sheet-title { font-size: 1.05rem; margin: 0; overflow-wrap: anywhere; }
 .sheet-body { -webkit-overflow-scrolling: touch; overflow-y: auto; overscroll-behavior: contain; padding: 1rem 1rem 0.5rem; }
-.sheet-close { border-radius: 0; margin: 0; width: 100%; }
+.sheet-close { background: var(--primary); border-color: var(--primary); border-radius: 0; color: var(--primary-text); margin: 0; width: 100%; }
 @media (prefers-reduced-motion: no-preference) {
   .figure-explanation[open] > .sheet { animation: sheet-rise 180ms ease-out; }
 }
