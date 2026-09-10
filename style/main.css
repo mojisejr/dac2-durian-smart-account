@@ -143,11 +143,13 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 .live-total { align-items: center; background: var(--text); border-radius: 0.7rem; bottom: 76px; color: var(--bg); display: flex; justify-content: space-between; min-height: 64px; padding: 0.75rem 1rem; position: sticky; z-index: 5; }
 .live-total span { font-size: 0.82rem; }
 .live-total strong { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; text-align: right; }
-.live-explanation { border: 0; padding: 0; }
-.live-explanation summary { align-items: center; display: flex; font-size: 1.15rem; justify-content: center; list-style: none; min-height: 48px; min-width: 48px; padding: 0; }
-.live-explanation[open] div { background: var(--surface); border: 1px solid var(--border); border-radius: 0.8rem; bottom: 70px; color: var(--text); left: 0; max-height: 60vh; overflow: auto; padding: 1rem; position: absolute; width: 100%; }
-.live-explanation h3 { font-size: 1rem; margin-bottom: 0.25rem; }
-.live-explanation p { margin-bottom: 0.75rem; }
+/* The bar carries z-index 5, which makes it a stacking context, so a sheet
+   opened from inside it was trapped below the navigation's z-index 10 and its
+   close button could not be reached. The bar rises above the navigation only
+   while its own explanation is open. */
+.live-total:has(details[open]) { z-index: 30; }
+.live-total .figure-explanation { flex: 0 0 48px; min-width: 48px; }
+.live-total .figure-explanation > summary { color: var(--bg); }
 .bottom-nav { background: var(--surface); border-top: 1px solid var(--border); bottom: 0; box-shadow: 0 -6px 16px rgb(0 0 0 / 12%); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); left: 50%; max-width: 30rem; position: fixed; transform: translateX(-50%); width: 100%; z-index: 10; }
 .bottom-nav a, .nav-disabled { align-items: center; color: var(--muted); display: flex; flex-direction: column; font-size: 0.8125rem; justify-content: center; min-height: 68px; text-decoration: none; }
 .nav-disabled { opacity: 0.55; }
@@ -163,11 +165,11 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 
 .hero-card { display: grid; gap: 0.35rem; }
 .hero-value { display: block; font-size: clamp(1.9rem, 9vw, 2.6rem); font-variant-numeric: tabular-nums; line-height: 1.25; overflow-wrap: anywhere; }
-.figure-grid { display: grid; gap: 0.7rem; grid-template-columns: repeat(2, minmax(0, 1fr)); position: relative; }
-.figure-tile { display: grid; gap: 0.3rem; position: static; }
+.figure-grid { display: grid; gap: 0.7rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.figure-tile { display: grid; gap: 0.3rem; }
 .figure-tile strong { font-size: 1.15rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; text-wrap: balance; }
 .figure-list { display: grid; gap: 0.2rem; }
-.figure-row, .kpi-row { align-items: center; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; justify-content: space-between; min-height: 48px; padding: 0.5rem 0; position: relative; }
+.figure-row, .kpi-row { align-items: center; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; justify-content: space-between; min-height: 48px; padding: 0.5rem 0; }
 .figure-list .figure-row:first-of-type, .kpi-list .kpi-row:first-of-type { border-top: 0; }
 .figure-label { align-items: center; display: flex; gap: 0.35rem; }
 .figure-value { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; text-align: right; }
@@ -194,16 +196,26 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 }
 .incomplete-state { display: grid; gap: 0.8rem; }
 
-/* The card used to anchor to the ⓘ itself, so its right edge was the icon's
-   position plus 78vw and it overflowed by arithmetic. Anchoring to the row or
-   card and pinning both edges makes it exactly as wide as its column, which is
-   the pattern .live-explanation has always used without overflowing. */
+/* An explanation is a sheet, not a tooltip: measured at 320px every one of them
+   is taller than half the screen and six are taller than all of it. It rises
+   from the bottom, dims what is behind it, names the figure it explains, and
+   closes by its own button in the thumb's reach. */
 .figure-explanation { border: 0; padding: 0; }
 .figure-explanation summary { align-items: center; color: var(--muted); display: flex; font-size: 1.05rem; justify-content: center; list-style: none; min-height: 48px; min-width: 48px; }
 .figure-explanation summary::-webkit-details-marker { display: none; }
-.figure-explanation[open] div { background: var(--surface); border: 1px solid var(--border); border-radius: 0.8rem; bottom: auto; box-shadow: 0 8px 24px rgb(0 0 0 / 18%); left: 0; max-height: 60vh; overflow: auto; padding: 1rem; position: absolute; right: 0; top: auto; width: auto; z-index: 11; }
-.figure-explanation h3 { font-size: 0.95rem; margin-bottom: 0.2rem; }
-.figure-explanation p { font-size: 0.9rem; margin-bottom: 0.7rem; }
+.figure-explanation > .sheet, .figure-explanation > .sheet-backdrop { display: none; }
+.figure-explanation[open] > .sheet-backdrop { background: rgb(0 0 0 / 45%); display: block; inset: 0; position: fixed; z-index: 20; }
+.figure-explanation[open] > .sheet { background: var(--surface); border-radius: 1rem 1rem 0 0; bottom: 0; box-shadow: 0 -8px 28px rgb(0 0 0 / 28%); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; left: 50%; max-height: 90vh; max-width: 30rem; position: fixed; transform: translateX(-50%); width: 100%; z-index: 21; }
+.sheet-head { border-bottom: 1px solid var(--border); padding: 0.9rem 1rem; }
+.sheet-title { font-size: 1.05rem; margin: 0; overflow-wrap: anywhere; }
+.sheet-body { -webkit-overflow-scrolling: touch; overflow-y: auto; overscroll-behavior: contain; padding: 1rem 1rem 0.5rem; }
+.sheet-close { border-radius: 0; margin: 0; width: 100%; }
+@media (prefers-reduced-motion: no-preference) {
+  .figure-explanation[open] > .sheet { animation: sheet-rise 180ms ease-out; }
+}
+@keyframes sheet-rise { from { transform: translate(-50%, 100%); } to { transform: translate(-50%, 0); } }
+.sheet-body h3 { font-size: 0.95rem; margin-bottom: 0.2rem; }
+.sheet-body p { font-size: 0.9rem; margin-bottom: 0.9rem; }
 
 .segmented { display: grid; gap: 0.3rem; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .segment { background: var(--surface); border: 1px solid var(--border); color: var(--text); font-size: 0.8125rem; line-height: 1.25; min-height: 48px; overflow-wrap: anywhere; padding: 0.35rem 0.25rem; }

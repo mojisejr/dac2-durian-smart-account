@@ -88,7 +88,10 @@ async function inspect(page, intendedWidth) {
       // Nothing that must be tapped may sit under the sticky bars. A control
       // under the bar right now is fine if scrolling brings it clear, so the
       // test is whether it is still covered once scrolled to the middle of the
-      // screen — the position a thumb would actually bring it to.
+      // screen — the position a thumb would actually bring it to. While a sheet
+      // is up the whole screen is blocked on purpose, so the question does not
+      // apply and is not asked.
+      if (document.querySelector('details[open] > .sheet')) continue;
       el.scrollIntoView({ block: 'center', behavior: 'instant' });
       const placed = target.getBoundingClientRect();
       const x = Math.min(Math.max(placed.left + placed.width / 2, 1), intendedWidth - 1);
@@ -106,7 +109,32 @@ async function inspect(page, intendedWidth) {
     }
 
     window.scrollTo(0, scrollTop);
+    // An open explanation is the state that failed twice: first by overflowing
+    // the screen, then by showing 49% of its text with nothing to say the rest
+    // existed. It must lie wholly on screen and carry a real close control.
+    const sheets = [];
+    for (const sheet of document.querySelectorAll('details[open] > .sheet')) {
+      const rect = sheet.getBoundingClientRect();
+      const close = sheet.querySelector('.sheet-close');
+      const closeRect = close?.getBoundingClientRect();
+      const body = sheet.querySelector('.sheet-body');
+      sheets.push({
+        label: sheet.querySelector('.sheet-title')?.textContent?.trim().slice(0, 30) ?? '?',
+        outside:
+          rect.left < -1 ||
+          rect.right > intendedWidth + 1 ||
+          rect.top < -1 ||
+          rect.bottom > window.innerHeight + 1,
+        closeWidth: closeRect ? Math.round(closeRect.width) : 0,
+        closeHeight: closeRect ? Math.round(closeRect.height) : 0,
+        bodyScrolls: body ? getComputedStyle(body).overflowY === 'auto' : false,
+        bodyVisible: body ? Math.round(body.clientHeight) : 0,
+        bodyNeeded: body ? Math.round(body.scrollHeight) : 0,
+      });
+    }
+
     return {
+      sheets,
       laidOutAt: window.innerWidth,
       documentWidth: document.documentElement.scrollWidth,
       overflowing,
@@ -135,6 +163,19 @@ function assess(where, report, intendedWidth) {
   }
   for (const item of report.covered.slice(0, 4)) {
     fail(where, `${item.el} is covered by ${item.by} and cannot be tapped — "${item.text}"`);
+  }
+  for (const sheet of report.sheets) {
+    if (sheet.outside) {
+      fail(where, `the "${sheet.label}" explanation extends past the screen`);
+    }
+    if (sheet.closeHeight < 47.5 || sheet.closeWidth < 47.5) {
+      fail(where, `the "${sheet.label}" explanation closes with a ${sheet.closeWidth}x${sheet.closeHeight} control, under the 48px rule`);
+    }
+    // Text longer than the room it has must be scrollable, or the reader is
+    // shown part of an answer with nothing to say the rest exists.
+    if (sheet.bodyNeeded > sheet.bodyVisible + 1 && !sheet.bodyScrolls) {
+      fail(where, `the "${sheet.label}" explanation needs ${sheet.bodyNeeded}px, shows ${sheet.bodyVisible}px, and cannot be scrolled`);
+    }
   }
 }
 
@@ -177,6 +218,17 @@ async function signIn(browser) {
   return { cookies, planId };
 }
 
+/** No sheet may be left standing between measurements. */
+async function ensureClosed(page) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!(await page.locator('details[open] > .sheet').count())) return true;
+    const close = page.locator('details[open] > .sheet > .sheet-close').first();
+    await close.click({ timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(120);
+  }
+  return !(await page.locator('details[open] > .sheet').count());
+}
+
 /** Open each visible ⓘ in turn and measure the page while it is open. */
 async function openEachExplanation(page, size, where) {
   const selector = 'details.figure-explanation:visible > summary, details.live-explanation:visible > summary';
@@ -194,9 +246,22 @@ async function openEachExplanation(page, size, where) {
       fail(`${where} @${size.name}px ⓘ#${index + 1}`, 'the explanation could not be opened');
       continue;
     }
-    await page.waitForTimeout(120);
+    // The sheet animates up over 180ms; measuring sooner measures it in flight.
+    await page.waitForTimeout(400);
     assess(`${where} @${size.name}px ⓘ#${index + 1}`, await inspect(page, size.width), size.width);
-    await summary.click({ timeout: 5000 }).catch(() => {});
+
+    // Close the way a reader does. The icon is behind the backdrop once the
+    // sheet is up, so an explanation that can only be closed by finding it
+    // again is a defect, not a detail of the harness.
+    const close = page.locator('details[open] > .sheet > .sheet-close');
+    if (await close.count()) {
+      await close.first().click({ timeout: 5000 }).catch(() => {});
+    }
+    await page.waitForTimeout(200);
+    if (await page.locator('details[open] > .sheet').count()) {
+      fail(`${where} @${size.name}px ⓘ#${index + 1}`, 'the explanation would not close');
+      await page.reload({ waitUntil: 'networkidle' });
+    }
   }
 }
 
@@ -235,15 +300,17 @@ try {
         for (const tab of ['ตรวจสอบ', 'ภาษี', 'สถานการณ์']) {
           const button = page.locator(`button[role="tab"]:has-text("${tab}")`);
           if (await button.count()) {
-            await button.click();
+            await ensureClosed(page);
+            await button.click({ timeout: 10000 });
             await page.waitForTimeout(200);
             assess(`${size.name}px analysis:${tab}`, await inspect(page, size.width), size.width);
             await openEachExplanation(page, size, `analysis:${tab}`);
           }
         }
-        const table = page.locator('details.scenario-table summary');
+        await ensureClosed(page);
+        const table = page.locator('details.scenario-table:visible > summary');
         if (await table.count()) {
-          await table.click();
+          await table.click({ timeout: 10000 });
           await page.waitForTimeout(250);
           assess(`${size.name}px analysis:table`, await inspect(page, size.width), size.width);
         }

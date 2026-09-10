@@ -110,6 +110,11 @@ properties:
 - Every activation target meets the 48-pixel minimum of `DESIGN.md` rule 1,
   measured on the label that activates a wrapped control, and nothing that must
   be tapped stays covered by the sticky bars once scrolled to.
+- An open explanation lies wholly within the screen, closes by a control of its
+  own that meets the same 48-pixel rule, and can be scrolled when its text is
+  longer than the room it has. Measured at 320 pixels, every explanation is
+  taller than half the screen and six are taller than all of it, so this is the
+  assertion that decides the pattern rather than a preference about it.
 
 ```bash
 npm install

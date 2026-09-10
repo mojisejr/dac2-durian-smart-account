@@ -3,7 +3,7 @@ use leptos::{form::ActionForm, prelude::*};
 use leptos_router::{components::A, hooks::use_params_map};
 
 use crate::{
-    analysis_ui::{PlanAnalysisView, PlanDashboardView},
+    analysis_ui::{Explain, PlanAnalysisView, PlanDashboardView},
     auth::{Logout, current_user_email},
     plan_form::{FixedCostForm, GradeForm, PlanForm, VariableCostForm},
     plans::{
@@ -386,7 +386,11 @@ fn LiveTotal(form: RwSignal<PlanForm>) -> impl IntoView {
             .map(|profit| format!("กำไรสุทธิประมาณ {} บาท", money(profit)))
             .unwrap_or_else(|| "กรอกข้อมูลเพิ่มเพื่อคำนวณยอดรวม".into())
     };
-    view! { <aside class="live-total" aria-live="polite"><span>"ยอดรวมสด"</span><strong>{summary}</strong><details class="live-explanation"><summary aria-label="อธิบายกำไรสุทธิและกระแสเงินสด">"ⓘ"</summary><div><h3>"คืออะไร"</h3><p>"กำไรสุทธิรวมค่าเสื่อมราคาซึ่งไม่ได้จ่ายเป็นเงินสดจริงในปีนี้ กระแสเงินสดตัดค่าเสื่อมออก จึงเป็นเงินที่เข้ากระเป๋าจริง"</p><h3>"ใช้ยังไง"</h3><p>"ใช้กำไรสุทธิดูว่าธุรกิจกำไรไหม ใช้กระแสเงินสดดูว่าเดือนหน้ามีเงินจ่ายค่าแรงหรือเปล่า"</p><h3>"ทำไมต้องมี"</h3><p>"สวนที่กำไรดีแต่เงินสดขาดมือ ล้มได้ และล้มบ่อย"</p><h3>"ไม่ใส่ได้ไหม"</h3><p>"คำนวณให้เอง แต่ถ้าไม่แยกว่าต้นทุนคงที่ตัวไหนเป็นเงินสด ตัวเลขนี้จะเท่ากับกำไรสุทธิ และจะไม่บอกอะไรเลย"</p></div></details></aside> }
+    view! { <aside class="live-total" aria-live="polite">
+        <span>"ยอดรวมสด"</span>
+        <strong>{summary}</strong>
+        <Explain explanation=crate::explanations::NET_PROFIT label="กำไรสุทธิ กับ กระแสเงินสด".into()/>
+    </aside> }
 }
 
 #[component]

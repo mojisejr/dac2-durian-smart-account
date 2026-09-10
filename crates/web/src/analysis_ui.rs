@@ -114,17 +114,40 @@ const fn health_status_label(status: HealthStatus) -> (&'static str, &'static st
 
 // ---------------------------------------------------------------- components
 
-/// The `ⓘ` affordance. Four questions, always in the same order.
+/// The `ⓘ` affordance: four questions, always in the same order, in a sheet.
+///
+/// Measured at 320 pixels wide, every explanation is taller than half the
+/// screen and six are taller than the whole of a short one, so this is not
+/// tooltip-sized content and never was. The sheet rises from the bottom, leaves
+/// the figure it explains visible above it, and closes by its own button rather
+/// than by finding the same small icon again.
 #[component]
-fn Explain(explanation: Explanation, label: String) -> impl IntoView {
+pub fn Explain(explanation: Explanation, label: String) -> impl IntoView {
+    let open = RwSignal::new(false);
+    let title = label.clone();
+    let sheet_label = label.clone();
     view! {
-        <details class="figure-explanation">
-            <summary aria-label=format!("อธิบาย{label}")>"ⓘ"</summary>
-            <div>
-                <h3>"คืออะไร"</h3><p>{explanation.what}</p>
-                <h3>"ใช้ยังไง"</h3><p>{explanation.how}</p>
-                <h3>"ทำไมต้องมี"</h3><p>{explanation.why}</p>
-                <h3>"ไม่ใส่ได้ไหม"</h3><p>{explanation.missing}</p>
+        <details class="figure-explanation" open=move || open.get()>
+            <summary
+                aria-label=format!("อธิบาย{label}")
+                on:click=move |event| {
+                    // Take the toggle over so the close button and the backdrop
+                    // can drive it too. Without script the browser's own toggle
+                    // still runs and the icon remains the way back out.
+                    event.prevent_default();
+                    open.update(|value| *value = !*value);
+                }
+            >"ⓘ"</summary>
+            <span class="sheet-backdrop" on:click=move |_| open.set(false)></span>
+            <div class="sheet" role="group" aria-label=format!("คำอธิบาย {sheet_label}")>
+                <div class="sheet-head"><h3 class="sheet-title">{title}</h3></div>
+                <div class="sheet-body">
+                    <h3>"คืออะไร"</h3><p>{explanation.what}</p>
+                    <h3>"ใช้ยังไง"</h3><p>{explanation.how}</p>
+                    <h3>"ทำไมต้องมี"</h3><p>{explanation.why}</p>
+                    <h3>"ไม่ใส่ได้ไหม"</h3><p>{explanation.missing}</p>
+                </div>
+                <button class="sheet-close" type="button" on:click=move |_| open.set(false)>"ปิด"</button>
             </div>
         </details>
     }
