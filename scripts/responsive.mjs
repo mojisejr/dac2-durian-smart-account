@@ -229,7 +229,7 @@ function assess(where, report, intendedWidth) {
 }
 
 async function signIn(browser) {
-  const email = `responsive${Date.now()}@dac2.local`;
+  const email = 'responsive-proof@dac2.local';
   const password = 'CorrectHorse123!';
   const context = await browser.newContext({ viewport: { width: 412, height: 915 } });
   const page = await context.newPage();
@@ -254,13 +254,24 @@ async function signIn(browser) {
   await page.click('button[type="submit"]');
   await page.waitForTimeout(1200);
 
+  // The workbook sample is a browser-only sandbox. Editing and leaving it must
+  // not create a season row.
+  await page.goto(`${BASE}/demo`);
+  await page.getByLabel('ราคาเกรดแรก').fill('120');
+  await page.click('button:has-text("คืนค่าตัวอย่าง")');
   await page.goto(`${BASE}/plans`);
-  await page.click('button:has-text("เปิดแผนตัวอย่าง")');
-  await page.waitForTimeout(1500);
-  await page.goto(`${BASE}/plans`);
-  const href = await page.locator('a[href^="/plans/"]').first().getAttribute('href');
-  const planId = href?.split('/')[2];
-  if (!planId) throw new Error('the sample plan was not created');
+  if (await page.locator('.plan-list-item').count()) {
+    throw new Error('the browser-only demonstration created a stored season');
+  }
+
+  await page.goto(`${BASE}/plans/new`);
+  await page.fill('input[name="season_year"]', '2569');
+  await page.fill('input[name="name"]', 'สวนรวมสำหรับ responsive proof');
+  await page.fill('textarea[name="note"]', 'ข้อมูลทดสอบที่สคริปต์ลบพร้อมบัญชี');
+  await page.click('button:has-text("สร้างฤดูกาล")');
+  await page.waitForURL(/\/plans\/\d+$/);
+  const planId = page.url().match(/\/plans\/(\d+)$/)?.[1];
+  if (!planId) throw new Error('the real season was not created');
 
   const cookies = await context.cookies();
   await context.close();
@@ -309,7 +320,7 @@ async function openEachExplanation(page, size, where) {
     await page.waitForTimeout(200);
     if (await page.locator('details[open] > .sheet').count()) {
       fail(`${where} @${size.name}px ⓘ#${index + 1}`, 'the explanation would not close');
-      await page.reload({ waitUntil: 'networkidle' });
+      await page.reload({ waitUntil: 'domcontentloaded' });
     }
   }
 }
@@ -318,6 +329,8 @@ const browser = await chromium.launch({ channel: 'chrome' });
 try {
   const { cookies, planId } = await signIn(browser);
   const routes = [
+    ['demo', `${BASE}/demo`],
+    ['new-season', `${BASE}/plans/new`],
     ['plans', `${BASE}/plans`],
     ['hub', `${BASE}/plans/${planId}`],
     ['dashboard', `${BASE}/plans/${planId}/dashboard`],
@@ -337,7 +350,7 @@ try {
     const page = await context.newPage();
 
     for (const [routeName, url] of routes) {
-      await page.goto(url, { waitUntil: 'networkidle' });
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(250);
       assess(`${size.name}px ${routeName}`, await inspect(page, size.width), size.width);
 

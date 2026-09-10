@@ -34,11 +34,13 @@ async fn plan_flow(auth_session: store::AuthSession) -> StatusCode {
     };
     let pool = auth_session.backend.pool();
 
-    let created = match web::plans::create_empty_for_owner(pool, user.id, "ฤดูทดสอบ").await
-    {
-        Ok(record) => record,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
-    };
+    let created =
+        match web::plans::create_empty_for_owner(pool, user.id, 2569, "ฤดูทดสอบ", "แผนรวมทุกแปลง")
+            .await
+        {
+            Ok(record) => record,
+            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+        };
     let mut expected = calc::workbook_sample();
     expected.name = "ฤดูทดสอบฉบับเต็ม".into();
     expected.production.grades = (1..=10)
@@ -64,28 +66,13 @@ async fn plan_flow(auth_session: store::AuthSession) -> StatusCode {
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
 
-    let duplicate = match web::plans::duplicate_for_owner(pool, user.id, created.id, "ฤดูถัดไป").await
-    {
-        Ok(record) => record,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
-    };
-    if duplicate.closed || duplicate.form.name != "ฤดูถัดไป" {
-        return StatusCode::INTERNAL_SERVER_ERROR;
-    }
-    let cleared = match web::plans::clear_for_owner(pool, user.id, duplicate.id).await {
-        Ok(record) => record,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
-    };
-    let cleared_plan = match cleared.form.to_plan() {
-        Ok(plan) => plan,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
-    };
-    if cleared_plan.name != "ฤดูถัดไป"
-        || cleared_plan.market != calc::MarketPlan::default()
-        || !cleared_plan.production.grades.is_empty()
-        || !cleared_plan.variable_costs.is_empty()
-        || !cleared_plan.fixed_costs.is_empty()
-        || !cleared_plan.health_answers.is_empty()
+    let duplicate =
+        match web::plans::duplicate_for_owner(pool, user.id, created.id, 2570, "ฤดูถัดไป", "").await
+        {
+            Ok(record) => record,
+            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+        };
+    if duplicate.closed || duplicate.form.name != "ฤดูถัดไป" || duplicate.season_year != Some(2570)
     {
         return StatusCode::INTERNAL_SERVER_ERROR;
     }

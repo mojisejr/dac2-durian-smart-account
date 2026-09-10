@@ -15,7 +15,7 @@ pub async fn load(
     plan_id: PlanId,
 ) -> Result<Option<StoredPlan>, StoreError> {
     let Some(plan_row) = sqlx::query(
-        "SELECT name, closed_at IS NOT NULL AS closed FROM plans
+        "SELECT name, season_year, note, closed_at IS NOT NULL AS closed FROM plans
          WHERE id = $1 AND owner_id = $2",
     )
     .bind(plan_id)
@@ -187,6 +187,8 @@ pub async fn load(
     Ok(Some(StoredPlan {
         id: plan_id,
         owner_id,
+        season_year: plan_row.try_get("season_year")?,
+        note: plan_row.try_get("note")?,
         closed: plan_row.try_get("closed")?,
         plan: Plan {
             name: plan_row.try_get("name")?,

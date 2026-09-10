@@ -12,8 +12,8 @@ use crate::users::UserId;
 
 pub async fn list(pool: &PgPool, owner_id: UserId) -> Result<Vec<PlanSummary>, StoreError> {
     let rows = sqlx::query(
-        "SELECT id, name, closed_at IS NOT NULL AS closed FROM plans \
-         WHERE owner_id = $1 ORDER BY id DESC",
+        "SELECT id, name, season_year, note, closed_at IS NOT NULL AS closed FROM plans \
+         WHERE owner_id = $1 ORDER BY season_year DESC NULLS LAST, id DESC",
     )
     .bind(owner_id)
     .fetch_all(pool)
@@ -24,6 +24,8 @@ pub async fn list(pool: &PgPool, owner_id: UserId) -> Result<Vec<PlanSummary>, S
             Ok(PlanSummary {
                 id: row.try_get("id")?,
                 name: row.try_get("name")?,
+                season_year: row.try_get("season_year")?,
+                note: row.try_get("note")?,
                 closed: row.try_get("closed")?,
             })
         })
@@ -33,21 +35,30 @@ pub async fn list(pool: &PgPool, owner_id: UserId) -> Result<Vec<PlanSummary>, S
 pub async fn create(
     pool: &PgPool,
     owner_id: UserId,
+    season_year: i32,
+    note: &str,
     plan: &Plan,
 ) -> Result<StoredPlan, StoreError> {
     let mut transaction = pool.begin().await?;
-    let id: PlanId =
-        sqlx::query_scalar("INSERT INTO plans (owner_id, name) VALUES ($1, $2) RETURNING id")
-            .bind(owner_id)
-            .bind(&plan.name)
-            .fetch_one(transaction.as_mut())
-            .await?;
+    let id: PlanId = sqlx::query_scalar(
+        "INSERT INTO plans (owner_id, name, season_year, note) \
+         VALUES ($1, $2, $3, $4) RETURNING id",
+    )
+    .bind(owner_id)
+    .bind(&plan.name)
+    .bind(season_year)
+    .bind(note.trim())
+    .fetch_one(transaction.as_mut())
+    .await
+    .map_err(season_write_error)?;
     write::replace_sections(transaction.as_mut(), owner_id, id, plan).await?;
     transaction.commit().await?;
 
     Ok(StoredPlan {
         id,
         owner_id,
+        season_year: Some(season_year),
+        note: note.trim().into(),
         closed: false,
         plan: plan.clone(),
     })
@@ -78,13 +89,33 @@ pub async fn save(
         .await?;
     write::replace_sections(transaction.as_mut(), owner_id, id, plan).await?;
     transaction.commit().await?;
+    load(pool, owner_id, id).await?.ok_or(StoreError::NotFound)
+}
 
-    Ok(StoredPlan {
-        id,
-        owner_id,
-        closed: false,
-        plan: plan.clone(),
-    })
+pub async fn update_metadata(
+    pool: &PgPool,
+    owner_id: UserId,
+    id: PlanId,
+    season_year: i32,
+    name: &str,
+    note: &str,
+) -> Result<(), StoreError> {
+    let mut transaction = pool.begin().await?;
+    ensure_open(transaction.as_mut(), owner_id, id).await?;
+    sqlx::query(
+        "UPDATE plans SET season_year = $3, name = $4, note = $5 \
+         WHERE id = $1 AND owner_id = $2",
+    )
+    .bind(id)
+    .bind(owner_id)
+    .bind(season_year)
+    .bind(name.trim())
+    .bind(note.trim())
+    .execute(transaction.as_mut())
+    .await
+    .map_err(season_write_error)?;
+    transaction.commit().await?;
+    Ok(())
 }
 
 pub async fn close(pool: &PgPool, owner_id: UserId, id: PlanId) -> Result<(), StoreError> {
@@ -117,28 +148,46 @@ pub async fn duplicate(
     pool: &PgPool,
     owner_id: UserId,
     source_id: PlanId,
+    season_year: i32,
     new_name: &str,
+    note: &str,
 ) -> Result<StoredPlan, StoreError> {
     let mut transaction = pool.begin().await?;
     let Some(mut source) = read::load(transaction.as_mut(), owner_id, source_id).await? else {
         return Err(StoreError::NotFound);
     };
     source.plan.name = new_name.into();
-    let id: PlanId =
-        sqlx::query_scalar("INSERT INTO plans (owner_id, name) VALUES ($1, $2) RETURNING id")
-            .bind(owner_id)
-            .bind(&source.plan.name)
-            .fetch_one(transaction.as_mut())
-            .await?;
+    let id: PlanId = sqlx::query_scalar(
+        "INSERT INTO plans (owner_id, name, season_year, note) \
+         VALUES ($1, $2, $3, $4) RETURNING id",
+    )
+    .bind(owner_id)
+    .bind(&source.plan.name)
+    .bind(season_year)
+    .bind(note.trim())
+    .fetch_one(transaction.as_mut())
+    .await
+    .map_err(season_write_error)?;
     write::replace_sections(transaction.as_mut(), owner_id, id, &source.plan).await?;
     transaction.commit().await?;
 
     Ok(StoredPlan {
         id,
         owner_id,
+        season_year: Some(season_year),
+        note: note.trim().into(),
         closed: false,
         plan: source.plan,
     })
+}
+
+fn season_write_error(error: sqlx::Error) -> StoreError {
+    if let sqlx::Error::Database(database) = &error
+        && database.constraint() == Some("plans_owner_season_year_unique")
+    {
+        return StoreError::DuplicateSeasonYear;
+    }
+    StoreError::Database(error)
 }
 
 async fn ensure_open(

@@ -1,15 +1,15 @@
 use calc::{CashKind, HealthQuestion, VariableCostKind};
 use leptos::{form::ActionForm, prelude::*};
-use leptos_router::{components::A, hooks::use_params_map};
+use leptos_router::{
+    components::A,
+    hooks::{use_params_map, use_query_map},
+};
 
 use crate::{
-    analysis_ui::{Explain, PlanAnalysisView, PlanDashboardView},
+    analysis_ui::{PlanAnalysisView, PlanDashboardView},
     auth::{Logout, current_user_email},
     plan_form::{FixedCostForm, GradeForm, PlanForm, VariableCostForm},
-    plans::{
-        ClearPlan, ClosePlan, CreateEmptyPlan, CreateSamplePlan, DuplicatePlan, PlanRecord,
-        SavePlan, list_plans,
-    },
+    plans::{ClosePlan, CreateSeason, PlanRecord, SavePlan, UpdateSeasonMetadata, list_plans},
 };
 
 const SECTIONS: [(&str, &str, &str); 6] = [
@@ -24,17 +24,23 @@ const SECTIONS: [(&str, &str, &str); 6] = [
 #[component]
 pub fn PlansPage() -> impl IntoView {
     let logout = ServerAction::<Logout>::new();
-    let create_sample = ServerAction::<CreateSamplePlan>::new();
-    let create_empty = ServerAction::<CreateEmptyPlan>::new();
     let user = Resource::new(|| (), |_| current_user_email());
     let plans = Resource::new(|| (), |_| list_plans());
+    let query = use_query_map();
+    let return_to = move || {
+        query.with(|params| {
+            params
+                .get("from")
+                .and_then(|value| value.parse::<i64>().ok())
+        })
+    };
 
     view! {
         <section class="page-stack">
             <header class="page-heading">
                 <div>
                     <p class="eyebrow">"พื้นที่ส่วนตัว"</p>
-                    <h1>"แผนของฉัน"</h1>
+                    <h1>"ฤดูกาลของฉัน"</h1>
                 </div>
                 <Suspense fallback=move || view! { <span>"…"</span> }>
                     {move || user.get().map(|result| view! {
@@ -43,43 +49,203 @@ pub fn PlansPage() -> impl IntoView {
                 </Suspense>
             </header>
 
-            <section class="card starter-card">
-                <h2>"เริ่มจากตัวอย่าง หรือเริ่มว่าง"</h2>
-                <p>"แผนตัวอย่างใช้ตัวเลขจากแบบคำนวณเดิม และล้างออกได้ในครั้งเดียว"</p>
-                <div class="actions">
-                    <ActionForm action=create_sample>
-                        <button class="primary" type="submit">"เปิดแผนตัวอย่าง"</button>
-                    </ActionForm>
-                    <ActionForm action=create_empty>
-                        <input type="hidden" name="name" value="แผนฤดูใหม่"/>
-                        <button class="secondary" type="submit">"เริ่มแผนว่าง"</button>
-                    </ActionForm>
-                </div>
-            </section>
+            <Show when=move || return_to().is_some()>
+                <A
+                    attr:class="button secondary season-back"
+                    href=move || format!("/plans/{}", return_to().unwrap_or_default())
+                >"‹ กลับไปฤดูกาลที่เปิดอยู่"</A>
+            </Show>
 
-            <Suspense fallback=move || view! { <p>"กำลังอ่านแผน…"</p> }>
+            <Suspense fallback=move || view! { <p>"กำลังอ่านฤดูกาล…"</p> }>
                 {move || plans.get().map(|result| match result {
                     Ok(items) if items.is_empty() => view! {
-                        <section class="empty-state"><h2>"ยังไม่มีแผน"</h2><p>"เลือกตัวอย่างหรือแผนว่างด้านบนได้เลย"</p></section>
-                    }.into_any(),
-                    Ok(items) => view! {
-                        <section class="plan-list" aria-label="รายการแผน">
-                            {items.into_iter().map(|plan| view! {
-                                <A attr:class="plan-list-item" href=format!("/plans/{}", plan.id)>
-                                    <span><strong>{plan.name}</strong><small>{if plan.closed { "ปิดฤดูกาลแล้ว" } else { "กำลังทำ" }}</small></span>
-                                    <span aria-hidden="true">"›"</span>
-                                </A>
-                            }).collect_view()}
+                        <section class="card starter-card first-season">
+                            <p class="eyebrow">"เริ่มต้น"</p>
+                            <h2>"ลองดูก่อน หรือสร้างฤดูกาลแรก"</h2>
+                            <p>"ข้อมูลตัวอย่างให้ลองเปลี่ยนตัวเลขได้โดยไม่บันทึกลงประวัติ"</p>
+                            <div class="actions">
+                                <A attr:class="button primary" href="/demo">"ดูตัวอย่างการใช้งาน"</A>
+                                <A attr:class="button secondary" href="/plans/new">"สร้างฤดูกาลแรก"</A>
+                            </div>
                         </section>
                     }.into_any(),
-                    Err(_) => view! { <p class="form-message bad-message">"อ่านรายการแผนไม่ได้ กรุณาลองอีกครั้ง"</p> }.into_any(),
+                    Ok(items) => {
+                        let latest_year = items.iter().filter_map(|plan| plan.season_year).max();
+                        view! {
+                            <section class="card starter-card compact-starter">
+                                <h2>"เริ่มฤดูกาลใหม่"</h2>
+                                <p>"กำหนดปี ชื่อ และบันทึกก่อนสร้าง ฤดูกาลหนึ่งรวมข้อมูลจากทุกแปลง"</p>
+                                <div class="actions">
+                                    <A attr:class="button primary" href="/plans/new">"เริ่มฤดูกาลใหม่"</A>
+                                    <A attr:class="button text-button" href="/demo">"ดูตัวอย่างการใช้งาน"</A>
+                                </div>
+                            </section>
+                            <section class="plan-list" aria-label="รายการฤดูกาล">
+                                {items.into_iter().map(|plan| {
+                                    let is_latest = plan.season_year.is_some() && plan.season_year == latest_year;
+                                    let (state_label, state_class) = season_state(plan.closed, is_latest);
+                                    let note = plan.note;
+                                    let note_view = (!note.is_empty()).then(|| view! {
+                                        <small class="season-note">{note}</small>
+                                    });
+                                    let class = if plan.closed {
+                                        "plan-list-item season-closed"
+                                    } else if !is_latest {
+                                        "plan-list-item season-older-open"
+                                    } else {
+                                        "plan-list-item season-latest"
+                                    };
+                                    view! {
+                                        <A attr:class=class href=format!("/plans/{}", plan.id)>
+                                            <span class="season-card-copy">
+                                                <small class="season-year">{season_year_label(plan.season_year)}</small>
+                                                <strong>{plan.name}</strong>
+                                                {note_view}
+                                                <span class="season-statuses">
+                                                    <Show when=move || is_latest>
+                                                        <small class="status latest-status">"ปีล่าสุด"</small>
+                                                    </Show>
+                                                    <small class=state_class>
+                                                        {state_label}
+                                                    </small>
+                                                </span>
+                                            </span>
+                                            <span aria-hidden="true">"›"</span>
+                                        </A>
+                                    }
+                                }).collect_view()}
+                            </section>
+                        }.into_any()
+                    },
+                    Err(_) => view! { <p class="form-message bad-message">"อ่านรายการฤดูกาลไม่ได้ กรุณาลองอีกครั้ง"</p> }.into_any(),
                 })}
             </Suspense>
 
             <ActionForm action=logout>
                 <button class="text-button" type="submit">"ออกจากระบบ"</button>
             </ActionForm>
-            <BottomNav plan_id=None/>
+        </section>
+    }
+}
+
+#[component]
+pub fn NewSeasonPage() -> impl IntoView {
+    let query = use_query_map();
+    let source_id = move || {
+        query.with(|params| {
+            params
+                .get("source")
+                .and_then(|value| value.parse::<i64>().ok())
+        })
+    };
+    let source = Resource::new(source_id, |id| async move {
+        match id {
+            Some(id) => crate::plans::load_plan(id).await,
+            None => Ok(None),
+        }
+    });
+
+    view! {
+        <Suspense fallback=move || view! { <p>"กำลังเตรียมฤดูกาล…"</p> }>
+            {move || source.get().map(|result| match result {
+                Ok(record) => view! { <NewSeasonForm source=record/> }.into_any(),
+                Err(_) => view! { <section class="card"><h1>"เตรียมฤดูกาลไม่ได้"</h1><A href="/plans">"กลับไปรายการฤดูกาล"</A></section> }.into_any(),
+            })}
+        </Suspense>
+    }
+}
+
+#[component]
+fn NewSeasonForm(source: Option<PlanRecord>) -> impl IntoView {
+    let create = ServerAction::<CreateSeason>::new();
+    let source_id = source.as_ref().map(|record| record.id);
+    let year = source
+        .as_ref()
+        .and_then(|record| record.season_year)
+        .map(|year| year + 1)
+        .map(|year| year.to_string())
+        .unwrap_or_default();
+    let name = source
+        .as_ref()
+        .map(|record| record.form.name.clone())
+        .unwrap_or_default();
+    let source_name = source.as_ref().map(|record| record.form.name.clone());
+
+    view! {
+        <section class="page-stack">
+            <header class="page-heading">
+                <div>
+                    <p class="eyebrow">"ฤดูกาล"</p>
+                    <h1>{if source_id.is_some() { "ทำฤดูกาลถัดไป" } else { "เริ่มฤดูกาลใหม่" }}</h1>
+                </div>
+                <A attr:class="icon-button" href="/plans" attr:aria-label="ยกเลิกและกลับไปรายการฤดูกาล">"×"</A>
+            </header>
+            <section class="card season-create-card">
+                {source_name.map(|name| view! { <p class="copy-source">"คัดลอกข้อมูลตั้งต้นจาก " <strong>{name}</strong></p> })}
+                <p>"หนึ่งฤดูกาลรวมประมาณการของทุกแปลงในปีเก็บเกี่ยวเดียว"</p>
+                <ActionForm action=create>
+                    {source_id.map(|id| view! { <input type="hidden" name="source_id" value=id/> })}
+                    <label>
+                        <span>"ปีฤดูกาล (พ.ศ.)"</span>
+                        <input type="text" name="season_year" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" value=year placeholder="เช่น 2569" required/>
+                    </label>
+                    <label>
+                        <span>"ชื่อฤดูกาล"</span>
+                        <input type="text" name="name" maxlength="120" value=name placeholder="เช่น สวนรวม หมอนทอง" required/>
+                    </label>
+                    <label>
+                        <span>"บันทึก (ไม่บังคับ)"</span>
+                        <textarea name="note" maxlength="2000" rows="4" placeholder="เรื่องที่อยากจำเมื่อกลับมาดูฤดูกาลนี้"></textarea>
+                    </label>
+                    <button class="primary" type="submit">"สร้างฤดูกาล"</button>
+                </ActionForm>
+                <ServerErrorMessage action=create/>
+            </section>
+        </section>
+    }
+}
+
+#[component]
+pub fn DemoPage() -> impl IntoView {
+    let form = RwSignal::new(PlanForm::from_plan(&calc::workbook_sample()));
+    view! {
+        <section class="page-stack demo-page">
+            <header class="page-heading">
+                <div><p class="eyebrow">"โหมดตัวอย่าง"</p><h1>"ลองก่อน โดยไม่บันทึก"</h1></div>
+                <A attr:class="icon-button" href="/plans" attr:aria-label="ปิดตัวอย่าง">"×"</A>
+            </header>
+            <div class="demo-banner" role="status">
+                <strong>"ข้อมูลนี้ไม่ใช่ฤดูกาลของคุณ"</strong>
+                <span>"ลองเปลี่ยนตัวเลขได้ ระบบจะไม่บันทึกลงประวัติ"</span>
+            </div>
+            <section class="card demo-controls">
+                <h2>"ลองเปลี่ยนผลผลิตและราคา"</h2>
+                <PlanField
+                    label="ผลต่อต้น"
+                    unit="ผล"
+                    numeric=true
+                    value=Signal::derive(move || form.get().production.fruits_per_tree)
+                    on_value=Callback::new(move |value| form.update(|form| form.production.fruits_per_tree = value))
+                    closed=false
+                />
+                <PlanField
+                    label="ราคาเกรดแรก"
+                    unit="บาท/กก."
+                    numeric=true
+                    value=Signal::derive(move || form.get().grades.first().map(|grade| grade.price_per_kg.clone()).unwrap_or_default())
+                    on_value=Callback::new(move |value| form.update(|form| if let Some(grade) = form.grades.first_mut() { grade.price_per_kg = value }))
+                    closed=false
+                />
+                <div class="actions">
+                    <button class="secondary" type="button" on:click=move |_| form.set(PlanForm::from_plan(&calc::workbook_sample()))>"คืนค่าตัวอย่าง"</button>
+                    <A attr:class="button primary" href="/plans/new">"สร้างฤดูกาลของฉัน"</A>
+                </div>
+            </section>
+            <section aria-live="polite">
+                {move || form.get().to_plan().ok().map(|plan| view! {
+                    <crate::analysis_ui::DashboardFigures analysis=calc::analyze(&plan)/>
+                })}
+            </section>
         </section>
     }
 }
@@ -94,10 +260,10 @@ pub fn PlanHubPage() -> impl IntoView {
         }
     });
     view! {
-        <Suspense fallback=move || view! { <p>"กำลังอ่านแผน…"</p> }>
+        <Suspense fallback=move || view! { <p>"กำลังอ่านฤดูกาล…"</p> }>
             {move || record.get().map(|result| match result {
                 Ok(Some(record)) => view! { <PlanHub record/> }.into_any(),
-                _ => view! { <section class="card"><h1>"ไม่พบแผนนี้"</h1><A href="/plans">"กลับไปแผนของฉัน"</A></section> }.into_any(),
+                _ => view! { <section class="card"><h1>"ไม่พบฤดูกาลนี้"</h1><A href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
             })}
         </Suspense>
     }
@@ -105,23 +271,47 @@ pub fn PlanHubPage() -> impl IntoView {
 
 #[component]
 fn PlanHub(record: PlanRecord) -> impl IntoView {
-    let clear = ServerAction::<ClearPlan>::new();
-    let duplicate = ServerAction::<DuplicatePlan>::new();
     let close = ServerAction::<ClosePlan>::new();
+    let update_metadata = ServerAction::<UpdateSeasonMetadata>::new();
     let id = record.id;
     let form = record.form;
     let name = form.name.clone();
-    let duplicate_name = next_season_name(&form.name);
+    let year = record.season_year;
+    let note = record.note;
+    let closed = record.closed;
 
     view! {
         <section class="page-stack plan-page">
             <header class="page-heading">
-                <div><p class="eyebrow">"ฤดูกาล"</p><h1>{name.clone()}</h1></div>
-                <A attr:class="icon-button" href="/plans" attr:aria-label="กลับไปรายการแผน">"×"</A>
+                <div><p class="eyebrow">{season_year_label(year)}</p><h1>{name.clone()}</h1></div>
+                <A attr:class="icon-button" href=format!("/plans?from={id}") attr:aria-label="เปิดรายการฤดูกาล">"×"</A>
             </header>
-            <Show when=move || record.closed>
+            <Show when=move || closed>
                 <div class="closed-banner" role="status">"ฤดูกาลนี้ปิดแล้ว · แก้ไขไม่ได้"</div>
             </Show>
+            <section class="card season-details">
+                <h2>"รายละเอียดฤดูกาล"</h2>
+                {if closed {
+                    view! {
+                        <dl class="season-metadata">
+                            <div><dt>"ปีฤดูกาล"</dt><dd>{season_year_label(year)}</dd></div>
+                            <div><dt>"ชื่อ"</dt><dd>{name.clone()}</dd></div>
+                            <div><dt>"บันทึก"</dt><dd>{if note.is_empty() { "—".into() } else { note.clone() }}</dd></div>
+                        </dl>
+                    }.into_any()
+                } else {
+                    view! {
+                        <ActionForm action=update_metadata>
+                            <input type="hidden" name="id" value=id/>
+                            <label><span>"ปีฤดูกาล (พ.ศ.)"</span><input type="text" name="season_year" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" value=year.map(|year| year.to_string()).unwrap_or_default() required/></label>
+                            <label><span>"ชื่อฤดูกาล"</span><input type="text" name="name" maxlength="120" value=name.clone() required/></label>
+                            <label><span>"บันทึก (ไม่บังคับ)"</span><textarea name="note" maxlength="2000" rows="3">{note.clone()}</textarea></label>
+                            <button class="secondary" type="submit">"บันทึกรายละเอียด"</button>
+                        </ActionForm>
+                        <ServerMessage action=update_metadata/>
+                    }.into_any()
+                }}
+            </section>
             <section class="section-list">
                 <A attr:class="section-card" href=format!("/plans/{id}/dashboard")>
                     <span><strong>"หน้าแรก"</strong><small>"ตัวเลขสรุปของฤดูกาลนี้"</small></span>
@@ -146,23 +336,11 @@ fn PlanHub(record: PlanRecord) -> impl IntoView {
             // the cards below it. The dashboard carries the figure instead.
             <section class="card plan-actions">
                 <h2>"จัดการฤดูกาล"</h2>
-                <ActionForm action=duplicate>
-                    <input type="hidden" name="id" value=id/>
-                    <label><span>"ชื่อสำเนา"</span><input type="text" name="new_name" value=duplicate_name/></label>
-                    <button class="secondary" type="submit">{if record.closed { "ทำแผนฤดูถัดไปจากฤดูนี้" } else { "ทำสำเนาฤดูกาล" }}</button>
-                </ActionForm>
-                <Show when=move || !record.closed>
-                    <details class="confirm-box">
-                        <summary>"ล้างข้อมูลตัวอย่าง"</summary>
-                        <p>"จะลบข้อมูลตลาด ผลผลิต ต้นทุน เป้าหมาย และคำตอบสุขภาพทั้งหมด แต่เก็บชื่อฤดูกาลไว้"</p>
-                        <ActionForm action=clear>
-                            <input type="hidden" name="id" value=id/>
-                            <button class="danger" type="submit">"ยืนยัน ล้างทั้งหมด"</button>
-                        </ActionForm>
-                    </details>
+                <A attr:class="button secondary" href=format!("/plans/new?source={id}")>"ทำฤดูกาลถัดไปจากฤดูนี้"</A>
+                <Show when=move || !closed>
                     <details class="confirm-box">
                         <summary>"ปิดฤดูกาล"</summary>
-                        <p>"เมื่อปิดแล้ว แผนนี้จะอ่านได้อย่างเดียว และแก้กลับไม่ได้"</p>
+                        <p>"เมื่อปิดแล้ว ฤดูกาลนี้จะอ่านได้อย่างเดียว และแก้กลับไม่ได้"</p>
                         <ActionForm action=close>
                             <input type="hidden" name="id" value=id/>
                             <button class="danger" type="submit">"ยืนยัน ปิดฤดูกาล"</button>
@@ -170,7 +348,7 @@ fn PlanHub(record: PlanRecord) -> impl IntoView {
                     </details>
                 </Show>
             </section>
-            <BottomNav plan_id=Some(id)/>
+            <BottomNav plan_id=id active=NavSection::Input/>
         </section>
     }
 }
@@ -202,7 +380,7 @@ pub fn PlanSectionRoute() -> impl IntoView {
                         view! { <PlanAnalysisView record/> }.into_any(),
                     Ok(Some(record)) if SECTIONS.iter().any(|(slug, _, _)| *slug == section) =>
                         view! { <PlanSectionView record section/> }.into_any(),
-                    _ => view! { <section class="card"><h1>"ไม่พบส่วนนี้"</h1><A href="/plans">"กลับไปแผนของฉัน"</A></section> }.into_any(),
+                    _ => view! { <section class="card"><h1>"ไม่พบส่วนนี้"</h1><A href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
                 }
             })}
         </Suspense>
@@ -215,6 +393,11 @@ pub fn PlanSectionView(record: PlanRecord, section: String) -> impl IntoView {
     let save = ServerAction::<SavePlan>::new();
     let id = record.id;
     let closed = record.closed;
+    let season_label = format!(
+        "{} · {}",
+        season_year_label(record.season_year),
+        form.get().name
+    );
     let title = SECTIONS
         .iter()
         .find(|(slug, _, _)| *slug == section)
@@ -224,7 +407,7 @@ pub fn PlanSectionView(record: PlanRecord, section: String) -> impl IntoView {
     view! {
         <section class="page-stack plan-page">
             <header class="page-heading compact-heading">
-                <div><p class="eyebrow">"กรอกข้อมูล"</p><h1>{title}</h1></div>
+                <div><p class="eyebrow">{season_label}</p><h1>{title}</h1></div>
                 <A attr:class="icon-button" href=format!("/plans/{id}") attr:aria-label="กลับหน้าฤดูกาล">"×"</A>
             </header>
             <Show when=move || closed>
@@ -241,7 +424,7 @@ pub fn PlanSectionView(record: PlanRecord, section: String) -> impl IntoView {
             </ActionForm>
             <ServerMessage action=save/>
             <LiveTotal form/>
-            <BottomNav plan_id=Some(id)/>
+            <BottomNav plan_id=id active=NavSection::Input/>
         </section>
     }
 }
@@ -385,33 +568,40 @@ fn PlanField(
 fn LiveTotal(form: RwSignal<PlanForm>) -> impl IntoView {
     let summary = move || {
         live_profit(&form.get())
-            .map(|profit| format!("กำไรสุทธิประมาณ {} บาท", money(profit)))
-            .unwrap_or_else(|| "กรอกข้อมูลเพิ่มเพื่อคำนวณยอดรวม".into())
+            .map(|profit| format!("กำไรสุทธิโดยประมาณ {} บาท", money(profit)))
+            .unwrap_or_else(|| "ยังคำนวณกำไรสุทธิไม่ได้".into())
     };
     view! { <aside class="live-total" aria-live="polite">
-        <span>"ยอดรวมสด"</span>
         <strong>{summary}</strong>
-        <Explain explanation=crate::explanations::NET_PROFIT label="กำไรสุทธิ กับ กระแสเงินสด".into()/>
     </aside> }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum NavSection {
+    Home,
+    Input,
+    Analysis,
+}
+
 #[component]
-pub(crate) fn BottomNav(plan_id: Option<i64>) -> impl IntoView {
-    let input_href = plan_id
-        .map(|id| format!("/plans/{id}"))
-        .unwrap_or_else(|| "/plans".into());
-    let home_href = plan_id
-        .map(|id| format!("/plans/{id}/dashboard"))
-        .unwrap_or_else(|| "/plans".into());
-    let analysis_href = plan_id.map(|id| format!("/plans/{id}/analysis"));
+pub(crate) fn BottomNav(plan_id: i64, active: NavSection) -> impl IntoView {
     view! { <nav class="bottom-nav" aria-label="เมนูหลัก">
-        <A href=home_href>"หน้าแรก"</A>
-        <A href=input_href>"กรอกข้อมูล"</A>
-        {match analysis_href {
-            Some(href) => view! { <A href=href>"วิเคราะห์"</A> }.into_any(),
-            None => view! { <span class="nav-disabled">"วิเคราะห์"</span> }.into_any(),
-        }}
-        <A href="/plans">"บัญชี"</A>
+        <A
+            attr:class=if active == NavSection::Home { "nav-active" } else { "" }
+            attr:aria-current=(active == NavSection::Home).then_some("page")
+            href=format!("/plans/{plan_id}/dashboard")
+        >"หน้าแรก"</A>
+        <A
+            attr:class=if active == NavSection::Input { "nav-active" } else { "" }
+            attr:aria-current=(active == NavSection::Input).then_some("page")
+            href=format!("/plans/{plan_id}")
+        >"กรอกข้อมูล"</A>
+        <A
+            attr:class=if active == NavSection::Analysis { "nav-active" } else { "" }
+            attr:aria-current=(active == NavSection::Analysis).then_some("page")
+            href=format!("/plans/{plan_id}/analysis")
+        >"วิเคราะห์"</A>
+        <A href=format!("/plans?from={plan_id}")>"ฤดูกาล"</A>
     </nav> }
 }
 
@@ -427,6 +617,19 @@ where
     S::Error: Clone + std::fmt::Display + Send + Sync + 'static,
 {
     view! { <p class="form-message" aria-live="polite">{move || action.value().get().map(|result| result.unwrap_or_else(|error| error.to_string()))}</p> }
+}
+
+#[component]
+fn ServerErrorMessage<S>(action: ServerAction<S>) -> impl IntoView
+where
+    S: server_fn::ServerFn<Output = ()> + Clone + Send + Sync + 'static,
+    S::Error: Clone + std::fmt::Display + Send + Sync + 'static,
+{
+    view! {
+        <p class="form-message bad-message" aria-live="polite">
+            {move || action.value().get().and_then(|result| result.err().map(|error| error.to_string()))}
+        </p>
+    }
 }
 
 fn route_plan_id() -> impl Fn() -> Option<i64> + Copy {
@@ -454,28 +657,23 @@ pub(crate) fn money(value: rust_decimal::Decimal) -> String {
     )
 }
 
+fn season_year_label(year: Option<i32>) -> String {
+    year.map_or_else(|| "ยังไม่ระบุปี".into(), |year| format!("ฤดูกาล {year}"))
+}
+
+fn season_state(closed: bool, is_latest: bool) -> (&'static str, &'static str) {
+    match (closed, is_latest) {
+        (true, _) => ("ปิดแล้ว", "status muted"),
+        (false, true) => ("กำลังทำ", "status good"),
+        (false, false) => ("ปีก่อน · ยังไม่ปิด", "status warning"),
+    }
+}
+
 fn live_profit(form: &PlanForm) -> Option<rust_decimal::Decimal> {
     form.to_plan()
         .ok()
         .map(|plan| calc::analyze(&plan))
         .and_then(|analysis| analysis.business.net_profit)
-}
-
-fn next_season_name(name: &str) -> String {
-    let mut parts = name
-        .split_whitespace()
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    if let Some(part) = parts
-        .iter_mut()
-        .rev()
-        .find(|part| part.len() == 4 && part.chars().all(|character| character.is_ascii_digit()))
-        && let Ok(year) = part.parse::<u32>()
-    {
-        *part = (year + 1).to_string();
-        return parts.join(" ");
-    }
-    format!("สำเนา {name}")
 }
 
 fn numeric_input_invalid(value: &str) -> bool {
@@ -611,8 +809,10 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_defaults_to_the_next_named_season_when_a_year_is_present() {
-        assert_eq!(next_season_name("ฤดู 2569"), "ฤดู 2570");
-        assert_eq!(next_season_name("สวนหลัก"), "สำเนา สวนหลัก");
+    fn season_cards_name_open_closed_latest_and_older_states() {
+        assert_eq!(season_state(false, true).0, "กำลังทำ");
+        assert_eq!(season_state(false, false).0, "ปีก่อน · ยังไม่ปิด");
+        assert_eq!(season_state(true, true).0, "ปิดแล้ว");
+        assert_eq!(season_state(true, false).0, "ปิดแล้ว");
     }
 }

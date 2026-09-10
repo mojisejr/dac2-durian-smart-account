@@ -1,6 +1,6 @@
 # DAC2 — Design
 
-**Status:** draft, revision 0.2
+**Status:** draft, revision 0.3
 **Home:** this file moves to the application repository root in slice 1. There is
 one copy of it, never two.
 
@@ -167,10 +167,12 @@ inside on the right (`กก.`, `บาท`, `ไร่`, `%`), `inputmode="deci
 thousands separators applied when focus leaves. Invalid values keep what the
 owner typed and explain underneath in `bad`; the field is never cleared for them.
 
-**Live total bar.** Pinned to the bottom of every input screen, above the tab
-bar, borrowed from a shopping cart total. Shows `กำไรสุทธิ` and its value, and
-updates as the owner types because the calculation runs locally. This bar is the
-main reason the calculation crate compiles to WebAssembly.
+**Live calculation line.** Pinned above the tab bar on every input screen. It is
+a compact `surface` row with a quiet border, not a dark result card. It says
+`กำไรสุทธิโดยประมาณ` and its value, or `ยังคำนวณกำไรสุทธิไม่ได้`, and updates
+as the owner types because the calculation runs locally. It carries no heading
+such as `ยอดรวมสด` and no explanation control: this is feedback for the current
+task, not a second destination competing with the form.
 
 **Stat card.** A label, a figure at `hero` or `title`, a unit, and where a target
 exists, the verdict word beside it in `good` or `warn`.
@@ -206,7 +208,8 @@ The wording is the owner's, not the implementer's. Every explanation lives in
 
 **Empty state.** Every list and every screen has one, written as a sentence and
 a single action. The empty state is a designed screen, not what is left when
-content is missing, and clearing the sample plan is how anyone can see it.
+content is missing. The demonstration can be reset without creating or clearing
+a stored season.
 
 **Locked banner.** A closed season shows a `bad`-bordered strip at the top of
 every screen reading `ฤดูกาลนี้ปิดแล้ว · แก้ไขไม่ได้`, with
@@ -225,8 +228,14 @@ Navigation is a four-item bottom tab bar, the arrangement Shopee, LINE, and ever
 Thai banking application already taught this user.
 
 ```
-[ หน้าแรก ]   [ กรอกข้อมูล ]   [ วิเคราะห์ ]   [ บัญชี ]
+[ หน้าแรก ]   [ กรอกข้อมูล ]   [ วิเคราะห์ ]   [ ฤดูกาล ]
 ```
+
+Inside a season, the current item has a visible surface treatment and
+`aria-current="page"`; focus is never conveyed by colour alone. The season-list
+screen does not show three plan tabs that have no selected plan. If it was
+opened from a season it shows one explicit route back; direct entry has no
+invented back destination.
 
 ### หน้าแรก — dashboard
 
@@ -271,19 +280,17 @@ navigation.
 │ ○ สุขภาพธุรกิจ     0/12 › │
 └────────────────────────────┘
 
-  [ ล้างข้อมูลทั้งหมด ]
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-กำไรสุทธิ       834,600.00 ฿
+────────────────────────────
+กำไรสุทธิโดยประมาณ  834,600.00 บาท
 ```
 
 `เป้าหมาย` is a card because no target is a constant. Until the owner sets one,
 the KPI that needs it has no verdict to give.
 
-**Clearing.** `ล้างข้อมูลทั้งหมด` empties every section in one action, behind one
-confirmation naming what will go. It exists so a new owner can move from the
-sample plan to their own without deleting sixteen rows by hand. The `⋯` menu
-holds `ทำแผนฤดูถัดไปจากฤดูนี้`, `ปิดฤดูกาล`, and `เปลี่ยนชื่อ`.
+The hub edits year, name, and note while the season is open. Its management
+area holds `ทำฤดูกาลถัดไปจากฤดูนี้` and `ปิดฤดูกาล`. Reset belongs only to the
+browser demonstration; a real season is never mistaken for disposable sample
+data.
 
 ### ประมาณการผลผลิต — grade mix
 
@@ -346,9 +353,23 @@ which is how far things can fall before this stops working. `ดูตารา�
 opens the full matrix as a horizontally scrolling table with the first column
 pinned, for anyone who wants the overview.
 
-### บัญชี
+### ฤดูกาล
 
-Plans, theme, sign out. Nothing else in the first release.
+Each saved season is the combined business forecast for every orchard plot in
+one Buddhist harvest year. A season has a required four-digit year, a required
+human name, and one optional note. One owner has one season per year. The year
+is stored separately and is never inferred from the name.
+
+Cards state both time and lifecycle: the highest year says `ปีล่าสุด`; an open
+season says `กำลังทำ`; an older open season says `ปีก่อน · ยังไม่ปิด`; a closed
+season says `ปิดแล้ว`. Text carries each fact and colour only reinforces it. A
+note is previewed in at most two lines. Metadata is editable while open and
+read-only after close.
+
+The workbook sample is not a season. `ดูตัวอย่างการใช้งาน` opens an editable,
+resettable browser-only demonstration with `สร้างฤดูกาลของฉัน`; leaving or
+reopening it writes no history. After a real season exists, the demonstration
+remains available as a quiet help action outside the season list.
 
 ### Sign-in, registration, password reset
 
@@ -368,21 +389,21 @@ under the password field. No illustration, no marketing copy, no social buttons.
   │                                                        → กดลิงก์ยืนยัน → เข้าสู่ระบบ
   │
   └─ ล็อกอินแล้ว ─→ มีแผนไหม?
-                      ├─ ไม่มี → สร้างแผนแรก ─┬─ [เริ่มจากตัวอย่าง]
-                      │                       └─ [เริ่มจากศูนย์]
+                      ├─ ไม่มี → ┬─ [ดูตัวอย่างการใช้งาน] — ไม่บันทึก
+                      │          └─ [สร้างฤดูกาลแรก] — ปี + ชื่อ + บันทึก
                       └─ มี   → หน้าแรก
 ```
 
 ### First run, from nothing to a profit figure
 
 ```
-สร้าง "ฤดู 2569"  →  เลือก [เริ่มจากตัวอย่าง]
+เลือก [ดูตัวอย่างการใช้งาน]
         ↓
-   เห็นแอปทำงานเต็มรูปแบบทันที ด้วยตัวเลขจากไฟล์ต้นฉบับ
+   เห็นผลจากไฟล์ต้นฉบับ ลองเปลี่ยนตัวเลข และคืนค่าได้โดยไม่บันทึก
         ↓
-   [ ล้างข้อมูลทั้งหมด ]  ← ปุ่มเดียว ยืนยันครั้งเดียว
+   [ สร้างฤดูกาลของฉัน ] → ปี พ.ศ. + ชื่อ + บันทึก
         ↓
-   กรอกข้อมูล (hub) — ทั้ง 6 การ์ดว่าง   แถบล่าง: "ยังคำนวณไม่ได้"
+   กรอกข้อมูล (hub) — ทั้ง 6 การ์ดว่าง   แถบล่าง: "ยังคำนวณกำไรสุทธิไม่ได้"
         ↓
    ประมาณการผลผลิต + เกรด               แถบล่าง: รายได้ 1,645,875.00 ฿
         ↓
@@ -442,7 +463,8 @@ dependency is that yield comes before anything can be computed at all.
   ทุกหน้าขึ้นแถบ: ฤดูกาลนี้ปิดแล้ว · แก้ไขไม่ได้
                   [ ทำแผนฤดูถัดไปจากฤดูนี้ ]
         ↓
-  แตะ → "ฤดู 2570" ถูกสร้างจากสำเนาทั้งหมดของ 2569
+  แตะ → ฟอร์มเสนอปี 2570 ชื่อเดิม และบันทึกว่างให้ตรวจก่อนสร้าง
+        → ฤดู 2570 ถูกสร้างจากสำเนาข้อมูลคำนวณทั้งหมดของ 2569
         ↓
   แก้เฉพาะที่เปลี่ยน (ราคา ผลผลิต ค่าแรง)
   ไม่ต้องกรอก 16 บรรทัดใหม่

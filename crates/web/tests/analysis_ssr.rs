@@ -23,6 +23,8 @@ fn render_with(form: PlanForm, analysis_view: bool) -> String {
         provide_context(RequestUrl::new("/plans/42/dashboard"));
         let record = PlanRecord {
             id: 42,
+            season_year: Some(2569),
+            note: "ปีทดสอบ".into(),
             closed: false,
             form: form.clone(),
         };

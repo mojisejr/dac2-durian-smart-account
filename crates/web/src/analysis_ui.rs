@@ -15,7 +15,7 @@ use rust_decimal::Decimal;
 use crate::{
     explanations::{self, Explanation},
     plan_form::PlanForm,
-    plan_ui::{BottomNav, money},
+    plan_ui::{BottomNav, NavSection, money},
     plans::PlanRecord,
 };
 
@@ -201,14 +201,15 @@ fn MissingInputs(id: i64, form: PlanForm) -> impl IntoView {
 pub fn PlanDashboardView(record: PlanRecord) -> impl IntoView {
     let id = record.id;
     let name = record.form.name.clone();
+    let year = record.season_year;
     let form = record.form.clone();
     let analysis = record.form.to_plan().ok().map(|plan| calc::analyze(&plan));
 
     view! {
         <section class="page-stack plan-page">
             <header class="page-heading">
-                <div><p class="eyebrow">"หน้าแรก"</p><h1>{name}</h1></div>
-                <A attr:class="icon-button" href="/plans" attr:aria-label="กลับไปรายการแผน">"×"</A>
+                <div><p class="eyebrow">{year.map_or_else(|| "ฤดูกาล".into(), |year| format!("ฤดูกาล {year}"))}</p><h1>{name}</h1></div>
+                <A attr:class="icon-button" href=format!("/plans?from={id}") attr:aria-label="เปิดรายการฤดูกาล">"×"</A>
             </header>
             {match analysis {
                 Some(analysis) if analysis.business.net_profit.is_some() =>
@@ -216,13 +217,13 @@ pub fn PlanDashboardView(record: PlanRecord) -> impl IntoView {
                 _ => view! { <MissingInputs id form/> }.into_any(),
             }}
             <AnalysisLinks id/>
-            <BottomNav plan_id=Some(id)/>
+            <BottomNav plan_id=id active=NavSection::Home/>
         </section>
     }
 }
 
 #[component]
-fn DashboardFigures(analysis: Analysis) -> impl IntoView {
+pub(crate) fn DashboardFigures(analysis: Analysis) -> impl IntoView {
     let business = analysis.business;
     let revenue = analysis.revenue;
     let cost = analysis.cost;
@@ -310,6 +311,7 @@ fn AnalysisLinks(id: i64) -> impl IntoView {
 pub fn PlanAnalysisView(record: PlanRecord) -> impl IntoView {
     let id = record.id;
     let name = record.form.name.clone();
+    let year = record.season_year;
     let form = record.form.clone();
     let analysis = record.form.to_plan().ok().map(|plan| calc::analyze(&plan));
     let tab = RwSignal::new("efficiency");
@@ -317,14 +319,14 @@ pub fn PlanAnalysisView(record: PlanRecord) -> impl IntoView {
     view! {
         <section class="page-stack plan-page">
             <header class="page-heading">
-                <div><p class="eyebrow">"วิเคราะห์"</p><h1>{name}</h1></div>
+                <div><p class="eyebrow">{year.map_or_else(|| "วิเคราะห์".into(), |year| format!("วิเคราะห์ · ฤดูกาล {year}"))}</p><h1>{name}</h1></div>
                 <A attr:class="icon-button" href=format!("/plans/{id}/dashboard") attr:aria-label="กลับไปหน้าแรกของแผน">"×"</A>
             </header>
             {match analysis {
                 Some(analysis) => view! { <AnalysisTabs id analysis tab/> }.into_any(),
                 None => view! { <MissingInputs id form/> }.into_any(),
             }}
-            <BottomNav plan_id=Some(id)/>
+            <BottomNav plan_id=id active=NavSection::Analysis/>
         </section>
     }
 }

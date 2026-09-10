@@ -84,8 +84,9 @@ a { color: var(--primary); }
 
 form { display: grid; gap: 1rem; margin: 0; }
 label { display: grid; gap: 0.35rem; font-weight: 650; }
-input, select { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 0.55rem; color: var(--text); font: inherit; font-variant-numeric: tabular-nums; min-height: 56px; padding: 0.75rem 0.85rem; width: 100%; }
-input:focus, select:focus, button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid var(--warn); outline-offset: 2px; }
+input, select, textarea { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 0.55rem; color: var(--text); font: inherit; font-variant-numeric: tabular-nums; min-height: 56px; padding: 0.75rem 0.85rem; width: 100%; }
+textarea { line-height: 1.6; resize: vertical; }
+input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid var(--warn); outline-offset: 2px; }
 .input-with-unit { display: grid; position: relative; }
 .input-with-unit input { padding-right: 5.25rem; }
 .unit { align-self: center; color: var(--muted); font-size: 0.88rem; padding-right: 0.8rem; pointer-events: none; position: absolute; right: 0; }
@@ -117,6 +118,25 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 .plan-list-item, .section-card { align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 0.75rem; color: var(--text); display: flex; justify-content: space-between; min-height: 72px; padding: 0.9rem 1rem; text-decoration: none; }
 .plan-list-item span:first-child, .section-card span:first-child { display: grid; }
 .plan-list-item small, .section-card small, .section-intro, .section-title p { color: var(--muted); font-weight: 400; }
+.season-card-copy { gap: 0.2rem; }
+.season-year { color: var(--primary) !important; font-weight: 700 !important; }
+.season-note { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.season-statuses { align-items: center; display: flex !important; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.3rem; }
+.season-statuses .status { margin-left: 0; }
+.season-latest { border-color: var(--primary); }
+.season-older-open { border-color: var(--warn); }
+.season-closed { opacity: 0.82; }
+.latest-status { color: var(--primary) !important; }
+.warning { color: var(--warn) !important; }
+.season-back { justify-self: start; }
+.season-metadata { display: grid; gap: 0.7rem; margin: 0; }
+.season-metadata div { border-top: 1px solid var(--border); display: grid; gap: 0.15rem; padding-top: 0.6rem; }
+.season-metadata div:first-child { border-top: 0; padding-top: 0; }
+.season-metadata dt { color: var(--muted); font-size: 0.82rem; }
+.season-metadata dd { margin: 0; white-space: pre-wrap; }
+.copy-source { background: color-mix(in srgb, var(--primary) 9%, var(--surface)); border-left: 4px solid var(--primary); padding: 0.7rem 0.8rem; }
+.demo-banner { background: var(--surface); border: 1px solid var(--warn); border-left-width: 4px; border-radius: 0.7rem; color: var(--text); display: grid; gap: 0.15rem; padding: 0.8rem 1rem; }
+.demo-banner span { color: var(--muted); }
 .status { border: 1px solid currentcolor; border-radius: 999px; flex: 0 0 auto; font-size: 0.82rem; margin-left: 0.5rem; padding: 0.2rem 0.55rem; }
 /* A status pill that stretches the width of its card reads as a button nobody
    can press. It is a statement, so it takes only the room its words need. */
@@ -140,19 +160,12 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 .validation-summary:empty { display: none; }
 .validation-summary p { margin: 0; }
 
-.live-total { align-items: center; background: var(--text); border-radius: 0.7rem; bottom: 76px; color: var(--bg); display: flex; justify-content: space-between; min-height: 64px; padding: 0.75rem 1rem; position: sticky; z-index: 5; }
-.live-total span { font-size: 0.82rem; }
-.live-total strong { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; text-align: right; }
-/* The bar carries z-index 5, which makes it a stacking context, so a sheet
-   opened from inside it was trapped below the navigation's z-index 10 and its
-   close button could not be reached. The bar rises above the navigation only
-   while its own explanation is open. */
-.live-total:has(details[open]) { z-index: 30; }
-.live-total .figure-explanation { flex: 0 0 48px; min-width: 48px; }
-.live-total .figure-explanation > summary { color: var(--bg); }
+.live-total { align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 0.55rem; bottom: 76px; color: var(--text); display: flex; min-height: 48px; padding: 0.55rem 0.8rem; position: sticky; z-index: 5; }
+.live-total strong { font-size: 0.9rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .bottom-nav { background: var(--surface); border-top: 1px solid var(--border); bottom: 0; box-shadow: 0 -6px 16px rgb(0 0 0 / 12%); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); left: 50%; max-width: 30rem; position: fixed; transform: translateX(-50%); width: 100%; z-index: 10; }
 .bottom-nav a, .nav-disabled { align-items: center; color: var(--muted); display: flex; flex-direction: column; font-size: 0.8125rem; justify-content: center; min-height: 68px; text-decoration: none; }
 .nav-disabled { opacity: 0.55; }
+.bottom-nav a.nav-active { background: var(--surface); box-shadow: inset 0 3px 0 var(--primary); color: var(--text); font-weight: 700; }
 
 @media (min-width: 31rem) {
   main { padding-top: 2rem; }
