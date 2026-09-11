@@ -83,7 +83,14 @@ async function inspect(page, intendedWidth) {
     // how a sheet came to render its text at 1.04:1 and still pass.
     const parse = (value) => {
       const parts = value.match(/[\d.]+/g);
-      return parts ? parts.slice(0, 3).map(Number) : null;
+      if (!parts) return null;
+      const channels = parts.slice(0, 3).map(Number);
+      // Chromium serializes color-mix() as color(srgb 0..1 0..1 0..1).
+      // Treating those fractions as legacy rgb(0..255) makes a pale surface
+      // look black and reports a false contrast failure.
+      return value.startsWith('color(srgb')
+        ? channels.map((channel) => channel * 255)
+        : channels;
     };
     const alpha = (value) => {
       const parts = value.match(/[\d.]+/g);
@@ -332,8 +339,19 @@ async function signIn(browser) {
   const detailedPlanId = page.url().match(/\/plans\/(\d+)\/quick\/production$/)?.[1];
   if (!detailedPlanId) throw new Error('the detailed proof season was not created');
   await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  const modeResponse = page.waitForResponse(
+    (response) => response.request().method() === 'POST',
+    { timeout: 10000 },
+  );
   await page.click('button:has-text("เปลี่ยนเป็นแผนละเอียด")');
-  await page.waitForURL(new RegExp(`/plans/${detailedPlanId}$`));
+  const modeResult = await modeResponse;
+  if (!modeResult.ok()) {
+    throw new Error(`switching to detailed mode returned HTTP ${modeResult.status()}`);
+  }
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page
+    .getByRole('heading', { name: 'แผนละเอียด', exact: true })
+    .waitFor({ state: 'visible', timeout: 10000 });
 
   // A separate season reaches final comparison so the responsive matrix can
   // measure both the editable draft and immutable result states.
@@ -376,6 +394,49 @@ async function signIn(browser) {
     .catch(() => {
       throw new Error('final comparison did not show the deterministic yield delta');
     });
+
+  // Finalize the earlier 2569 draft with different values. History must then
+  // compare the 2571 actual directly with 2569, name the skipped year, and use
+  // the fixed transparent percentage rule rather than inventing 2570 data.
+  await page.goto(`${BASE}/plans/${planId}/close`);
+  await page.fill('input[name="sellable_yield_kg"]', '16000');
+  await page.fill('input[name="revenue"]', '1400000');
+  await page.fill('input[name="total_cost"]', '950000');
+  await page.fill('textarea[name="note"]', 'ปีฐานสำหรับประวัติ');
+  await page.click('button:has-text("บันทึกและตรวจทาน")');
+  await page.waitForURL(new RegExp(`/plans/${planId}/close/review$`));
+  await page.click('button:has-text("ยืนยันผลจริงและปิดฤดูกาล")');
+  await page.waitForURL(new RegExp(`/plans/${planId}/comparison$`));
+
+  await page.goto(`${BASE}/history`);
+  await page
+    .getByText('ผลผลิตที่ขายได้ สูงกว่าฤดูกาลก่อน 12.50%', { exact: true })
+    .waitFor({ state: 'visible', timeout: 10000 });
+  await page
+    .getByText('มีปีที่ข้ามระหว่างสองผลจริง ระบบเทียบเฉพาะปีที่แสดงและไม่ประมาณค่าปีที่หายไป', { exact: true })
+    .waitFor({ state: 'visible', timeout: 10000 });
+
+  // Targets remain available, but only behind the explicitly optional
+  // advanced area. Saving one and returning must retain the owner's value.
+  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  const advancedTarget = page.locator('a:has-text("เป้าหมาย KPI")');
+  if (await advancedTarget.isVisible()) {
+    throw new Error('advanced targets appeared in the main journey before expansion');
+  }
+  await page.click('summary:has-text("การวางแผนขั้นสูง (ไม่บังคับ)")');
+  await advancedTarget.click();
+  await page.waitForURL(new RegExp(`/plans/${detailedPlanId}/targets$`));
+  const yieldTarget = page.locator('label:has-text("ผลผลิตต่อไร่") input');
+  await yieldTarget.fill('2200');
+  await page.click('button:has-text("บันทึกส่วนนี้")');
+  await page.getByText('บันทึกแล้ว', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
+  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await page.click('summary:has-text("การวางแผนขั้นสูง (ไม่บังคับ)")');
+  await page.click('a:has-text("เป้าหมาย KPI")');
+  await page.waitForURL(new RegExp(`/plans/${detailedPlanId}/targets$`));
+  if (await page.locator('label:has-text("ผลผลิตต่อไร่") input').inputValue() !== '2200') {
+    throw new Error('advanced target did not persist after leaving and returning');
+  }
 
   const cookies = await context.cookies();
   await context.close();
@@ -444,11 +505,13 @@ try {
     ['actual-entry', `${BASE}/plans/${planId}/close`],
     ['actual-review', `${BASE}/plans/${planId}/close/review`],
     ['actual-comparison', `${BASE}/plans/${comparisonPlanId}/comparison`],
+    ['history', `${BASE}/history?from=${comparisonPlanId}`],
     ['detailed-hub', `${BASE}/plans/${detailedPlanId}`],
     ['dashboard', `${BASE}/plans/${detailedPlanId}/dashboard`],
     ['analysis', `${BASE}/plans/${detailedPlanId}/analysis`],
     ['production', `${BASE}/plans/${detailedPlanId}/production`],
     ['health', `${BASE}/plans/${detailedPlanId}/health`],
+    ['targets-advanced', `${BASE}/plans/${detailedPlanId}/targets`],
   ];
 
   for (const size of WIDTHS) {

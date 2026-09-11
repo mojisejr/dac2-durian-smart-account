@@ -76,7 +76,7 @@ pub fn compare_metrics(
         .into_iter()
         .map(|metric| {
             let forecast_value = metric_value(forecast, metric);
-            let actual_value = metric_value(&actual, metric);
+            let actual_value = metric_value(actual, metric);
             MetricComparison {
                 metric,
                 forecast: forecast_value,

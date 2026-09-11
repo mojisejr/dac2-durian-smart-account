@@ -153,6 +153,25 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 .comparison-values dt { color: var(--muted); }
 .comparison-values dd { font-variant-numeric: tabular-nums; margin: 0; overflow-wrap: anywhere; text-align: right; }
 .comparison-card > strong { font-size: 1.05rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.history-intro, .history-season, .history-cues, .cue-row, .advanced-planning { display: grid; gap: 0.75rem; }
+.history-season > .button { width: 100%; }
+.history-note, .baseline-copy { margin-bottom: 0; }
+.baseline-copy { background: color-mix(in srgb, var(--primary) 9%, var(--surface)); border-left: 4px solid var(--primary); padding: 0.7rem 0.8rem; }
+.unavailable-history { border-left: 4px solid var(--warn); }
+.history-cues { border-top: 1px solid var(--border); padding-top: 0.75rem; }
+.history-cues h3 { font-size: 1rem; margin: 0; }
+.cue-row { border-top: 1px solid var(--border); gap: 0.2rem; padding-top: 0.65rem; }
+.cue-row:first-of-type { border-top: 0; padding-top: 0; }
+.cue-row span, .cue-row small { color: var(--muted); }
+.cue-row small { font-size: 0.8125rem; line-height: 1.55; }
+.history-table { min-width: 48rem !important; }
+.history-table th, .history-table td { vertical-align: top; }
+.history-table td { white-space: normal; }
+.history-table th:first-child { min-width: 9rem; }
+.history-table td:not(:first-child) { min-width: 12rem; }
+.advanced-planning { padding-top: 1rem; }
+.advanced-planning > summary { color: var(--primary); padding-block: 0; }
+.advanced-planning > p { color: var(--muted); margin-bottom: 0; }
 .demo-banner { background: var(--surface); border: 1px solid var(--warn); border-left-width: 4px; border-radius: 0.7rem; color: var(--text); display: grid; gap: 0.15rem; padding: 0.8rem 1rem; }
 .demo-banner span { color: var(--muted); }
 .status { border: 1px solid currentcolor; border-radius: 999px; flex: 0 0 auto; font-size: 0.82rem; margin-left: 0.5rem; padding: 0.2rem 0.55rem; }

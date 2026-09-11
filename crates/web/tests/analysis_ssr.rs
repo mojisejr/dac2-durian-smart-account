@@ -193,10 +193,34 @@ fn a_kpi_without_a_target_is_not_graded_and_routes_to_the_targets_screen() {
     plan.targets = calc::KpiTargets::default();
     let html = analysis(PlanForm::from_plan(&plan));
 
-    assert!(html.contains("ยังไม่ได้ตั้งเป้า"));
+    assert!(html.contains("ตั้งเป้าในขั้นสูง"));
     assert!(html.contains("/plans/42/targets"));
     assert!(!html.contains("ถึงเป้า"));
     assert!(!html.contains("ต้องปรับปรุง"));
+}
+
+#[test]
+fn missing_physical_quantities_are_quiet_and_do_not_render_incomplete_kpis() {
+    let mut plan = workbook_sample();
+    plan.variable_costs.retain(|line| {
+        !matches!(
+            line.kind,
+            calc::VariableCostKind::OrchardLabor
+                | calc::VariableCostKind::Fertilizer
+                | calc::VariableCostKind::Water
+                | calc::VariableCostKind::Electricity
+        )
+    });
+    let html = analysis(PlanForm::from_plan(&plan));
+
+    for hidden in ["ผลผลิตต่อวันแรงงาน", "ผลผลิตต่อปุ๋ย", "ผลผลิตต่อน้ำ", "ผลผลิตต่อไฟฟ้า"]
+    {
+        assert!(
+            !html.contains(hidden),
+            "{hidden} should stay quiet without a quantity"
+        );
+    }
+    assert!(html.contains("ข้อมูลที่ไม่กรอกจะไม่ถูกนับว่าไม่ครบ"));
 }
 
 #[test]

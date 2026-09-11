@@ -1,6 +1,6 @@
 # DAC2 — Design
 
-**Status:** draft, revision 0.5
+**Status:** draft, revision 0.6
 **Home:** this file moves to the application repository root in slice 1. There is
 one copy of it, never two.
 
@@ -308,9 +308,12 @@ computed from absent inputs.
 
 ### กรอกข้อมูล — hub
 
-Six cards, each showing its own completeness. Any order, any time, no wizard,
+Five main cards show their own completeness. Any order, any time, no wizard,
 nothing lost by leaving. This screen is the workbook's `ตรวจสอบ` sheet made into
-navigation.
+navigation. The nine optional KPI targets move under one collapsed
+`การวางแผนขั้นสูง (ไม่บังคับ)` area after the main cards. Existing target values
+remain stored and editable there, but an empty target never looks like unfinished
+main work.
 
 ```
 ฤดู 2569                     ⋯
@@ -319,16 +322,20 @@ navigation.
 │ ✓ ประมาณการผลผลิต       › │
 │ ⚠ ปัจจัยและต้นทุน  3/16 › │
 │ ○ ต้นทุนคงที่           › │
-│ ○ เป้าหมาย         2/9  › │
 │ ○ สุขภาพธุรกิจ     0/12 › │
 └────────────────────────────┘
+
+การวางแผนขั้นสูง (ไม่บังคับ)
+  เป้าหมาย KPI                  ›
 
 ────────────────────────────
 กำไรสุทธิโดยประมาณ  834,600.00 บาท
 ```
 
-`เป้าหมาย` is a card because no target is a constant. Until the owner sets one,
-the KPI that needs it has no verdict to give.
+Until the owner sets a target, the KPI that needs it has no verdict to give.
+Physical efficiency rows appear only when their exact owner-entered quantity
+and unit exist. Missing optional quantities stay quiet and never count against
+readiness.
 
 The hub edits year, name, and note while the season is open. Its management
 area holds `ทำฤดูกาลถัดไปจากฤดูนี้` and
@@ -436,6 +443,52 @@ resettable browser-only demonstration with `สร้างฤดูกาลข
 reopening it writes no history. After a real season exists, the demonstration
 remains available as a quiet help action outside the season list.
 
+### ประวัติฤดูกาล
+
+`ฤดูกาล` in the in-season tab bar opens a chronological result history. A closed
+season that predates actual capture remains visible as `ไม่มีผลจริง`; the
+application never fills it with zero. The first closed season with actual values
+is labelled `ปีฐาน` and explicitly says it is not yet a trend.
+
+Each later actual season compares against the immediately preceding season that
+also has actual values. A skipped Buddhist year is named as a gap; no value is
+interpolated. Every season carries an accessible table with `ตัวชี้วัด`,
+`ผลจริง`, `เทียบประมาณการ`, and `เทียบฤดูก่อน` for sellable yield, revenue,
+total cost, profit, average price, and cost per kilogram.
+
+Above that table, fixed factual cues say only what the numbers did, for example
+`ต้นทุนต่อกิโลกรัม สูงกว่าฤดูกาลก่อน 8.40%`. They never say why, never call the
+change good or bad, and never recommend an orchard action. Each cue repeats both
+source values and the formula
+`((ผลจริงปีนี้ - ผลจริงปีก่อน) ÷ |ผลจริงปีก่อน|) × 100`. When the earlier value
+is zero, the absolute difference remains visible but the percent state says it
+cannot be calculated.
+
+The shipped copy for this surface is fixed:
+
+- Header: `ผลจริงข้ามปี` / `ประวัติฤดูกาล`.
+- Introduction: `เทียบจากข้อมูลที่บันทึกจริง`, followed by
+  `ปีแรกที่มีผลจริงเป็นปีฐาน ไม่เรียกว่าแนวโน้ม ปีต่อไปเทียบกับฤดูกาลก่อนที่มีผลจริงเท่านั้น`.
+- Empty state: `ยังไม่มีฤดูกาลที่ปิดแล้ว` and
+  `เมื่อปิดฤดูกาลพร้อมผลจริง ประวัติจะเริ่มจากปีฐานตรงนี้`.
+- Legacy state: `ไม่มีผลจริง` and
+  `ฤดูกาลนี้ปิดก่อนมีขั้นตอนบันทึกผลจริง ระบบจึงไม่เติมศูนย์หรือสร้างแนวโน้มแทน`.
+- Baseline explanation:
+  `นี่คือฤดูกาลแรกที่มีผลจริง จึงใช้เป็นปีฐานและยังไม่สรุปว่าเป็นแนวโน้ม`.
+- Gap explanation:
+  `มีปีที่ข้ามระหว่างสองผลจริง ระบบเทียบเฉพาะปีที่แสดงและไม่ประมาณค่าปีที่หายไป`.
+- Cue heading: `ข้อสังเกตจากกติกาคงที่`; zero-base explanation:
+  `คิดเปอร์เซ็นต์ไม่ได้ เพราะค่าฤดูกาลก่อนเป็นศูนย์`.
+- Table headings: `ตัวชี้วัด`, `ผลจริง`, `เทียบประมาณการ`, and
+  `เทียบฤดูก่อน`. The route back to one season says
+  `ดูผลจริงเทียบประมาณการของฤดูนี้`.
+- When opened from an in-season tab, the visible route back says
+  `‹ กลับไปฤดูกาลที่เปิดอยู่` and returns to that exact season.
+
+The advanced area uses `การวางแผนขั้นสูง (ไม่บังคับ)`, `เป้าหมาย KPI`, and
+`ค่าที่ตั้งไว้เดิมยังอยู่และแก้ได้ที่นี่`. Its target screen begins
+`ส่วนขั้นสูงนี้ไม่บังคับ เป้าหมายเป็นตัวเลขของเจ้าของสวน ระบบจะไม่เดาให้ ถ้าเว้นว่าง หน้าวิเคราะห์จะไม่ตัดสินว่าผ่านหรือไม่ผ่าน`.
+
 ### Sign-in, registration, password reset
 
 Three plain screens. One field per row, one primary button, and the reset link
@@ -468,7 +521,7 @@ under the password field. No illustration, no marketing copy, no social buttons.
         ↓
    [ สร้างฤดูกาลของฉัน ] → ปี พ.ศ. + ชื่อ + บันทึก
         ↓
-   กรอกข้อมูล (hub) — ทั้ง 6 การ์ดว่าง   แถบล่าง: "ยังคำนวณกำไรสุทธิไม่ได้"
+   กรอกข้อมูล (hub) — 5 ส่วนหลักว่าง      แถบล่าง: "ยังคำนวณกำไรสุทธิไม่ได้"
         ↓
    ประมาณการผลผลิต + เกรด               แถบล่าง: รายได้ 1,645,875.00 ฿
         ↓
@@ -477,7 +530,7 @@ under the password field. No illustration, no marketing copy, no social buttons.
         ↓
    ต้นทุนคงที่                           แถบล่าง: กำไรสุทธิ 834,600.00 ฿
         ↓
-   เป้าหมาย  ← ถ้าข้ามไป KPI จะบอกว่า "ยังไม่ได้ตั้งเป้า" ไม่ใช่ตัดสินมั่ว
+   [ขั้นสูง] เป้าหมาย KPI (ไม่บังคับ) ← ถ้าข้ามไป KPI จะไม่ตัดสินมั่ว
         ↓
    สุขภาพธุรกิจ 12 ข้อ
         ↓

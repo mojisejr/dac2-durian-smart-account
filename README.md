@@ -24,6 +24,11 @@ AI, LLM, model API, prompt, embedding, vector store, or inference path.
 The second decision-support batch replaces immediate close with a persisted
 actual-outcome draft, explicit review, atomic finalization, and a deterministic
 comparison against the active forecast frozen at close.
+The third batch adds owner-scoped chronological history. The first season with
+actual values is a baseline; later seasons show actual change and
+forecast-versus-actual difference for the same six metrics with fixed factual
+wording and visible formulas. It makes no prediction, diagnosis, or generated
+recommendation.
 
 ## Quick forecast proof
 
@@ -101,6 +106,26 @@ The suite proves lossless complete and empty-plan round trips, every exposed
 operation under the wrong owner, every mutation of a closed plan, and
 independence after a deep duplicate is edited.
 
+## Season history proof
+
+The history query reads only the authenticated owner's closed seasons and orders
+them by stored Buddhist harvest year with plan ID as a stable tie-break. Legacy
+closed seasons remain visible without synthetic actuals. `build_season_history`
+uses the first real actual as a baseline, compares each later actual only with
+the preceding observed actual, and never interpolates a skipped year.
+
+Each of the six metrics exposes the stored actual, `actual - forecast`, and the
+cross-season absolute and percentage change. Percentage change uses
+`((current - previous) / |previous|) * 100`; when the previous value is zero or
+either value is absent, the unavailable state is explicit. All cue prose is a
+fixed UI template over those values. There is no AI, LLM, model API, prompt,
+embedding, vector store, or inference call.
+
+```bash
+cargo test -p calc
+./scripts/test-plans.sh
+```
+
 ## Account and trust proof
 
 Registration compares trimmed email addresses without ASCII case distinctions,
@@ -127,8 +152,10 @@ after a password reset.
 The analysis screens add no arithmetic. They read the `Analysis` the calculation
 crate already produces and decide only how a figure is named, formatted, and
 withheld. A figure the engine cannot compute is shown as `ยังไม่มีข้อมูล`, never
-as zero, and a KPI whose target the owner has not set shows `ยังไม่ได้ตั้งเป้า`
-with a route to the targets screen rather than a verdict nobody chose.
+as zero. Optional KPI targets now sit under an explicitly advanced detailed-
+planning area. A KPI without a target routes there rather than receiving a
+verdict nobody chose. Physical KPI rows appear only when their owner-entered
+quantity and unit exist; absence is quiet and does not count against readiness.
 
 Every panel is server rendered with the inactive ones carrying `hidden`, so the
 whole analysis reaches the reader in the first response and the tests below read
@@ -140,7 +167,7 @@ cargo test -p web --test analysis_ssr --features ssr
 
 The suite proves the dashboard against the workbook's own cached business
 figures, the empty-plan state that names what is missing instead of showing a
-number, all nine KPI rows with their explanations, the graded and ungraded target
+number, available KPI rows with their explanations, the graded and ungraded target
 cases, all six completeness rules with the routes that would fix them, both tax
 methods with the cheaper one marked and the disclaimer present, and all
 twenty-five scenario cells including the centre the sliders start from.
@@ -155,7 +182,8 @@ scroll container never scrolled, and layout is not in a string.
 
 `scripts/check-responsive.sh` drives real Chrome at 320, 360, 393, and 412
 pixels, exercises the non-persistent demonstration, all three quick questions,
-the quick result, and the existing detailed season surfaces, opens every
+the quick result, actual close and comparison, season history with a skipped
+year, the advanced-target route, and the existing detailed season surfaces, opens every
 explanation and every tab in turn, and asserts these properties:
 
 - No page is wider than the device, and content may not push the layout viewport
@@ -231,7 +259,8 @@ docker compose up -d --wait
 ./scripts/test-plans.sh
 ```
 
-The six section routes are server rendered and hydrated. Sarabun font files are
+The five main section routes and the advanced KPI-target route are server
+rendered and hydrated. Sarabun font files are
 served by the application itself under the SIL Open Font License; no font CDN
 or other runtime SaaS is used.
 

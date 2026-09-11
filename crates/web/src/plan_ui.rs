@@ -11,17 +11,30 @@ use crate::{
     plan_form::{FixedCostForm, GradeForm, PlanForm, VariableCostForm},
     plans::{
         CreateSeason, FinalizeActual, PlanRecord, SaveActualDraft, SavePlan, SaveQuickStep,
-        SwitchForecastMode, UpdateSeasonMetadata, list_plans, quick_resume_path,
+        SeasonHistoryItem, SwitchForecastMode, UpdateSeasonMetadata, list_plans,
+        load_season_history, quick_resume_path,
     },
 };
 
-const SECTIONS: [(&str, &str, &str); 6] = [
+const MAIN_SECTIONS: [(&str, &str, &str); 5] = [
     ("market", "ตลาด", "ลูกค้า ความต้องการ และช่องทางขาย"),
     ("production", "ผลผลิตและเกรด", "พื้นที่ ผลผลิต สูญเสีย และสัดส่วนเกรด"),
     ("variable-costs", "ต้นทุนผันแปร", "รายการที่เปลี่ยนตามการผลิต"),
     ("fixed-costs", "ต้นทุนคงที่", "เงินสด ค่าเสื่อม และเงินลงทุน"),
-    ("targets", "เป้าหมาย", "ตัวเลขเปรียบเทียบที่เจ้าของกำหนด"),
     ("health", "สุขภาพสวน", "12 คำถาม 6 มิติ"),
+];
+
+const EDITABLE_SECTIONS: [(&str, &str, &str); 6] = [
+    ("market", "ตลาด", "ลูกค้า ความต้องการ และช่องทางขาย"),
+    ("production", "ผลผลิตและเกรด", "พื้นที่ ผลผลิต สูญเสีย และสัดส่วนเกรด"),
+    ("variable-costs", "ต้นทุนผันแปร", "รายการที่เปลี่ยนตามการผลิต"),
+    ("fixed-costs", "ต้นทุนคงที่", "เงินสด ค่าเสื่อม และเงินลงทุน"),
+    ("health", "สุขภาพสวน", "12 คำถาม 6 มิติ"),
+    (
+        "targets",
+        "เป้าหมาย KPI",
+        "ตัวเลขเปรียบเทียบขั้นสูงที่เจ้าของกำหนดเอง",
+    ),
 ];
 
 #[component]
@@ -80,6 +93,7 @@ pub fn PlansPage() -> impl IntoView {
                                 <p>"กำหนดปี ชื่อ และบันทึกก่อนสร้าง ฤดูกาลหนึ่งรวมข้อมูลจากทุกแปลง"</p>
                                 <div class="actions">
                                     <A attr:class="button primary" href="/plans/new">"เริ่มฤดูกาลใหม่"</A>
+                                    <A attr:class="button secondary" href="/history">"ดูประวัติผลจริง"</A>
                                     <A attr:class="button text-button" href="/demo">"ดูตัวอย่างการใช้งาน"</A>
                                 </div>
                             </section>
@@ -128,6 +142,289 @@ pub fn PlansPage() -> impl IntoView {
                 <button class="text-button" type="submit">"ออกจากระบบ"</button>
             </ActionForm>
         </section>
+    }
+}
+
+#[component]
+pub fn SeasonHistoryPage() -> impl IntoView {
+    let history = Resource::new(|| (), |_| load_season_history());
+    let query = use_query_map();
+    let return_to = move || {
+        query.with(|params| {
+            params
+                .get("from")
+                .and_then(|value| value.parse::<i64>().ok())
+        })
+    };
+    view! {
+        <Suspense fallback=move || view! { <p>"กำลังอ่านประวัติฤดูกาล…"</p> }>
+            {move || history.get().map(|result| match result {
+                Ok(items) => view! { <SeasonHistoryView items return_to=return_to()/> }.into_any(),
+                Err(_) => view! { <section class="card empty-state"><h1>"อ่านประวัติฤดูกาลไม่ได้"</h1><p>"กรุณาลองอีกครั้ง"</p><A attr:class="button secondary" href="/plans">"กลับฤดูกาลของฉัน"</A></section> }.into_any(),
+            })}
+        </Suspense>
+    }
+}
+
+#[component]
+pub fn SeasonHistoryView(items: Vec<SeasonHistoryItem>, return_to: Option<i64>) -> impl IntoView {
+    use std::collections::HashMap;
+
+    if items.is_empty() {
+        return view! {
+            <section class="page-stack history-page">
+                <header class="page-heading compact-heading"><div><p class="eyebrow">"ผลจริงข้ามปี"</p><h1>"ประวัติฤดูกาล"</h1></div><A attr:class="icon-button" href="/plans" attr:aria-label="กลับฤดูกาลของฉัน">"×"</A></header>
+                {history_return_link(return_to)}
+                <section class="card empty-state"><h2>"ยังไม่มีฤดูกาลที่ปิดแล้ว"</h2><p>"เมื่อปิดฤดูกาลพร้อมผลจริง ประวัติจะเริ่มจากปีฐานตรงนี้"</p><A attr:class="button primary" href="/plans">"กลับฤดูกาลของฉัน"</A></section>
+            </section>
+        }.into_any();
+    }
+
+    let labels = items
+        .iter()
+        .map(|item| {
+            (
+                item.id,
+                (
+                    item.name.clone(),
+                    item.actual_outcome
+                        .as_ref()
+                        .map(|actual| actual.outcome.note.clone())
+                        .unwrap_or_default(),
+                ),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let history = calc::build_season_history(
+        items
+            .into_iter()
+            .map(|item| {
+                let (actual, forecast) = item.actual_outcome.map_or((None, None), |record| {
+                    if record.finalized {
+                        (
+                            Some(calc::analyze_actual(&record.outcome).metrics),
+                            record.forecast,
+                        )
+                    } else {
+                        (None, None)
+                    }
+                });
+                calc::SeasonSnapshot {
+                    season_id: item.id,
+                    season_year: item.season_year,
+                    actual,
+                    forecast,
+                }
+            })
+            .collect(),
+    );
+
+    view! {
+        <section class="page-stack history-page">
+            <header class="page-heading compact-heading">
+                <div><p class="eyebrow">"ผลจริงข้ามปี"</p><h1>"ประวัติฤดูกาล"</h1></div>
+                <A attr:class="icon-button" href="/plans" attr:aria-label="กลับฤดูกาลของฉัน">"×"</A>
+            </header>
+            {history_return_link(return_to)}
+            <section class="card history-intro">
+                <h2>"เทียบจากข้อมูลที่บันทึกจริง"</h2>
+                <p>"ปีแรกที่มีผลจริงเป็นปีฐาน ไม่เรียกว่าแนวโน้ม ปีต่อไปเทียบกับฤดูกาลก่อนที่มีผลจริงเท่านั้น"</p>
+                <p class="caption">"ผลต่างประมาณการ = ผลจริง - ประมาณการ · การเปลี่ยนแปลงข้ามปี = ((ผลจริงปีนี้ - ผลจริงปีก่อน) ÷ |ผลจริงปีก่อน|) × 100"</p>
+            </section>
+            {history.into_iter().map(|entry| {
+                let (name, note) = labels.get(&entry.season.season_id).cloned().unwrap_or_default();
+                view! { <HistorySeasonCard entry name note/> }
+            }).collect_view()}
+        </section>
+    }.into_any()
+}
+
+fn history_return_link(return_to: Option<i64>) -> Option<impl IntoView> {
+    return_to.map(|id| view! {
+        <A attr:class="button secondary season-back" href=format!("/plans/{id}")>"‹ กลับไปฤดูกาลที่เปิดอยู่"</A>
+    })
+}
+
+#[component]
+fn HistorySeasonCard(entry: calc::SeasonHistoryEntry, name: String, note: String) -> impl IntoView {
+    let year = entry.season.season_year;
+    let year_label = season_year_label(year);
+    let Some(actual) = entry.season.actual.clone() else {
+        return view! {
+            <article class="card history-season unavailable-history">
+                <div class="section-title"><div><p class="eyebrow">{year_label}</p><h2>{name}</h2></div><span class="status muted">"ไม่มีผลจริง"</span></div>
+                <p>"ฤดูกาลนี้ปิดก่อนมีขั้นตอนบันทึกผลจริง ระบบจึงไม่เติมศูนย์หรือสร้างแนวโน้มแทน"</p>
+            </article>
+        }.into_any();
+    };
+
+    let status = if entry.baseline {
+        "ปีฐาน".to_owned()
+    } else {
+        entry.previous_actual_year.map_or_else(
+            || "เทียบกับผลจริงก่อนหน้า".into(),
+            |previous| format!("เทียบกับฤดูกาล {previous}"),
+        )
+    };
+    let skipped = entry
+        .previous_actual_year
+        .zip(year)
+        .is_some_and(|(previous, current)| current - previous > 1);
+    let previous_year = entry.previous_actual_year;
+    let trends = entry.actual_trends.clone();
+    let forecast = entry.forecast_comparison.clone();
+    let note_view = (!note.is_empty()).then(|| view! { <p class="history-note">{note}</p> });
+    let cue_view = (!trends.is_empty()).then(|| {
+        let cues = trends
+            .clone()
+            .into_iter()
+            .map(|trend| view! { <TrendCue trend current_year=year previous_year/> })
+            .collect_view();
+        view! {
+            <section class="history-cues" aria-label="ข้อสังเกตจากตัวเลข">
+                <h3>"ข้อสังเกตจากกติกาคงที่"</h3>
+                {cues}
+            </section>
+        }
+    });
+
+    view! {
+        <article class="card history-season">
+            <div class="section-title"><div><p class="eyebrow">{year_label}</p><h2>{name}</h2></div><span class="status muted">{status}</span></div>
+            {note_view}
+            <Show when=move || entry.baseline>
+                <p class="baseline-copy">"นี่คือฤดูกาลแรกที่มีผลจริง จึงใช้เป็นปีฐานและยังไม่สรุปว่าเป็นแนวโน้ม"</p>
+            </Show>
+            <Show when=move || skipped>
+                <p class="caption">"มีปีที่ข้ามระหว่างสองผลจริง ระบบเทียบเฉพาะปีที่แสดงและไม่ประมาณค่าปีที่หายไป"</p>
+            </Show>
+            {cue_view}
+            <div class="table-scroll">
+                <table class="history-table">
+                    <caption>"ทุกค่ามาจากผลจริงและภาพนิ่งประมาณการของฤดูกาลนี้"</caption>
+                    <thead><tr><th scope="col">"ตัวชี้วัด"</th><th scope="col">"ผลจริง"</th><th scope="col">"เทียบประมาณการ"</th><th scope="col">"เทียบฤดูก่อน"</th></tr></thead>
+                    <tbody>
+                        {ComparisonMetric::ALL.into_iter().map(|metric| view! {
+                            <HistoryMetricRow metric actual=actual.clone() forecast=forecast.clone() trends=trends.clone() baseline=entry.baseline/>
+                        }).collect_view()}
+                    </tbody>
+                </table>
+            </div>
+            <A attr:class="button secondary" href=format!("/plans/{}/comparison", entry.season.season_id)>"ดูผลจริงเทียบประมาณการของฤดูนี้"</A>
+        </article>
+    }.into_any()
+}
+
+#[component]
+fn TrendCue(
+    trend: calc::MetricTrend,
+    current_year: Option<i32>,
+    previous_year: Option<i32>,
+) -> impl IntoView {
+    let (label, unit) = comparison_metric_label(trend.metric);
+    let years = format!(
+        "ฤดูกาล {} → {}",
+        previous_year.map_or_else(|| "ก่อนหน้า".into(), |year| year.to_string()),
+        current_year.map_or_else(|| "ปัจจุบัน".into(), |year| year.to_string())
+    );
+    let sentence = match (trend.direction, trend.percent_change) {
+        (Some(calc::TrendDirection::Higher), Some(percent)) => {
+            format!("{label} สูงกว่าฤดูกาลก่อน {}%", money(percent.abs()))
+        }
+        (Some(calc::TrendDirection::Lower), Some(percent)) => {
+            format!("{label} ต่ำกว่าฤดูกาลก่อน {}%", money(percent.abs()))
+        }
+        (Some(calc::TrendDirection::Unchanged), Some(_)) => format!("{label} เท่ากับฤดูกาลก่อน"),
+        _ => format!("{label} ยังคิดเปอร์เซ็นต์เปลี่ยนแปลงไม่ได้"),
+    };
+    let inputs = format!(
+        "{years}: {} → {}",
+        actual_metric(trend.previous, unit),
+        actual_metric(trend.current, unit)
+    );
+    let formula = if trend.delta.is_some() && trend.percent_change.is_none() {
+        "คิดเปอร์เซ็นต์ไม่ได้ เพราะค่าฤดูกาลก่อนเป็นศูนย์".to_owned()
+    } else {
+        "สูตร: ((ผลจริงปีนี้ - ผลจริงปีก่อน) ÷ |ผลจริงปีก่อน|) × 100".to_owned()
+    };
+    view! {
+        <div class="cue-row"><strong>{sentence}</strong><span>{inputs}</span><small>{formula}</small></div>
+    }
+}
+
+#[component]
+fn HistoryMetricRow(
+    metric: ComparisonMetric,
+    actual: calc::OutcomeMetrics,
+    forecast: Vec<calc::MetricComparison>,
+    trends: Vec<calc::MetricTrend>,
+    baseline: bool,
+) -> impl IntoView {
+    let (label, unit) = comparison_metric_label(metric);
+    let actual_value = history_metric_value(&actual, metric);
+    let forecast_delta = forecast
+        .iter()
+        .find(|row| row.metric == metric)
+        .and_then(|row| row.delta);
+    let trend = trends.iter().find(|trend| trend.metric == metric);
+    let forecast_text = delta_text(forecast_delta, unit, "ประมาณการ");
+    let trend_text = if baseline {
+        "ปีฐาน".to_owned()
+    } else if let Some(trend) = trend {
+        match (trend.delta, trend.percent_change) {
+            (Some(delta), Some(percent)) => format!(
+                "{} {} {unit} ({}%)",
+                direction_word(delta, "ฤดูก่อน"),
+                money(delta.abs()),
+                money(percent.abs())
+            ),
+            (Some(delta), None) => format!(
+                "{} {} {unit} · ไม่มี % เพราะฐานเป็น 0",
+                direction_word(delta, "ฤดูก่อน"),
+                money(delta.abs())
+            ),
+            _ => "ยังเปรียบเทียบไม่ได้".into(),
+        }
+    } else {
+        "ยังเปรียบเทียบไม่ได้".into()
+    };
+    view! { <tr><th scope="row">{label}</th><td>{actual_metric(actual_value, unit)}</td><td>{forecast_text}</td><td>{trend_text}</td></tr> }
+}
+
+fn history_metric_value(
+    metrics: &calc::OutcomeMetrics,
+    metric: ComparisonMetric,
+) -> Option<rust_decimal::Decimal> {
+    match metric {
+        ComparisonMetric::SellableYieldKg => metrics.sellable_yield_kg,
+        ComparisonMetric::Revenue => metrics.revenue,
+        ComparisonMetric::TotalCost => metrics.total_cost,
+        ComparisonMetric::Profit => metrics.profit,
+        ComparisonMetric::AveragePricePerKg => metrics.average_price_per_kg,
+        ComparisonMetric::CostPerKg => metrics.cost_per_kg,
+    }
+}
+
+fn delta_text(delta: Option<rust_decimal::Decimal>, unit: &str, comparison: &str) -> String {
+    delta.map_or_else(
+        || "ยังเปรียบเทียบไม่ได้".into(),
+        |delta| {
+            format!(
+                "{} {} {unit}",
+                direction_word(delta, comparison),
+                money(delta.abs())
+            )
+        },
+    )
+}
+
+fn direction_word(delta: rust_decimal::Decimal, comparison: &str) -> String {
+    if delta > rust_decimal::Decimal::ZERO {
+        format!("สูงกว่า{comparison}")
+    } else if delta < rust_decimal::Decimal::ZERO {
+        format!("ต่ำกว่า{comparison}")
+    } else {
+        format!("เท่ากับ{comparison}")
     }
 }
 
@@ -273,7 +570,7 @@ pub fn PlanHubPage() -> impl IntoView {
 }
 
 #[component]
-fn PlanHub(record: PlanRecord) -> impl IntoView {
+pub fn PlanHub(record: PlanRecord) -> impl IntoView {
     let update_metadata = ServerAction::<UpdateSeasonMetadata>::new();
     let id = record.id;
     let form = record.form;
@@ -689,7 +986,7 @@ fn DetailedModeHub(id: i64, form: PlanForm, closed: bool) -> impl IntoView {
                 <span><strong>"วิเคราะห์"</strong><small>"ประสิทธิภาพ ตรวจสอบ ภาษี สถานการณ์"</small></span>
                 <span class="status muted">"เปิด"</span>
             </A>
-            {SECTIONS.into_iter().map(|(slug, title, description)| {
+            {MAIN_SECTIONS.into_iter().map(|(slug, title, description)| {
                 let complete = form.section_complete(slug);
                 view! {
                     <A attr:class="section-card" href=format!("/plans/{id}/{slug}")>
@@ -699,6 +996,14 @@ fn DetailedModeHub(id: i64, form: PlanForm, closed: bool) -> impl IntoView {
                 }
             }).collect_view()}
         </section>
+        <details class="card advanced-planning">
+            <summary>"การวางแผนขั้นสูง (ไม่บังคับ)"</summary>
+            <p>"ตั้งเป้าหมาย KPI ของสวนเองเมื่ออยากใช้เกณฑ์เปรียบเทียบ ส่วนนี้ไม่ขวางผลประมาณการหรือความพร้อมของแผน"</p>
+            <A attr:class="section-card" href=format!("/plans/{id}/targets")>
+                <span><strong>"เป้าหมาย KPI"</strong><small>"ค่าที่ตั้งไว้เดิมยังอยู่และแก้ได้ที่นี่"</small></span>
+                <span aria-hidden="true">"›"</span>
+            </A>
+        </details>
     }
 }
 
@@ -947,7 +1252,7 @@ pub fn PlanSectionRoute() -> impl IntoView {
                         view! { <PlanDashboardView record/> }.into_any(),
                     Ok(Some(record)) if section == "analysis" =>
                         view! { <PlanAnalysisView record/> }.into_any(),
-                    Ok(Some(record)) if SECTIONS.iter().any(|(slug, _, _)| *slug == section) =>
+                    Ok(Some(record)) if EDITABLE_SECTIONS.iter().any(|(slug, _, _)| *slug == section) =>
                         view! { <PlanSectionView record section/> }.into_any(),
                     _ => view! { <section class="card"><h1>"ไม่พบส่วนนี้"</h1><A href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
                 }
@@ -970,7 +1275,7 @@ pub fn PlanSectionView(record: PlanRecord, section: String) -> impl IntoView {
         season_year_label(record.season_year),
         form.get().name
     );
-    let title = SECTIONS
+    let title = EDITABLE_SECTIONS
         .iter()
         .find(|(slug, _, _)| *slug == section)
         .map(|(_, title, _)| *title)
@@ -1092,7 +1397,7 @@ fn FixedCostFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
 #[component]
 fn TargetFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
     view! { <section class="card field-stack">
-        <p class="section-intro">"เป้าหมายเป็นตัวเลขของเจ้าของสวน ระบบจะไม่เดาให้ ถ้าเว้นว่าง หน้าวิเคราะห์จะแสดงว่ายังไม่ได้ตั้งเป้า"</p>
+        <p class="section-intro">"ส่วนขั้นสูงนี้ไม่บังคับ เป้าหมายเป็นตัวเลขของเจ้าของสวน ระบบจะไม่เดาให้ ถ้าเว้นว่าง หน้าวิเคราะห์จะไม่ตัดสินว่าผ่านหรือไม่ผ่าน"</p>
         <PlanField label="ผลผลิตต่อไร่" unit="กก./ไร่" numeric=true value=Signal::derive(move || form.get().targets.yield_per_rai) on_value=Callback::new(move |v| form.update(|f| f.targets.yield_per_rai = v)) closed/>
         <PlanField label="ผลผลิตต่อต้น" unit="กก./ต้น" numeric=true value=Signal::derive(move || form.get().targets.yield_per_tree) on_value=Callback::new(move |v| form.update(|f| f.targets.yield_per_tree = v)) closed/>
         <PlanField label="ผลผลิตต่อวันแรงงาน" unit="กก./วัน" numeric=true value=Signal::derive(move || form.get().targets.yield_per_labor_day) on_value=Callback::new(move |v| form.update(|f| f.targets.yield_per_labor_day = v)) closed/>
@@ -1174,7 +1479,7 @@ pub(crate) fn BottomNav(plan_id: i64, active: NavSection) -> impl IntoView {
             attr:aria-current=(active == NavSection::Analysis).then_some("page")
             href=format!("/plans/{plan_id}/analysis")
         >"วิเคราะห์"</A>
-        <A href=format!("/plans?from={plan_id}")>"ฤดูกาล"</A>
+        <A href=format!("/history?from={plan_id}")>"ฤดูกาล"</A>
     </nav> }
 }
 

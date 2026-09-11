@@ -7,10 +7,10 @@ use leptos_router::location::RequestUrl;
 use web::{
     plan_form::PlanForm,
     plan_ui::{
-        ActualCloseView, ActualComparisonView, ActualReviewView, DemoPage, PlanSectionView,
-        QuickQuestionView, QuickResultView,
+        ActualCloseView, ActualComparisonView, ActualReviewView, DemoPage, PlanHub,
+        PlanSectionView, QuickQuestionView, QuickResultView, SeasonHistoryView,
     },
-    plans::{ActualOutcomeRecord, PlanRecord},
+    plans::{ActualOutcomeRecord, PlanRecord, SeasonHistoryItem},
 };
 
 const SECTIONS: [(&str, &str); 6] = [
@@ -176,6 +176,72 @@ fn render_actual(view: &str, record: PlanRecord) -> String {
     })
 }
 
+fn outcome_metrics(yield_kg: i64, revenue: i64, cost: i64) -> calc::OutcomeMetrics {
+    let yield_kg = rust_decimal::Decimal::from(yield_kg);
+    let revenue = rust_decimal::Decimal::from(revenue);
+    let cost = rust_decimal::Decimal::from(cost);
+    calc::OutcomeMetrics {
+        sellable_yield_kg: Some(yield_kg),
+        revenue: Some(revenue),
+        total_cost: Some(cost),
+        profit: Some(revenue - cost),
+        average_price_per_kg: (!yield_kg.is_zero()).then(|| revenue / yield_kg),
+        cost_per_kg: (!yield_kg.is_zero()).then(|| cost / yield_kg),
+    }
+}
+
+fn history_item(
+    id: i64,
+    year: i32,
+    name: &str,
+    actual: Option<calc::OutcomeMetrics>,
+    forecast: Option<calc::OutcomeMetrics>,
+) -> SeasonHistoryItem {
+    SeasonHistoryItem {
+        id,
+        name: name.into(),
+        season_year: Some(year),
+        actual_outcome: actual.map(|metrics| ActualOutcomeRecord {
+            outcome: calc::ActualOutcome {
+                sellable_yield_kg: metrics.sellable_yield_kg,
+                revenue: metrics.revenue,
+                total_cost: metrics.total_cost,
+                note: format!("บันทึกฤดู {year}"),
+            },
+            finalized: true,
+            forecast_mode: Some(calc::ForecastMode::Quick),
+            forecast,
+        }),
+    }
+}
+
+fn render_history(items: Vec<SeasonHistoryItem>) -> String {
+    Owner::new().with(move || {
+        provide_context(RequestUrl::new("/history"));
+        let view =
+            view! { <Router><SeasonHistoryView items=items.clone() return_to=None/></Router> };
+        let mut html = String::new();
+        view.to_html_with_buf(
+            &mut html,
+            &mut Position::FirstChild,
+            true,
+            false,
+            Vec::new(),
+        );
+        html
+    })
+}
+
+fn render_history_from(items: Vec<SeasonHistoryItem>, return_to: i64) -> String {
+    Owner::new().with(move || {
+        provide_context(RequestUrl::new(&format!("/history?from={return_to}")));
+        let view = view! { <Router><SeasonHistoryView items=items.clone() return_to=Some(return_to)/></Router> };
+        let mut html = String::new();
+        view.to_html_with_buf(&mut html, &mut Position::FirstChild, true, false, Vec::new());
+        html
+    })
+}
+
 #[test]
 fn demonstration_is_an_editable_browser_surface_not_a_persisting_form() {
     let html = render_demo();
@@ -228,6 +294,108 @@ fn legacy_closed_season_never_renders_synthetic_zero_actuals() {
     assert!(html.contains("ไม่มีผลจริงที่บันทึกไว้"));
     assert!(html.contains("ไม่เติมศูนย์หรือสร้างตัวเลขแทน"));
     assert!(!html.contains("0.00 บาท"));
+}
+
+#[test]
+fn season_history_labels_legacy_baseline_skipped_year_and_fixed_cues() {
+    let baseline = outcome_metrics(20_000, 1_600_000, 900_000);
+    let later = outcome_metrics(18_000, 1_530_000, 990_000);
+    let html = render_history(vec![
+        history_item(
+            30,
+            2571,
+            "ปีหลัง",
+            Some(later.clone()),
+            Some(baseline.clone()),
+        ),
+        history_item(10, 2568, "ปิดแบบเดิม", None, None),
+        history_item(20, 2569, "ปีฐาน", Some(baseline.clone()), Some(baseline)),
+    ]);
+
+    assert!(html.contains("ประวัติฤดูกาล"));
+    assert!(html.contains("ไม่มีผลจริง"));
+    assert!(html.contains("ไม่เติมศูนย์หรือสร้างแนวโน้มแทน"));
+    assert!(html.contains("ปีฐานและยังไม่สรุปว่าเป็นแนวโน้ม"));
+    assert!(html.contains("มีปีที่ข้ามระหว่างสองผลจริง"));
+    assert!(html.contains("ต้นทุนรวม สูงกว่าฤดูกาลก่อน 10.00%"));
+    assert!(html.contains("ผลผลิตที่ขายได้ ต่ำกว่าฤดูกาลก่อน 10.00%"));
+    assert!(html.contains("สูตร: ((ผลจริงปีนี้ - ผลจริงปีก่อน) ÷ |ผลจริงปีก่อน|) × 100"));
+    assert!(html.contains("<table"));
+    assert!(html.contains("scope=\"col\""));
+    assert!(html.contains("scope=\"row\""));
+
+    let legacy_position = html.find("ปิดแบบเดิม").expect("legacy row");
+    let baseline_position = html.find("บันทึกฤดู 2569").expect("baseline row");
+    let later_position = html.find("บันทึกฤดู 2571").expect("later row");
+    assert!(legacy_position < baseline_position && baseline_position < later_position);
+}
+
+#[test]
+fn season_history_names_zero_denominator_as_unavailable_instead_of_zero_percent() {
+    let zero = outcome_metrics(0, 0, 0);
+    let later = outcome_metrics(10, 100, 50);
+    let html = render_history(vec![
+        history_item(1, 2569, "ปีศูนย์", Some(zero.clone()), Some(zero)),
+        history_item(2, 2570, "ปีถัดไป", Some(later.clone()), Some(later)),
+    ]);
+
+    assert!(html.contains("คิดเปอร์เซ็นต์ไม่ได้ เพราะค่าฤดูกาลก่อนเป็นศูนย์"));
+    assert!(html.contains("ไม่มี % เพราะฐานเป็น 0"));
+    assert!(!html.contains("สูงกว่าฤดูกาลก่อน 0.00%"));
+}
+
+#[test]
+fn history_opened_from_a_season_has_an_explicit_route_back() {
+    let metrics = outcome_metrics(10, 100, 50);
+    let html = render_history_from(
+        vec![history_item(
+            42,
+            2569,
+            "ปีฐาน",
+            Some(metrics.clone()),
+            Some(metrics),
+        )],
+        42,
+    );
+
+    assert!(html.contains("‹ กลับไปฤดูกาลที่เปิดอยู่"));
+    assert!(html.contains("href=\"/plans/42\""));
+}
+
+#[test]
+fn detailed_hub_moves_targets_under_an_explicit_advanced_area() {
+    let html = Owner::new().with(move || {
+        provide_context(RequestUrl::new("/plans/42"));
+        let view = view! {
+            <Router>
+                <PlanHub record=PlanRecord {
+                    id: 42,
+                    season_year: Some(2569),
+                    note: String::new(),
+                    closed: false,
+                    forecast_mode: calc::ForecastMode::Detailed,
+                    quick_estimate: calc::QuickEstimate::default(),
+                    actual_outcome: None,
+                    form: PlanForm::from_plan(&calc::workbook_sample()),
+                }/>
+            </Router>
+        };
+        let mut html = String::new();
+        view.to_html_with_buf(
+            &mut html,
+            &mut Position::FirstChild,
+            true,
+            false,
+            Vec::new(),
+        );
+        html
+    });
+
+    assert!(html.contains("การวางแผนขั้นสูง (ไม่บังคับ)"));
+    assert!(html.contains("เป้าหมาย KPI"));
+    assert!(html.contains("ค่าที่ตั้งไว้เดิมยังอยู่และแก้ได้ที่นี่"));
+    assert!(html.contains("/plans/42/targets"));
+    assert_eq!(html.matches("ตัวเลขเปรียบเทียบที่เจ้าของกำหนด").count(), 0);
 }
 
 #[test]
