@@ -281,9 +281,23 @@ async function signIn(browser) {
   await page.fill('input[name="value"]', '20000');
   await page.click('button:has-text("ถัดไป")');
   await page.waitForURL(new RegExp(`/plans/${planId}/quick/price$`));
+
+  // Leaving after one answer and returning through the hub must resume at the
+  // first unanswered question rather than restarting or inventing a result.
+  await page.goto(`${BASE}/plans/${planId}`);
+  await page.click('a:has-text("ทำประมาณการต่อ")');
+  await page.waitForURL(new RegExp(`/plans/${planId}/quick/price$`));
   await page.fill('input[name="value"]', '80');
   await page.click('button:has-text("ถัดไป")');
   await page.waitForURL(new RegExp(`/plans/${planId}/quick/cost$`));
+  await page.goBack({ waitUntil: 'domcontentloaded' });
+  await page.waitForURL(new RegExp(`/plans/${planId}/quick/price$`));
+  if (await page.locator('input[name="value"]').inputValue() !== '80') {
+    throw new Error('browser back lost the persisted quick price');
+  }
+  await page.click('button:has-text("ถัดไป")');
+  await page.waitForURL(new RegExp(`/plans/${planId}/quick/cost$`));
+  await page.reload({ waitUntil: 'domcontentloaded' });
   await page.fill('input[name="value"]', '900000');
   await page.click('button:has-text("ดูผลประมาณการ")');
   await page.waitForURL(new RegExp(`/plans/${planId}/quick/result$`));
@@ -381,35 +395,42 @@ try {
       deviceScaleFactor: 2,
     });
     await context.addCookies(cookies);
-    const page = await context.newPage();
 
     for (const [routeName, url] of routes) {
-      await page.goto(url, { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(250);
-      assess(`${size.name}px ${routeName}`, await inspect(page, size.width), size.width);
+      // Route measurements are independent. A fresh page keeps a transient
+      // explanation, focus state, or hydration navigation from contaminating
+      // the next route's geometry proof.
+      const page = await context.newPage();
+      try {
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(250);
+        assess(`${size.name}px ${routeName}`, await inspect(page, size.width), size.width);
 
-      // Every explanation, one at a time: an open card is the state that failed.
-      // Only visible ones — a panel carrying `hidden` is not on screen to tap.
-      await openEachExplanation(page, size, routeName);
+        // Every explanation, one at a time: an open card is the state that failed.
+        // Only visible ones — a panel carrying `hidden` is not on screen to tap.
+        await openEachExplanation(page, size, routeName);
 
-      if (routeName === 'analysis') {
-        for (const tab of ['ตรวจสอบ', 'ภาษี', 'สถานการณ์']) {
-          const button = page.locator(`button[role="tab"]:has-text("${tab}")`);
-          if (await button.count()) {
-            await ensureClosed(page);
-            await button.click({ timeout: 10000 });
-            await page.waitForTimeout(200);
-            assess(`${size.name}px analysis:${tab}`, await inspect(page, size.width), size.width);
-            await openEachExplanation(page, size, `analysis:${tab}`);
+        if (routeName === 'analysis') {
+          for (const tab of ['ตรวจสอบ', 'ภาษี', 'สถานการณ์']) {
+            const button = page.locator(`button[role="tab"]:has-text("${tab}")`);
+            if (await button.count()) {
+              await ensureClosed(page);
+              await button.click({ timeout: 10000 });
+              await page.waitForTimeout(200);
+              assess(`${size.name}px analysis:${tab}`, await inspect(page, size.width), size.width);
+              await openEachExplanation(page, size, `analysis:${tab}`);
+            }
+          }
+          await ensureClosed(page);
+          const table = page.locator('details.scenario-table:visible > summary');
+          if (await table.count()) {
+            await table.click({ timeout: 10000 });
+            await page.waitForTimeout(250);
+            assess(`${size.name}px analysis:table`, await inspect(page, size.width), size.width);
           }
         }
-        await ensureClosed(page);
-        const table = page.locator('details.scenario-table:visible > summary');
-        if (await table.count()) {
-          await table.click({ timeout: 10000 });
-          await page.waitForTimeout(250);
-          assess(`${size.name}px analysis:table`, await inspect(page, size.width), size.width);
-        }
+      } finally {
+        await page.close();
       }
     }
     await context.close();
