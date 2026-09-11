@@ -264,6 +264,58 @@ async fn list_returns_only_the_owners_plans_and_closed_state(
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn history_is_owner_scoped_chronological_and_keeps_missing_actual_explicit(
+    pool: PgPool,
+) -> Result<(), StoreError> {
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let other = users::create(&pool, "other@example.test").await?;
+
+    let legacy = plans::create(&pool, owner.id, 2568, "ปิดก่อนมีผลจริง", &workbook_sample()).await?;
+    sqlx::query("UPDATE plans SET closed_at = CURRENT_TIMESTAMP WHERE id = $1 AND owner_id = $2")
+        .bind(legacy.id)
+        .bind(owner.id)
+        .execute(&pool)
+        .await?;
+
+    let baseline = plans::create(&pool, owner.id, 2569, "ปีฐาน", &workbook_sample()).await?;
+    plans::finalize_with_actual(&pool, owner.id, baseline.id, &actual_outcome()).await?;
+    let skipped = plans::create(&pool, owner.id, 2571, "ปีหลังข้ามช่วง", &workbook_sample()).await?;
+    let later_actual = ActualOutcome {
+        sellable_yield_kg: Some(Decimal::from(19_000)),
+        revenue: Some(Decimal::from(1_600_000)),
+        total_cost: Some(Decimal::from(1_000_000)),
+        note: "ข้อมูลปีหลัง".into(),
+    };
+    plans::finalize_with_actual(&pool, owner.id, skipped.id, &later_actual).await?;
+
+    let other_plan = plans::create(&pool, other.id, 2570, "ของคนอื่น", &workbook_sample()).await?;
+    plans::finalize_with_actual(&pool, other.id, other_plan.id, &actual_outcome()).await?;
+
+    let rows = plans::history(&pool, owner.id).await?;
+    assert_eq!(
+        rows.iter().map(|row| row.id).collect::<Vec<_>>(),
+        vec![legacy.id, baseline.id, skipped.id]
+    );
+    assert!(rows[0].actual_outcome.is_none());
+    assert_eq!(
+        rows[1]
+            .actual_outcome
+            .as_ref()
+            .and_then(|actual| actual.forecast.as_ref())
+            .and_then(|forecast| forecast.profit),
+        calc::analyze(&workbook_sample()).business.net_profit
+    );
+    assert_eq!(
+        rows[2]
+            .actual_outcome
+            .as_ref()
+            .map(|actual| actual.outcome.note.as_str()),
+        Some("ข้อมูลปีหลัง")
+    );
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn one_owner_cannot_create_two_seasons_for_the_same_year(
     pool: PgPool,
 ) -> Result<(), StoreError> {

@@ -32,10 +32,24 @@ pub struct ActualOutcomeRecord {
     pub forecast: Option<calc::OutcomeMetrics>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SeasonHistoryItem {
+    pub id: i64,
+    pub name: String,
+    pub season_year: Option<i32>,
+    pub actual_outcome: Option<ActualOutcomeRecord>,
+}
+
 #[server]
 pub async fn list_plans() -> Result<Vec<PlanSummary>, ServerFnError> {
     let (pool, owner_id) = authenticated_owner().await?;
     list_for_owner(&pool, owner_id).await
+}
+
+#[server]
+pub async fn load_season_history() -> Result<Vec<SeasonHistoryItem>, ServerFnError> {
+    let (pool, owner_id) = authenticated_owner().await?;
+    history_for_owner(&pool, owner_id).await
 }
 
 #[server]
@@ -162,6 +176,26 @@ pub async fn list_for_owner(
                     season_year: summary.season_year,
                     note: summary.note,
                     closed: summary.closed,
+                })
+                .collect()
+        })
+        .map_err(public_store_error)
+}
+
+#[cfg(feature = "ssr")]
+pub async fn history_for_owner(
+    pool: &sqlx::PgPool,
+    owner_id: store::users::UserId,
+) -> Result<Vec<SeasonHistoryItem>, ServerFnError> {
+    store::plans::history(pool, owner_id)
+        .await
+        .map(|rows| {
+            rows.into_iter()
+                .map(|row| SeasonHistoryItem {
+                    id: row.id,
+                    name: row.name,
+                    season_year: row.season_year,
+                    actual_outcome: row.actual_outcome.map(actual_record),
                 })
                 .collect()
         })
@@ -331,13 +365,18 @@ fn record(stored: store::plans::StoredPlan) -> PlanRecord {
         closed: stored.closed,
         forecast_mode: stored.forecast_mode,
         quick_estimate: stored.quick_estimate,
-        actual_outcome: stored.actual_outcome.map(|actual| ActualOutcomeRecord {
-            outcome: actual.outcome,
-            finalized: actual.finalized,
-            forecast_mode: actual.forecast_mode,
-            forecast: actual.forecast,
-        }),
+        actual_outcome: stored.actual_outcome.map(actual_record),
         form: PlanForm::from_plan(&stored.plan),
+    }
+}
+
+#[cfg(feature = "ssr")]
+fn actual_record(actual: store::plans::StoredActualOutcome) -> ActualOutcomeRecord {
+    ActualOutcomeRecord {
+        outcome: actual.outcome,
+        finalized: actual.finalized,
+        forecast_mode: actual.forecast_mode,
+        forecast: actual.forecast,
     }
 }
 

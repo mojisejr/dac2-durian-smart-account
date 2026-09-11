@@ -65,11 +65,18 @@ pub fn forecast_metrics(
 
 pub fn compare(forecast: &OutcomeMetrics, actual: &ActualOutcome) -> Vec<MetricComparison> {
     let actual = crate::analyze_actual(actual).metrics;
+    compare_metrics(forecast, &actual)
+}
+
+pub fn compare_metrics(
+    forecast: &OutcomeMetrics,
+    actual: &OutcomeMetrics,
+) -> Vec<MetricComparison> {
     ComparisonMetric::ALL
         .into_iter()
         .map(|metric| {
             let forecast_value = metric_value(forecast, metric);
-            let actual_value = metric_value(&actual, metric);
+            let actual_value = metric_value(actual, metric);
             MetricComparison {
                 metric,
                 forecast: forecast_value,
@@ -82,7 +89,7 @@ pub fn compare(forecast: &OutcomeMetrics, actual: &ActualOutcome) -> Vec<MetricC
         .collect()
 }
 
-fn metric_value(metrics: &OutcomeMetrics, metric: ComparisonMetric) -> Option<Decimal> {
+pub(crate) fn metric_value(metrics: &OutcomeMetrics, metric: ComparisonMetric) -> Option<Decimal> {
     match metric {
         ComparisonMetric::SellableYieldKg => metrics.sellable_yield_kg,
         ComparisonMetric::Revenue => metrics.revenue,

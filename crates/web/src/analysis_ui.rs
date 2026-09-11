@@ -21,14 +21,11 @@ use crate::{
 
 /// Shown wherever a figure cannot be computed from what the owner has entered.
 const ABSENT: &str = "ยังไม่มีข้อมูล";
-const NO_TARGET: &str = "ยังไม่ได้ตั้งเป้า";
-
-const SECTION_TITLES: [(&str, &str); 6] = [
+const SECTION_TITLES: [(&str, &str); 5] = [
     ("market", "ตลาด"),
     ("production", "ผลผลิตและเกรด"),
     ("variable-costs", "ต้นทุนผันแปร"),
     ("fixed-costs", "ต้นทุนคงที่"),
-    ("targets", "เป้าหมาย"),
     ("health", "สุขภาพสวน"),
 ];
 
@@ -337,7 +334,7 @@ fn AnalysisLinks(id: i64) -> impl IntoView {
                 <span class="status muted">"เปิด"</span>
             </A>
             <A attr:class="section-card" href=format!("/plans/{id}")>
-                <span><strong>"กรอกข้อมูล"</strong><small>"หกส่วนของแผนฤดูกาลนี้"</small></span>
+                <span><strong>"กรอกข้อมูล"</strong><small>"ห้าส่วนหลักของแผนฤดูกาลนี้"</small></span>
                 <span class="status muted">"เปิด"</span>
             </A>
         </section>
@@ -420,7 +417,8 @@ fn EfficiencyPanel(id: i64, kpis: Vec<KpiResult>, health: calc::HealthAnalysis) 
     view! {
         <section class="card kpi-list">
             <h2>"ประสิทธิภาพ"</h2>
-            {kpis.into_iter().map(|kpi| view! { <KpiRow id kpi/> }).collect_view()}
+            <p class="caption">"แสดงเฉพาะตัวชี้วัดที่มีปริมาณและหน่วยสำหรับคำนวณ ส่วนข้อมูลที่ไม่กรอกจะไม่ถูกนับว่าไม่ครบ"</p>
+            {kpis.into_iter().filter(|kpi| kpi.actual.is_some()).map(|kpi| view! { <KpiRow id kpi/> }).collect_view()}
         </section>
         <section class="card figure-list">
             <div class="section-title">
@@ -480,7 +478,7 @@ fn KpiRow(id: i64, kpi: KpiResult) -> impl IntoView {
                     }.into_any()
                 }
                 _ => view! {
-                    <A attr:class="kpi-no-target" href=format!("/plans/{id}/targets")>{NO_TARGET}</A>
+                    <A attr:class="kpi-no-target" href=format!("/plans/{id}/targets")>"ตั้งเป้าในขั้นสูง"</A>
                 }.into_any(),
             }}
         </div>

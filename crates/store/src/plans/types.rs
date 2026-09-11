@@ -36,6 +36,14 @@ pub struct StoredActualOutcome {
     pub forecast: Option<OutcomeMetrics>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct StoredSeasonHistory {
+    pub id: PlanId,
+    pub name: String,
+    pub season_year: Option<i32>,
+    pub actual_outcome: Option<StoredActualOutcome>,
+}
+
 #[derive(Debug)]
 pub enum StoreError {
     Database(sqlx::Error),

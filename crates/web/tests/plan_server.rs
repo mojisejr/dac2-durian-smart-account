@@ -150,6 +150,21 @@ async fn plan_flow(auth_session: store::AuthSession) -> StatusCode {
     {
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
+    let history = match web::plans::history_for_owner(pool, user.id).await {
+        Ok(history) => history,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    if history.len() != 1
+        || history[0].id != created.id
+        || history[0]
+            .actual_outcome
+            .as_ref()
+            .and_then(|actual| actual.forecast.as_ref())
+            .and_then(|forecast| forecast.profit)
+            .is_none()
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
     if web::plans::save_for_owner(pool, user.id, created.id, &form)
         .await
         .is_ok()

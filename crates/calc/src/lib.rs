@@ -21,6 +21,7 @@ pub mod sample;
 pub mod scenario;
 pub mod targets;
 pub mod tax;
+pub mod trend;
 pub mod validation;
 
 pub use actual::*;
@@ -30,6 +31,7 @@ pub use plan::*;
 pub use quick::*;
 pub use sample::workbook_sample;
 pub use targets::*;
+pub use trend::*;
 pub use validation::*;
 
 /// Calculate every derived workbook surface from one input aggregate.
