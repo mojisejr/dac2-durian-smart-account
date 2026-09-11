@@ -6,8 +6,11 @@ use leptos_router::components::Router;
 use leptos_router::location::RequestUrl;
 use web::{
     plan_form::PlanForm,
-    plan_ui::{DemoPage, PlanSectionView, QuickQuestionView, QuickResultView},
-    plans::PlanRecord,
+    plan_ui::{
+        ActualCloseView, ActualComparisonView, ActualReviewView, DemoPage, PlanSectionView,
+        QuickQuestionView, QuickResultView,
+    },
+    plans::{ActualOutcomeRecord, PlanRecord},
 };
 
 const SECTIONS: [(&str, &str); 6] = [
@@ -33,6 +36,7 @@ fn render(section: &str, closed: bool, form: PlanForm) -> String {
                         closed,
                         forecast_mode: calc::ForecastMode::Detailed,
                         quick_estimate: calc::QuickEstimate::default(),
+                        actual_outcome: None,
                         form: form.clone(),
                     }
                     section=section.clone()
@@ -75,6 +79,7 @@ fn quick_record(estimate: calc::QuickEstimate, closed: bool) -> PlanRecord {
         closed,
         forecast_mode: calc::ForecastMode::Quick,
         quick_estimate: estimate,
+        actual_outcome: None,
         form: PlanForm::from_plan(&calc::Plan::default()),
     }
 }
@@ -119,6 +124,58 @@ fn render_quick_result(estimate: calc::QuickEstimate) -> String {
     })
 }
 
+fn actual_record(finalized: bool) -> PlanRecord {
+    let quick = calc::QuickEstimate {
+        sellable_yield_kg: Some(rust_decimal::Decimal::from(20_000)),
+        average_price_per_kg: Some(rust_decimal::Decimal::from(80)),
+        total_cost: Some(rust_decimal::Decimal::from(900_000)),
+    };
+    let outcome = calc::ActualOutcome {
+        sellable_yield_kg: Some(rust_decimal::Decimal::from(18_000)),
+        revenue: Some(rust_decimal::Decimal::from(1_530_000)),
+        total_cost: Some(rust_decimal::Decimal::from(990_000)),
+        note: "ผลผลิตน้อยกว่าคาด".into(),
+    };
+    let forecast = finalized
+        .then(|| calc::forecast_metrics(calc::ForecastMode::Quick, &quick, &calc::Plan::default()));
+    PlanRecord {
+        id: 42,
+        season_year: Some(2569),
+        note: String::new(),
+        closed: finalized,
+        forecast_mode: calc::ForecastMode::Quick,
+        quick_estimate: quick,
+        actual_outcome: Some(ActualOutcomeRecord {
+            outcome,
+            finalized,
+            forecast_mode: finalized.then_some(calc::ForecastMode::Quick),
+            forecast,
+        }),
+        form: PlanForm::from_plan(&calc::Plan::default()),
+    }
+}
+
+fn render_actual(view: &str, record: PlanRecord) -> String {
+    let view = view.to_owned();
+    Owner::new().with(move || {
+        provide_context(RequestUrl::new("/plans/42/close"));
+        let rendered = match view.as_str() {
+            "entry" => view! { <Router><ActualCloseView record=record/></Router> }.into_any(),
+            "review" => view! { <Router><ActualReviewView record=record/></Router> }.into_any(),
+            _ => view! { <Router><ActualComparisonView record=record/></Router> }.into_any(),
+        };
+        let mut html = String::new();
+        rendered.to_html_with_buf(
+            &mut html,
+            &mut Position::FirstChild,
+            true,
+            false,
+            Vec::new(),
+        );
+        html
+    })
+}
+
 #[test]
 fn demonstration_is_an_editable_browser_surface_not_a_persisting_form() {
     let html = render_demo();
@@ -126,6 +183,51 @@ fn demonstration_is_an_editable_browser_surface_not_a_persisting_form() {
     assert!(html.contains("คืนค่าตัวอย่าง"));
     assert!(html.contains("สร้างฤดูกาลของฉัน"));
     assert!(!html.contains("<form"));
+}
+
+#[test]
+fn actual_entry_prefills_a_saved_draft_but_does_not_close_directly() {
+    let html = render_actual("entry", actual_record(false));
+    assert!(html.contains("บันทึกผลจริง"));
+    assert!(html.contains("18,000") || html.contains("18000"));
+    assert!(html.contains("บันทึกและตรวจทาน"));
+    assert!(html.contains("ยกเลิก · เก็บฤดูกาลไว้เปิดอยู่"));
+    assert!(!html.contains("ยืนยันผลจริงและปิดฤดูกาล"));
+}
+
+#[test]
+fn actual_review_names_the_irreversible_step_and_all_source_facts() {
+    let html = render_actual("review", actual_record(false));
+    assert!(html.contains("ตรวจทานก่อนปิดฤดูกาล"));
+    assert!(html.contains("18,000.00 กก."));
+    assert!(html.contains("1,530,000.00 บาท"));
+    assert!(html.contains("990,000.00 บาท"));
+    assert!(html.contains("540,000.00 บาท"));
+    assert!(html.contains("ยืนยันผลจริงและปิดฤดูกาล"));
+    assert!(html.contains("กลับไปแก้ผลจริง"));
+}
+
+#[test]
+fn final_comparison_names_source_formula_direction_and_unavailable_rules() {
+    let html = render_actual("comparison", actual_record(true));
+    assert!(html.contains("ผลจริงเทียบประมาณการ"));
+    assert!(html.contains("แหล่งประมาณการ: ประมาณการเร็ว"));
+    assert!(html.contains("ผลต่าง = ผลจริง - ประมาณการ"));
+    assert!(html.contains("ต่ำกว่าประมาณการ 2,000.00 กก."));
+    assert!(html.contains("สูงกว่าประมาณการ 90,000.00 บาท"));
+    assert!(html.contains("ต่ำกว่าประมาณการ 160,000.00 บาท"));
+    assert!(html.contains("ผลผลิตน้อยกว่าคาด"));
+}
+
+#[test]
+fn legacy_closed_season_never_renders_synthetic_zero_actuals() {
+    let html = render_actual(
+        "comparison",
+        quick_record(calc::QuickEstimate::default(), true),
+    );
+    assert!(html.contains("ไม่มีผลจริงที่บันทึกไว้"));
+    assert!(html.contains("ไม่เติมศูนย์หรือสร้างตัวเลขแทน"));
+    assert!(!html.contains("0.00 บาท"));
 }
 
 #[test]

@@ -28,6 +28,7 @@ fn render_with(form: PlanForm, analysis_view: bool) -> String {
             closed: false,
             forecast_mode: calc::ForecastMode::Detailed,
             quick_estimate: calc::QuickEstimate::default(),
+            actual_outcome: None,
             form: form.clone(),
         };
         let view = if analysis_view {

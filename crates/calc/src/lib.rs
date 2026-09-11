@@ -6,9 +6,11 @@
 //! [`Plan`] is transformed deterministically into an [`Analysis`] by
 //! [`analyze`], and the same code builds for native Rust and WebAssembly.
 
+pub mod actual;
 pub mod analysis;
 pub mod breakeven;
 pub mod checks;
+pub mod comparison;
 pub mod cost;
 pub mod efficiency;
 pub mod health;
@@ -21,7 +23,9 @@ pub mod targets;
 pub mod tax;
 pub mod validation;
 
+pub use actual::*;
 pub use analysis::*;
+pub use comparison::*;
 pub use plan::*;
 pub use quick::*;
 pub use sample::workbook_sample;

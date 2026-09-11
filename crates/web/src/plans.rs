@@ -20,7 +20,16 @@ pub struct PlanRecord {
     pub closed: bool,
     pub forecast_mode: calc::ForecastMode,
     pub quick_estimate: calc::QuickEstimate,
+    pub actual_outcome: Option<ActualOutcomeRecord>,
     pub form: PlanForm,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ActualOutcomeRecord {
+    pub outcome: calc::ActualOutcome,
+    pub finalized: bool,
+    pub forecast_mode: Option<calc::ForecastMode>,
+    pub forecast: Option<calc::OutcomeMetrics>,
 }
 
 #[server]
@@ -106,10 +115,25 @@ pub async fn switch_forecast_mode(id: i64, mode: String) -> Result<(), ServerFnE
 }
 
 #[server]
-pub async fn close_plan(id: i64) -> Result<(), ServerFnError> {
+pub async fn save_actual_draft(
+    id: i64,
+    sellable_yield_kg: String,
+    revenue: String,
+    total_cost: String,
+    note: String,
+) -> Result<(), ServerFnError> {
     let (pool, owner_id) = authenticated_owner().await?;
-    close_for_owner(&pool, owner_id, id).await?;
-    leptos_axum::redirect(&format!("/plans/{id}"));
+    let outcome = valid_actual_outcome(&sellable_yield_kg, &revenue, &total_cost, &note)?;
+    save_actual_draft_for_owner(&pool, owner_id, id, &outcome).await?;
+    leptos_axum::redirect(&format!("/plans/{id}/close/review"));
+    Ok(())
+}
+
+#[server]
+pub async fn finalize_actual(id: i64) -> Result<(), ServerFnError> {
+    let (pool, owner_id) = authenticated_owner().await?;
+    finalize_actual_for_owner(&pool, owner_id, id).await?;
+    leptos_axum::redirect(&format!("/plans/{id}/comparison"));
     Ok(())
 }
 
@@ -265,13 +289,36 @@ pub async fn update_metadata_for_owner(
 }
 
 #[cfg(feature = "ssr")]
-pub async fn close_for_owner(
+pub async fn save_actual_draft_for_owner(
     pool: &sqlx::PgPool,
     owner_id: store::users::UserId,
     id: i64,
-) -> Result<(), ServerFnError> {
-    store::plans::close(pool, owner_id, id)
+    outcome: &calc::ActualOutcome,
+) -> Result<PlanRecord, ServerFnError> {
+    store::plans::save_actual_draft(pool, owner_id, id, outcome)
         .await
+        .map(record)
+        .map_err(public_store_error)
+}
+
+#[cfg(feature = "ssr")]
+pub async fn finalize_actual_for_owner(
+    pool: &sqlx::PgPool,
+    owner_id: store::users::UserId,
+    id: i64,
+) -> Result<PlanRecord, ServerFnError> {
+    let stored = store::plans::load(pool, owner_id, id)
+        .await
+        .map_err(public_store_error)?
+        .ok_or_else(|| ServerFnError::new("ไม่พบฤดูกาลนี้"))?;
+    let outcome = stored
+        .actual_outcome
+        .as_ref()
+        .map(|actual| actual.outcome.clone())
+        .ok_or_else(|| ServerFnError::new("กรุณากรอกผลจริงก่อนตรวจทานและปิดฤดูกาล"))?;
+    store::plans::finalize_with_actual(pool, owner_id, id, &outcome)
+        .await
+        .map(record)
         .map_err(public_store_error)
 }
 
@@ -284,6 +331,12 @@ fn record(stored: store::plans::StoredPlan) -> PlanRecord {
         closed: stored.closed,
         forecast_mode: stored.forecast_mode,
         quick_estimate: stored.quick_estimate,
+        actual_outcome: stored.actual_outcome.map(|actual| ActualOutcomeRecord {
+            outcome: actual.outcome,
+            finalized: actual.finalized,
+            forecast_mode: actual.forecast_mode,
+            forecast: actual.forecast,
+        }),
         form: PlanForm::from_plan(&stored.plan),
     }
 }
@@ -330,6 +383,46 @@ fn valid_note(value: &str) -> Result<&str, ServerFnError> {
         return Err(ServerFnError::new("บันทึกยาวเกิน 2,000 ตัวอักษร"));
     }
     Ok(value)
+}
+
+#[cfg_attr(not(feature = "ssr"), allow(dead_code))]
+fn valid_actual_outcome(
+    sellable_yield_kg: &str,
+    revenue: &str,
+    total_cost: &str,
+    note: &str,
+) -> Result<calc::ActualOutcome, ServerFnError> {
+    Ok(calc::ActualOutcome {
+        sellable_yield_kg: Some(valid_actual_value(sellable_yield_kg, "ผลผลิตที่ขายได้จริง")?),
+        revenue: Some(valid_actual_value(revenue, "รายได้จริง")?),
+        total_cost: Some(valid_actual_value(total_cost, "ต้นทุนรวมจริง")?),
+        note: valid_note(note)?.into(),
+    })
+}
+
+#[cfg_attr(not(feature = "ssr"), allow(dead_code))]
+fn valid_actual_value(
+    value: &str,
+    label: &'static str,
+) -> Result<rust_decimal::Decimal, ServerFnError> {
+    use std::str::FromStr;
+
+    let normalized = value.trim().replace(',', "");
+    if normalized.is_empty() {
+        return Err(ServerFnError::new(format!("กรุณากรอก{label}")));
+    }
+    let parsed = rust_decimal::Decimal::from_str(&normalized)
+        .map_err(|_| ServerFnError::new(format!("{label}ต้องเป็นตัวเลข")))?;
+    if parsed < rust_decimal::Decimal::ZERO {
+        return Err(ServerFnError::new(format!("{label}ต้องไม่ติดลบ")));
+    }
+    let maximum = rust_decimal::Decimal::from(1_000_000_000_000_i64);
+    if parsed > maximum {
+        return Err(ServerFnError::new(format!(
+            "{label}สูงเกินขอบเขตที่ระบบคำนวณได้"
+        )));
+    }
+    Ok(parsed)
 }
 
 #[cfg_attr(not(feature = "ssr"), allow(dead_code))]
@@ -448,6 +541,28 @@ mod tests {
                 .to_string()
                 .contains("สูงเกินขอบเขต")
         );
+    }
+
+    #[test]
+    fn actual_values_accept_real_zeroes_but_reject_missing_negative_and_extreme_values() {
+        assert_eq!(
+            valid_actual_value("0", "ผลผลิตจริง").expect("a zero-yield season is real"),
+            rust_decimal::Decimal::ZERO
+        );
+        assert!(
+            valid_actual_value("", "ผลผลิตจริง")
+                .expect_err("blank fails")
+                .to_string()
+                .contains("กรุณากรอกผลผลิตจริง")
+        );
+        assert!(
+            valid_actual_value("-1", "รายได้จริง")
+                .expect_err("negative fails")
+                .to_string()
+                .contains("รายได้จริงต้องไม่ติดลบ")
+        );
+        assert!(valid_actual_value("1000000000001", "ต้นทุนจริง").is_err());
+        assert!(valid_actual_outcome("1", "2", "3", &"ก".repeat(2_001)).is_err());
     }
 
     #[test]

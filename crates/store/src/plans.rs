@@ -3,9 +3,9 @@ mod read;
 mod types;
 mod write;
 
-pub use types::{PlanId, PlanSummary, StoreError, StoredPlan};
+pub use types::{PlanId, PlanSummary, StoreError, StoredActualOutcome, StoredPlan};
 
-use calc::{ForecastMode, Plan, QuickEstimate};
+use calc::{ActualOutcome, ForecastMode, Plan, QuickEstimate};
 use sqlx::{PgConnection, PgPool, Row};
 
 use crate::users::UserId;
@@ -108,6 +108,7 @@ async fn create_with_mode(
         closed: false,
         forecast_mode,
         quick_estimate: quick_estimate.clone(),
+        actual_outcome: None,
         plan: plan.clone(),
     })
 }
@@ -211,16 +212,129 @@ pub async fn update_metadata(
     Ok(())
 }
 
-pub async fn close(pool: &PgPool, owner_id: UserId, id: PlanId) -> Result<(), StoreError> {
+pub async fn save_actual_draft(
+    pool: &PgPool,
+    owner_id: UserId,
+    id: PlanId,
+    outcome: &ActualOutcome,
+) -> Result<StoredPlan, StoreError> {
     let mut transaction = pool.begin().await?;
     ensure_open(transaction.as_mut(), owner_id, id).await?;
+    sqlx::query(
+        "INSERT INTO season_actual_outcomes (
+            plan_id, owner_id, sellable_yield_kg, revenue, total_cost, note
+         ) VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (plan_id) DO UPDATE SET
+            sellable_yield_kg = EXCLUDED.sellable_yield_kg,
+            revenue = EXCLUDED.revenue,
+            total_cost = EXCLUDED.total_cost,
+            note = EXCLUDED.note",
+    )
+    .bind(id)
+    .bind(owner_id)
+    .bind(outcome.sellable_yield_kg)
+    .bind(outcome.revenue)
+    .bind(outcome.total_cost)
+    .bind(outcome.note.trim())
+    .execute(transaction.as_mut())
+    .await?;
+    transaction.commit().await?;
+    load(pool, owner_id, id).await?.ok_or(StoreError::NotFound)
+}
+
+pub async fn finalize_with_actual(
+    pool: &PgPool,
+    owner_id: UserId,
+    id: PlanId,
+    outcome: &ActualOutcome,
+) -> Result<StoredPlan, StoreError> {
+    let mut transaction = pool.begin().await?;
+    let row = sqlx::query(
+        "SELECT closed_at IS NOT NULL AS closed FROM plans
+         WHERE id = $1 AND owner_id = $2 FOR UPDATE",
+    )
+    .bind(id)
+    .bind(owner_id)
+    .fetch_optional(transaction.as_mut())
+    .await?;
+    let Some(row) = row else {
+        return Err(StoreError::NotFound);
+    };
+
+    if row.try_get::<bool, _>("closed")? {
+        let existing = read::load(transaction.as_mut(), owner_id, id)
+            .await?
+            .ok_or(StoreError::NotFound)?;
+        if existing
+            .actual_outcome
+            .as_ref()
+            .is_some_and(|actual| actual.finalized && actual.outcome == normalized(outcome))
+        {
+            transaction.commit().await?;
+            return Ok(existing);
+        }
+        return Err(StoreError::Closed);
+    }
+
+    if !calc::analyze_actual(outcome).input_issues.is_empty() {
+        return Err(StoreError::InvalidValue {
+            field: "season_actual_outcomes",
+            value: "incomplete or negative actual facts".into(),
+        });
+    }
+
+    let stored = read::load(transaction.as_mut(), owner_id, id)
+        .await?
+        .ok_or(StoreError::NotFound)?;
+    let forecast =
+        calc::forecast_metrics(stored.forecast_mode, &stored.quick_estimate, &stored.plan);
+    let outcome = normalized(outcome);
+    sqlx::query(
+        "INSERT INTO season_actual_outcomes (
+            plan_id, owner_id, sellable_yield_kg, revenue, total_cost, note,
+            finalized_at, forecast_mode, forecast_sellable_yield_kg,
+            forecast_revenue, forecast_total_cost, forecast_profit,
+            forecast_average_price_per_kg, forecast_cost_per_kg
+         ) VALUES (
+            $1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, $7, $8, $9, $10,
+            $11, $12, $13
+         )
+         ON CONFLICT (plan_id) DO UPDATE SET
+            sellable_yield_kg = EXCLUDED.sellable_yield_kg,
+            revenue = EXCLUDED.revenue,
+            total_cost = EXCLUDED.total_cost,
+            note = EXCLUDED.note,
+            finalized_at = EXCLUDED.finalized_at,
+            forecast_mode = EXCLUDED.forecast_mode,
+            forecast_sellable_yield_kg = EXCLUDED.forecast_sellable_yield_kg,
+            forecast_revenue = EXCLUDED.forecast_revenue,
+            forecast_total_cost = EXCLUDED.forecast_total_cost,
+            forecast_profit = EXCLUDED.forecast_profit,
+            forecast_average_price_per_kg = EXCLUDED.forecast_average_price_per_kg,
+            forecast_cost_per_kg = EXCLUDED.forecast_cost_per_kg",
+    )
+    .bind(id)
+    .bind(owner_id)
+    .bind(outcome.sellable_yield_kg)
+    .bind(outcome.revenue)
+    .bind(outcome.total_cost)
+    .bind(&outcome.note)
+    .bind(codec::forecast_mode(stored.forecast_mode))
+    .bind(forecast.sellable_yield_kg)
+    .bind(forecast.revenue)
+    .bind(forecast.total_cost)
+    .bind(forecast.profit)
+    .bind(forecast.average_price_per_kg)
+    .bind(forecast.cost_per_kg)
+    .execute(transaction.as_mut())
+    .await?;
     sqlx::query("UPDATE plans SET closed_at = CURRENT_TIMESTAMP WHERE id = $1 AND owner_id = $2")
         .bind(id)
         .bind(owner_id)
         .execute(transaction.as_mut())
         .await?;
     transaction.commit().await?;
-    Ok(())
+    load(pool, owner_id, id).await?.ok_or(StoreError::NotFound)
 }
 
 pub async fn delete(pool: &PgPool, owner_id: UserId, id: PlanId) -> Result<(), StoreError> {
@@ -279,8 +393,18 @@ pub async fn duplicate(
         closed: false,
         forecast_mode,
         quick_estimate: source.quick_estimate,
+        actual_outcome: None,
         plan: source.plan,
     })
+}
+
+fn normalized(outcome: &ActualOutcome) -> ActualOutcome {
+    ActualOutcome {
+        sellable_yield_kg: outcome.sellable_yield_kg,
+        revenue: outcome.revenue,
+        total_cost: outcome.total_cost,
+        note: outcome.note.trim().into(),
+    }
 }
 
 fn season_write_error(error: sqlx::Error) -> StoreError {

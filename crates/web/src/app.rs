@@ -9,7 +9,8 @@ use crate::auth::{
     Login, Register, RequestPasswordReset, ResendVerification, ResetPassword, VerifyEmail,
 };
 use crate::plan_ui::{
-    DemoPage, NewSeasonPage, PlanHubPage, PlanSectionRoute, PlansPage, QuickPlanRoute,
+    ActualClosePage, ActualComparisonPage, ActualReviewPage, DemoPage, NewSeasonPage, PlanHubPage,
+    PlanSectionRoute, PlansPage, QuickPlanRoute,
 };
 
 #[component]
@@ -32,6 +33,9 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("plans/new") view=NewSeasonPage/>
                     <Route path=path!("plans/:id") view=PlanHubPage/>
                     <Route path=path!("plans/:id/quick/:step") view=QuickPlanRoute/>
+                    <Route path=path!("plans/:id/close") view=ActualClosePage/>
+                    <Route path=path!("plans/:id/close/review") view=ActualReviewPage/>
+                    <Route path=path!("plans/:id/comparison") view=ActualComparisonPage/>
                     <Route path=path!("plans/:id/:section") view=PlanSectionRoute/>
                 </Routes>
             </main>

@@ -1,6 +1,6 @@
 # DAC2 — Design
 
-**Status:** draft, revision 0.4
+**Status:** draft, revision 0.5
 **Home:** this file moves to the application repository root in slice 1. There is
 one copy of it, never two.
 
@@ -331,9 +331,31 @@ navigation.
 the KPI that needs it has no verdict to give.
 
 The hub edits year, name, and note while the season is open. Its management
-area holds `ทำฤดูกาลถัดไปจากฤดูนี้` and `ปิดฤดูกาล`. Reset belongs only to the
-browser demonstration; a real season is never mistaken for disposable sample
-data.
+area holds `ทำฤดูกาลถัดไปจากฤดูนี้` and
+`บันทึกผลจริงและปิดฤดูกาล`. Reset belongs only to the browser demonstration; a
+real season is never mistaken for disposable sample data.
+
+### บันทึกผลจริงและปิดฤดูกาล
+
+Closing is a review flow, never an immediate destructive button. The entry
+screen asks for `ผลผลิตที่ขายได้จริง`, `รายได้จริง`,
+`ต้นทุนรวมจริงโดยประมาณ`, and the optional
+`บันทึกว่าเกิดอะไรขึ้น (ไม่บังคับ)`. Its primary action is
+`บันทึกและตรวจทาน`; `ยกเลิก · เก็บฤดูกาลไว้เปิดอยู่` returns to the season
+without discarding a previously saved draft.
+
+The review screen is headed `ตรวจทานก่อนปิดฤดูกาล`, repeats the three source
+facts, derives `กำไรหรือขาดทุนจริง`, and offers `กลับไปแก้ผลจริง`,
+`ยกเลิก · ยังไม่ปิดฤดูกาล`, and the one destructive action
+`ยืนยันผลจริงและปิดฤดูกาล`. Only that final action freezes both the actual
+outcome and the active forecast and makes the season read-only.
+
+The comparison screen leads with `ผลจริง` and actual profit or loss. Six cards
+then show sellable yield, revenue, total cost, profit, average price, and cost
+per kilogram. Every card names `ประมาณการ`, `ผลจริง`, the neutral direction,
+and `ผลต่าง = ผลจริง - ประมาณการ`. Missing mathematics says
+`ยังเปรียบเทียบไม่ได้`; a legacy closed season says
+`ไม่มีผลจริงที่บันทึกไว้` and never displays synthetic zeroes.
 
 ### ประมาณการผลผลิต — grade mix
 
@@ -499,9 +521,13 @@ dependency is that yield comes before anything can be computed at all.
 ### Closing a season, and starting the next
 
 ```
-กรอกข้อมูล › ⋯ › ปิดฤดูกาล
+กรอกข้อมูล › บันทึกผลจริงและปิดฤดูกาล
         ↓
-  ยืนยัน → ฤดู 2569 กลายเป็นอ่านอย่างเดียว
+  กรอกผลผลิต รายได้ ต้นทุน และบันทึก → บันทึกและตรวจทาน
+        ↓
+  ตรวจทาน → ยืนยันผลจริงและปิดฤดูกาล
+        ↓
+  เห็นผลจริงเทียบประมาณการ → ฤดู 2569 กลายเป็นอ่านอย่างเดียว
         ↓
   ทุกหน้าขึ้นแถบ: ฤดูกาลนี้ปิดแล้ว · แก้ไขไม่ได้
                   [ ทำแผนฤดูถัดไปจากฤดูนี้ ]
@@ -513,8 +539,9 @@ dependency is that yield comes before anything can be computed at all.
   ไม่ต้องกรอก 16 บรรทัดใหม่
 ```
 
-Closing and duplicating are one motion on purpose. The moment an owner accepts
-that a season is over is the moment the next one is worth starting.
+Closing keeps `ทำฤดูกาลถัดไปจากฤดูนี้` as the next visible action, but does not
+create another season automatically. The owner still reviews the proposed next
+year, name, and blank note before creation.
 
 ## Explanations
 
