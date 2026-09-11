@@ -18,6 +18,8 @@ pub struct PlanRecord {
     pub season_year: Option<i32>,
     pub note: String,
     pub closed: bool,
+    pub forecast_mode: calc::ForecastMode,
+    pub quick_estimate: calc::QuickEstimate,
     pub form: PlanForm,
 }
 
@@ -42,7 +44,7 @@ pub async fn create_season(
         Some(id) => duplicate_for_owner(&pool, owner_id, id, year, name, note).await?,
         None => create_empty_for_owner(&pool, owner_id, year, name, note).await?,
     };
-    leptos_axum::redirect(&format!("/plans/{}", created.id));
+    leptos_axum::redirect(&format!("/plans/{}/quick/production", created.id));
     Ok(())
 }
 
@@ -74,6 +76,33 @@ pub async fn save_plan(id: i64, form_json: String) -> Result<String, ServerFnErr
         serde_json::from_str(&form_json).map_err(|_| ServerFnError::new("ข้อมูลแบบฟอร์มไม่ถูกต้อง"))?;
     save_for_owner(&pool, owner_id, id, &form).await?;
     Ok("บันทึกแล้ว".into())
+}
+
+#[server]
+pub async fn save_quick_step(id: i64, step: String, value: String) -> Result<(), ServerFnError> {
+    let (pool, owner_id) = authenticated_owner().await?;
+    let field = quick_field(&step)?;
+    let value = valid_quick_value(&value, field)?;
+    save_quick_value_for_owner(&pool, owner_id, id, field, value).await?;
+    leptos_axum::redirect(&quick_next_path(id, field));
+    Ok(())
+}
+
+#[server]
+pub async fn switch_forecast_mode(id: i64, mode: String) -> Result<(), ServerFnError> {
+    let (pool, owner_id) = authenticated_owner().await?;
+    let mode = match mode.as_str() {
+        "quick" => calc::ForecastMode::Quick,
+        "detailed" => calc::ForecastMode::Detailed,
+        _ => return Err(ServerFnError::new("โหมดประมาณการไม่ถูกต้อง")),
+    };
+    let record = set_forecast_mode_for_owner(&pool, owner_id, id, mode).await?;
+    let destination = match mode {
+        calc::ForecastMode::Quick => quick_resume_path(id, &record.quick_estimate),
+        calc::ForecastMode::Detailed => format!("/plans/{id}"),
+    };
+    leptos_axum::redirect(&destination);
+    Ok(())
 }
 
 #[server]
@@ -127,7 +156,7 @@ pub async fn create_empty_for_owner(
         name: name.trim().to_owned(),
         ..calc::Plan::default()
     };
-    store::plans::create(pool, owner_id, season_year, note, &plan)
+    store::plans::create_quick(pool, owner_id, season_year, note, &plan)
         .await
         .map(record)
         .map_err(public_store_error)
@@ -160,6 +189,47 @@ pub async fn save_for_owner(
         ServerFnError::new(message)
     })?;
     store::plans::save(pool, owner_id, id, &plan)
+        .await
+        .map(record)
+        .map_err(public_store_error)
+}
+
+#[cfg(feature = "ssr")]
+pub async fn save_quick_value_for_owner(
+    pool: &sqlx::PgPool,
+    owner_id: store::users::UserId,
+    id: i64,
+    field: calc::QuickInputField,
+    value: rust_decimal::Decimal,
+) -> Result<PlanRecord, ServerFnError> {
+    let Some(stored) = store::plans::load(pool, owner_id, id)
+        .await
+        .map_err(public_store_error)?
+    else {
+        return Err(ServerFnError::new("ไม่พบฤดูกาลนี้"));
+    };
+    let mut estimate = stored.quick_estimate;
+    match field {
+        calc::QuickInputField::SellableYieldKg => estimate.sellable_yield_kg = Some(value),
+        calc::QuickInputField::AveragePricePerKg => {
+            estimate.average_price_per_kg = Some(value);
+        }
+        calc::QuickInputField::TotalCost => estimate.total_cost = Some(value),
+    }
+    store::plans::save_quick(pool, owner_id, id, &estimate)
+        .await
+        .map(record)
+        .map_err(public_store_error)
+}
+
+#[cfg(feature = "ssr")]
+pub async fn set_forecast_mode_for_owner(
+    pool: &sqlx::PgPool,
+    owner_id: store::users::UserId,
+    id: i64,
+    mode: calc::ForecastMode,
+) -> Result<PlanRecord, ServerFnError> {
+    store::plans::set_forecast_mode(pool, owner_id, id, mode)
         .await
         .map(record)
         .map_err(public_store_error)
@@ -212,6 +282,8 @@ fn record(stored: store::plans::StoredPlan) -> PlanRecord {
         season_year: stored.season_year,
         note: stored.note,
         closed: stored.closed,
+        forecast_mode: stored.forecast_mode,
+        quick_estimate: stored.quick_estimate,
         form: PlanForm::from_plan(&stored.plan),
     }
 }
@@ -260,6 +332,71 @@ fn valid_note(value: &str) -> Result<&str, ServerFnError> {
     Ok(value)
 }
 
+#[cfg_attr(not(feature = "ssr"), allow(dead_code))]
+fn quick_field(value: &str) -> Result<calc::QuickInputField, ServerFnError> {
+    match value {
+        "production" => Ok(calc::QuickInputField::SellableYieldKg),
+        "price" => Ok(calc::QuickInputField::AveragePricePerKg),
+        "cost" => Ok(calc::QuickInputField::TotalCost),
+        _ => Err(ServerFnError::new("ไม่พบขั้นตอนประมาณการนี้")),
+    }
+}
+
+#[cfg_attr(not(feature = "ssr"), allow(dead_code))]
+fn quick_field_label(field: calc::QuickInputField) -> &'static str {
+    match field {
+        calc::QuickInputField::SellableYieldKg => "ผลผลิตที่ขายได้",
+        calc::QuickInputField::AveragePricePerKg => "ราคาขายเฉลี่ย",
+        calc::QuickInputField::TotalCost => "ต้นทุนรวม",
+    }
+}
+
+#[cfg_attr(not(feature = "ssr"), allow(dead_code))]
+fn valid_quick_value(
+    value: &str,
+    field: calc::QuickInputField,
+) -> Result<rust_decimal::Decimal, ServerFnError> {
+    use std::str::FromStr;
+
+    let label = quick_field_label(field);
+    let normalized = value.trim().replace(',', "");
+    if normalized.is_empty() {
+        return Err(ServerFnError::new(format!("กรุณากรอก{label}")));
+    }
+    let parsed = rust_decimal::Decimal::from_str(&normalized)
+        .map_err(|_| ServerFnError::new(format!("{label}ต้องเป็นตัวเลข")))?;
+    if parsed <= rust_decimal::Decimal::ZERO {
+        return Err(ServerFnError::new(format!("{label}ต้องมากกว่า 0")));
+    }
+    let maximum = rust_decimal::Decimal::from(1_000_000_000_000_i64);
+    if parsed > maximum {
+        return Err(ServerFnError::new(format!(
+            "{label}สูงเกินขอบเขตที่ระบบคำนวณได้"
+        )));
+    }
+    Ok(parsed)
+}
+
+pub fn quick_resume_path(id: i64, estimate: &calc::QuickEstimate) -> String {
+    match estimate.first_incomplete() {
+        Some(calc::QuickInputField::SellableYieldKg) => {
+            format!("/plans/{id}/quick/production")
+        }
+        Some(calc::QuickInputField::AveragePricePerKg) => format!("/plans/{id}/quick/price"),
+        Some(calc::QuickInputField::TotalCost) => format!("/plans/{id}/quick/cost"),
+        None => format!("/plans/{id}/quick/result"),
+    }
+}
+
+#[cfg_attr(not(feature = "ssr"), allow(dead_code))]
+fn quick_next_path(id: i64, field: calc::QuickInputField) -> String {
+    match field {
+        calc::QuickInputField::SellableYieldKg => format!("/plans/{id}/quick/price"),
+        calc::QuickInputField::AveragePricePerKg => format!("/plans/{id}/quick/cost"),
+        calc::QuickInputField::TotalCost => format!("/plans/{id}/quick/result"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,5 +414,54 @@ mod tests {
     fn season_note_is_trimmed_and_bounded() {
         assert_eq!(valid_note(" บันทึก ").expect("valid note"), "บันทึก");
         assert!(valid_note(&"ก".repeat(2_001)).is_err());
+    }
+
+    #[test]
+    fn quick_values_are_positive_bounded_decimals_with_specific_errors() {
+        use calc::QuickInputField::{AveragePricePerKg, SellableYieldKg, TotalCost};
+
+        assert_eq!(
+            valid_quick_value(" 20,000.50 ", SellableYieldKg).expect("valid yield"),
+            rust_decimal::Decimal::new(2_000_050, 2)
+        );
+        assert!(
+            valid_quick_value("", SellableYieldKg)
+                .expect_err("blank fails")
+                .to_string()
+                .contains("กรุณากรอกผลผลิตที่ขายได้")
+        );
+        assert!(
+            valid_quick_value("ศูนย์", AveragePricePerKg)
+                .expect_err("text fails")
+                .to_string()
+                .contains("ราคาขายเฉลี่ยต้องเป็นตัวเลข")
+        );
+        assert!(
+            valid_quick_value("0", TotalCost)
+                .expect_err("zero fails")
+                .to_string()
+                .contains("ต้นทุนรวมต้องมากกว่า 0")
+        );
+        assert!(
+            valid_quick_value("1000000000001", TotalCost)
+                .expect_err("technical upper bound fails")
+                .to_string()
+                .contains("สูงเกินขอบเขต")
+        );
+    }
+
+    #[test]
+    fn quick_resume_uses_the_first_missing_answer_and_then_the_result() {
+        let mut estimate = calc::QuickEstimate::default();
+        assert_eq!(
+            quick_resume_path(42, &estimate),
+            "/plans/42/quick/production"
+        );
+        estimate.sellable_yield_kg = Some(rust_decimal::Decimal::ONE);
+        assert_eq!(quick_resume_path(42, &estimate), "/plans/42/quick/price");
+        estimate.average_price_per_kg = Some(rust_decimal::Decimal::ONE);
+        assert_eq!(quick_resume_path(42, &estimate), "/plans/42/quick/cost");
+        estimate.total_cost = Some(rust_decimal::Decimal::ONE);
+        assert_eq!(quick_resume_path(42, &estimate), "/plans/42/quick/result");
     }
 }

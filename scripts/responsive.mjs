@@ -69,7 +69,11 @@ async function inspect(page, intendedWidth) {
           style.overflowX === 'scroll' ||
           style.textOverflow === 'ellipsis';
         if (!deliberate) {
-          clipped.push({ el: name(el), text: (el.textContent || '').trim().slice(0, 40) });
+          clipped.push({
+            el: name(el),
+            field: el instanceof HTMLInputElement ? `${el.type}:${el.name}=${el.value}`.slice(0, 60) : '',
+            text: (el.textContent || '').trim().slice(0, 40),
+          });
         }
       }
     }
@@ -202,7 +206,8 @@ function assess(where, report, intendedWidth) {
     fail(where, `${item.el} runs ${item.over}px past the right edge — "${item.text}"`);
   }
   for (const item of report.clipped.slice(0, 4)) {
-    fail(where, `${item.el} clips its own text — "${item.text}"`);
+    const detail = item.field || item.text;
+    fail(where, `${item.el} clips its own text — "${detail}"`);
   }
   for (const item of report.small.slice(0, 4)) {
     fail(where, `${item.el} is ${item.w}x${item.h}, under the 48px rule — "${item.text}"`);
@@ -269,13 +274,51 @@ async function signIn(browser) {
   await page.fill('input[name="name"]', 'สวนรวมสำหรับ responsive proof');
   await page.fill('textarea[name="note"]', 'ข้อมูลทดสอบที่สคริปต์ลบพร้อมบัญชี');
   await page.click('button:has-text("สร้างฤดูกาล")');
-  await page.waitForURL(/\/plans\/\d+$/);
-  const planId = page.url().match(/\/plans\/(\d+)$/)?.[1];
-  if (!planId) throw new Error('the real season was not created');
+  await page.waitForURL(/\/plans\/\d+\/quick\/production$/);
+  const planId = page.url().match(/\/plans\/(\d+)\/quick\/production$/)?.[1];
+  if (!planId) throw new Error('the quick season was not created');
+
+  await page.fill('input[name="value"]', '20000');
+  await page.click('button:has-text("ถัดไป")');
+  await page.waitForURL(new RegExp(`/plans/${planId}/quick/price$`));
+
+  // Leaving after one answer and returning through the hub must resume at the
+  // first unanswered question rather than restarting or inventing a result.
+  await page.goto(`${BASE}/plans/${planId}`);
+  await page.click('a:has-text("ทำประมาณการต่อ")');
+  await page.waitForURL(new RegExp(`/plans/${planId}/quick/price$`));
+  await page.fill('input[name="value"]', '80');
+  await page.click('button:has-text("ถัดไป")');
+  await page.waitForURL(new RegExp(`/plans/${planId}/quick/cost$`));
+  await page.goBack({ waitUntil: 'domcontentloaded' });
+  await page.waitForURL(new RegExp(`/plans/${planId}/quick/price$`));
+  if (await page.locator('input[name="value"]').inputValue() !== '80') {
+    throw new Error('browser back lost the persisted quick price');
+  }
+  await page.click('button:has-text("ถัดไป")');
+  await page.waitForURL(new RegExp(`/plans/${planId}/quick/cost$`));
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.fill('input[name="value"]', '900000');
+  await page.click('button:has-text("ดูผลประมาณการ")');
+  await page.waitForURL(new RegExp(`/plans/${planId}/quick/result$`));
+
+  // Keep a separate detailed-mode season in the same account so this proof
+  // covers the new quick surfaces without dropping the pre-existing detailed
+  // dashboard, analysis, and long-form input regression.
+  await page.goto(`${BASE}/plans/new`);
+  await page.fill('input[name="season_year"]', '2570');
+  await page.fill('input[name="name"]', 'สวนทดสอบละเอียด');
+  await page.click('button:has-text("สร้างฤดูกาล")');
+  await page.waitForURL(/\/plans\/\d+\/quick\/production$/);
+  const detailedPlanId = page.url().match(/\/plans\/(\d+)\/quick\/production$/)?.[1];
+  if (!detailedPlanId) throw new Error('the detailed proof season was not created');
+  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await page.click('button:has-text("เปลี่ยนเป็นแผนละเอียด")');
+  await page.waitForURL(new RegExp(`/plans/${detailedPlanId}$`));
 
   const cookies = await context.cookies();
   await context.close();
-  return { cookies, planId };
+  return { cookies, planId, detailedPlanId };
 }
 
 /** No sheet may be left standing between measurements. */
@@ -327,16 +370,21 @@ async function openEachExplanation(page, size, where) {
 
 const browser = await chromium.launch({ channel: 'chrome' });
 try {
-  const { cookies, planId } = await signIn(browser);
+  const { cookies, planId, detailedPlanId } = await signIn(browser);
   const routes = [
     ['demo', `${BASE}/demo`],
     ['new-season', `${BASE}/plans/new`],
     ['plans', `${BASE}/plans`],
-    ['hub', `${BASE}/plans/${planId}`],
-    ['dashboard', `${BASE}/plans/${planId}/dashboard`],
-    ['analysis', `${BASE}/plans/${planId}/analysis`],
-    ['production', `${BASE}/plans/${planId}/production`],
-    ['health', `${BASE}/plans/${planId}/health`],
+    ['quick-hub', `${BASE}/plans/${planId}`],
+    ['quick-production', `${BASE}/plans/${planId}/quick/production`],
+    ['quick-price', `${BASE}/plans/${planId}/quick/price`],
+    ['quick-cost', `${BASE}/plans/${planId}/quick/cost`],
+    ['quick-result', `${BASE}/plans/${planId}/quick/result`],
+    ['detailed-hub', `${BASE}/plans/${detailedPlanId}`],
+    ['dashboard', `${BASE}/plans/${detailedPlanId}/dashboard`],
+    ['analysis', `${BASE}/plans/${detailedPlanId}/analysis`],
+    ['production', `${BASE}/plans/${detailedPlanId}/production`],
+    ['health', `${BASE}/plans/${detailedPlanId}/health`],
   ];
 
   for (const size of WIDTHS) {
@@ -347,35 +395,42 @@ try {
       deviceScaleFactor: 2,
     });
     await context.addCookies(cookies);
-    const page = await context.newPage();
 
     for (const [routeName, url] of routes) {
-      await page.goto(url, { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(250);
-      assess(`${size.name}px ${routeName}`, await inspect(page, size.width), size.width);
+      // Route measurements are independent. A fresh page keeps a transient
+      // explanation, focus state, or hydration navigation from contaminating
+      // the next route's geometry proof.
+      const page = await context.newPage();
+      try {
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(250);
+        assess(`${size.name}px ${routeName}`, await inspect(page, size.width), size.width);
 
-      // Every explanation, one at a time: an open card is the state that failed.
-      // Only visible ones — a panel carrying `hidden` is not on screen to tap.
-      await openEachExplanation(page, size, routeName);
+        // Every explanation, one at a time: an open card is the state that failed.
+        // Only visible ones — a panel carrying `hidden` is not on screen to tap.
+        await openEachExplanation(page, size, routeName);
 
-      if (routeName === 'analysis') {
-        for (const tab of ['ตรวจสอบ', 'ภาษี', 'สถานการณ์']) {
-          const button = page.locator(`button[role="tab"]:has-text("${tab}")`);
-          if (await button.count()) {
-            await ensureClosed(page);
-            await button.click({ timeout: 10000 });
-            await page.waitForTimeout(200);
-            assess(`${size.name}px analysis:${tab}`, await inspect(page, size.width), size.width);
-            await openEachExplanation(page, size, `analysis:${tab}`);
+        if (routeName === 'analysis') {
+          for (const tab of ['ตรวจสอบ', 'ภาษี', 'สถานการณ์']) {
+            const button = page.locator(`button[role="tab"]:has-text("${tab}")`);
+            if (await button.count()) {
+              await ensureClosed(page);
+              await button.click({ timeout: 10000 });
+              await page.waitForTimeout(200);
+              assess(`${size.name}px analysis:${tab}`, await inspect(page, size.width), size.width);
+              await openEachExplanation(page, size, `analysis:${tab}`);
+            }
+          }
+          await ensureClosed(page);
+          const table = page.locator('details.scenario-table:visible > summary');
+          if (await table.count()) {
+            await table.click({ timeout: 10000 });
+            await page.waitForTimeout(250);
+            assess(`${size.name}px analysis:table`, await inspect(page, size.width), size.width);
           }
         }
-        await ensureClosed(page);
-        const table = page.locator('details.scenario-table:visible > summary');
-        if (await table.count()) {
-          await table.click({ timeout: 10000 });
-          await page.waitForTimeout(250);
-          assess(`${size.name}px analysis:table`, await inspect(page, size.width), size.width);
-        }
+      } finally {
+        await page.close();
       }
     }
     await context.close();

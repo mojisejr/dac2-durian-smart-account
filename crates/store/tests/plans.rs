@@ -1,4 +1,6 @@
-use calc::{Grade, VariableCostKind, VariableCostLine, workbook_sample};
+use calc::{
+    ForecastMode, Grade, QuickEstimate, VariableCostKind, VariableCostLine, workbook_sample,
+};
 use rust_decimal::Decimal;
 use sqlx::PgPool;
 use store::plans::{self, StoreError};
@@ -60,6 +62,42 @@ async fn an_empty_in_progress_plan_round_trips_as_missing_not_zero(
     assert!(loaded.plan.market.demand_kg.is_none());
     assert!(loaded.plan.production.grades.is_empty());
     assert!(loaded.plan.targets.yield_per_rai.is_none());
+    assert_eq!(loaded.forecast_mode, ForecastMode::Detailed);
+    assert_eq!(loaded.quick_estimate, QuickEstimate::default());
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_new_quick_season_persists_each_answer_without_touching_detail(
+    pool: PgPool,
+) -> Result<(), StoreError> {
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let detailed = ten_grade_plan();
+    let created = plans::create_quick(&pool, owner.id, 2569, "", &detailed).await?;
+    assert_eq!(created.forecast_mode, ForecastMode::Quick);
+    assert_eq!(created.quick_estimate, QuickEstimate::default());
+
+    let estimate = QuickEstimate {
+        sellable_yield_kg: Some(Decimal::from(20_000)),
+        average_price_per_kg: Some(Decimal::from(80)),
+        total_cost: Some(Decimal::from(900_000)),
+    };
+    let saved = plans::save_quick(&pool, owner.id, created.id, &estimate).await?;
+
+    assert_eq!(saved.forecast_mode, ForecastMode::Quick);
+    assert_eq!(saved.quick_estimate, estimate);
+    assert_eq!(saved.plan, detailed);
+
+    let detailed_mode =
+        plans::set_forecast_mode(&pool, owner.id, created.id, ForecastMode::Detailed).await?;
+    assert_eq!(detailed_mode.forecast_mode, ForecastMode::Detailed);
+    assert_eq!(detailed_mode.quick_estimate, estimate);
+    assert_eq!(detailed_mode.plan, detailed);
+
+    let quick_again =
+        plans::set_forecast_mode(&pool, owner.id, created.id, ForecastMode::Quick).await?;
+    assert_eq!(quick_again.forecast_mode, ForecastMode::Quick);
+    assert_eq!(quick_again.quick_estimate, estimate);
     Ok(())
 }
 
@@ -72,6 +110,12 @@ async fn every_exposed_operation_enforces_owner_scope(pool: PgPool) -> Result<()
 
     assert!(plans::load(&pool, other.id, created.id).await?.is_none());
     assert_not_found(plans::save(&pool, other.id, created.id, &plan).await);
+    assert_not_found(
+        plans::save_quick(&pool, other.id, created.id, &QuickEstimate::default()).await,
+    );
+    assert_not_found(
+        plans::set_forecast_mode(&pool, other.id, created.id, ForecastMode::Quick).await,
+    );
     assert_not_found(plans::close(&pool, other.id, created.id).await);
     assert_not_found(plans::duplicate(&pool, other.id, created.id, 2570, "ขโมยสำเนา", "").await);
     assert_not_found(plans::delete(&pool, other.id, created.id).await);
@@ -94,6 +138,8 @@ async fn every_mutation_of_a_closed_plan_is_refused(pool: PgPool) -> Result<(), 
         .expect("closed plan remains readable");
     assert!(closed.closed);
     assert_closed(plans::save(&pool, owner.id, created.id, &plan).await);
+    assert_closed(plans::save_quick(&pool, owner.id, created.id, &QuickEstimate::default()).await);
+    assert_closed(plans::set_forecast_mode(&pool, owner.id, created.id, ForecastMode::Quick).await);
     assert_closed(plans::close(&pool, owner.id, created.id).await);
     assert_closed(plans::delete(&pool, owner.id, created.id).await);
 
@@ -140,6 +186,32 @@ async fn duplicate_is_a_deep_independent_copy(pool: PgPool) -> Result<(), StoreE
     assert_ne!(reloaded_original.plan, reloaded_duplicate.plan);
     assert_eq!(reloaded_duplicate.season_year, Some(2570));
     assert_eq!(reloaded_duplicate.note, "คัดลอกแล้ว");
+    assert_eq!(reloaded_duplicate.forecast_mode, ForecastMode::Quick);
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn duplicate_keeps_both_input_sets_but_starts_in_quick_mode(
+    pool: PgPool,
+) -> Result<(), StoreError> {
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let detailed = ten_grade_plan();
+    let source = plans::create_quick(&pool, owner.id, 2569, "", &detailed).await?;
+    let estimate = QuickEstimate {
+        sellable_yield_kg: Some(Decimal::from(20_000)),
+        average_price_per_kg: Some(Decimal::from(80)),
+        total_cost: Some(Decimal::from(900_000)),
+    };
+    plans::save_quick(&pool, owner.id, source.id, &estimate).await?;
+    plans::set_forecast_mode(&pool, owner.id, source.id, ForecastMode::Detailed).await?;
+
+    let duplicate = plans::duplicate(&pool, owner.id, source.id, 2570, "ฤดูถัดไป", "").await?;
+    let mut expected_detailed = detailed;
+    expected_detailed.name = "ฤดูถัดไป".into();
+
+    assert_eq!(duplicate.forecast_mode, ForecastMode::Quick);
+    assert_eq!(duplicate.quick_estimate, estimate);
+    assert_eq!(duplicate.plan, expected_detailed);
     Ok(())
 }
 

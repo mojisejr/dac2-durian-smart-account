@@ -17,7 +17,29 @@ no profile image, avatar, or social login. The season UX follow-up gives every
 stored season an independent Buddhist harvest year, name, and note; makes one
 season the combined forecast for all plots in that year; and turns the workbook
 sample into an editable, resettable browser demonstration that never creates
-history.
+history. The first decision-support batch gives a new season a separate quick
+mode: three persisted owner inputs produce revenue, profit or loss, cost per
+kilogram, and break-even average sale price. It is deterministic and uses no
+AI, LLM, model API, prompt, embedding, vector store, or inference path.
+
+## Quick forecast proof
+
+Quick mode asks for sellable kilograms, expected average price per kilogram,
+and approximate total season cost. `analyze_quick(&QuickEstimate)` withholds all
+results until all three values are positive, then calculates only figures those
+values support. Each answer persists independently. Quick and detailed inputs
+remain separate, and the owner must explicitly switch mode; no value is
+converted or deleted automatically. Existing seasons migrate to detailed mode,
+while newly created and duplicated seasons start in quick mode.
+
+The pure formula tests, server-rendered one-question and result screens, real
+PostgreSQL round trips, owner scoping, closed-season enforcement, and mode
+switch preservation are covered by:
+
+```bash
+cargo test -p calc
+./scripts/test-plans.sh
+```
 
 ## Calculation proof
 
@@ -107,8 +129,9 @@ asserted all twenty-five of its cells were present. The markup was correct; the
 scroll container never scrolled, and layout is not in a string.
 
 `scripts/check-responsive.sh` drives real Chrome at 320, 360, 393, and 412
-pixels, exercises the non-persistent demonstration and real season creation,
-opens every explanation and every tab in turn, and asserts these properties:
+pixels, exercises the non-persistent demonstration, all three quick questions,
+the quick result, and the existing detailed season surfaces, opens every
+explanation and every tab in turn, and asserts these properties:
 
 - No page is wider than the device, and content may not push the layout viewport
   out to absorb an overflow.
