@@ -1,6 +1,6 @@
 use std::fmt;
 
-use calc::Plan;
+use calc::{ForecastMode, Plan, QuickEstimate};
 
 use crate::users::UserId;
 
@@ -22,6 +22,8 @@ pub struct StoredPlan {
     pub season_year: Option<i32>,
     pub note: String,
     pub closed: bool,
+    pub forecast_mode: ForecastMode,
+    pub quick_estimate: QuickEstimate,
     pub plan: Plan,
 }
 

@@ -5,7 +5,7 @@ mod write;
 
 pub use types::{PlanId, PlanSummary, StoreError, StoredPlan};
 
-use calc::Plan;
+use calc::{ForecastMode, Plan, QuickEstimate};
 use sqlx::{PgConnection, PgPool, Row};
 
 use crate::users::UserId;
@@ -39,15 +39,61 @@ pub async fn create(
     note: &str,
     plan: &Plan,
 ) -> Result<StoredPlan, StoreError> {
+    create_with_mode(
+        pool,
+        owner_id,
+        season_year,
+        note,
+        plan,
+        ForecastMode::Detailed,
+        &QuickEstimate::default(),
+    )
+    .await
+}
+
+pub async fn create_quick(
+    pool: &PgPool,
+    owner_id: UserId,
+    season_year: i32,
+    note: &str,
+    plan: &Plan,
+) -> Result<StoredPlan, StoreError> {
+    create_with_mode(
+        pool,
+        owner_id,
+        season_year,
+        note,
+        plan,
+        ForecastMode::Quick,
+        &QuickEstimate::default(),
+    )
+    .await
+}
+
+async fn create_with_mode(
+    pool: &PgPool,
+    owner_id: UserId,
+    season_year: i32,
+    note: &str,
+    plan: &Plan,
+    forecast_mode: ForecastMode,
+    quick_estimate: &QuickEstimate,
+) -> Result<StoredPlan, StoreError> {
     let mut transaction = pool.begin().await?;
     let id: PlanId = sqlx::query_scalar(
-        "INSERT INTO plans (owner_id, name, season_year, note) \
-         VALUES ($1, $2, $3, $4) RETURNING id",
+        "INSERT INTO plans (
+            owner_id, name, season_year, note, forecast_mode,
+            quick_sellable_yield_kg, quick_average_price_per_kg, quick_total_cost
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
     )
     .bind(owner_id)
     .bind(&plan.name)
     .bind(season_year)
     .bind(note.trim())
+    .bind(codec::forecast_mode(forecast_mode))
+    .bind(quick_estimate.sellable_yield_kg)
+    .bind(quick_estimate.average_price_per_kg)
+    .bind(quick_estimate.total_cost)
     .fetch_one(transaction.as_mut())
     .await
     .map_err(season_write_error)?;
@@ -60,6 +106,8 @@ pub async fn create(
         season_year: Some(season_year),
         note: note.trim().into(),
         closed: false,
+        forecast_mode,
+        quick_estimate: quick_estimate.clone(),
         plan: plan.clone(),
     })
 }
@@ -88,6 +136,51 @@ pub async fn save(
         .execute(transaction.as_mut())
         .await?;
     write::replace_sections(transaction.as_mut(), owner_id, id, plan).await?;
+    transaction.commit().await?;
+    load(pool, owner_id, id).await?.ok_or(StoreError::NotFound)
+}
+
+pub async fn save_quick(
+    pool: &PgPool,
+    owner_id: UserId,
+    id: PlanId,
+    estimate: &QuickEstimate,
+) -> Result<StoredPlan, StoreError> {
+    let mut transaction = pool.begin().await?;
+    ensure_open(transaction.as_mut(), owner_id, id).await?;
+    sqlx::query(
+        "UPDATE plans SET
+            forecast_mode = 'quick',
+            quick_sellable_yield_kg = $3,
+            quick_average_price_per_kg = $4,
+            quick_total_cost = $5
+         WHERE id = $1 AND owner_id = $2",
+    )
+    .bind(id)
+    .bind(owner_id)
+    .bind(estimate.sellable_yield_kg)
+    .bind(estimate.average_price_per_kg)
+    .bind(estimate.total_cost)
+    .execute(transaction.as_mut())
+    .await?;
+    transaction.commit().await?;
+    load(pool, owner_id, id).await?.ok_or(StoreError::NotFound)
+}
+
+pub async fn set_forecast_mode(
+    pool: &PgPool,
+    owner_id: UserId,
+    id: PlanId,
+    mode: ForecastMode,
+) -> Result<StoredPlan, StoreError> {
+    let mut transaction = pool.begin().await?;
+    ensure_open(transaction.as_mut(), owner_id, id).await?;
+    sqlx::query("UPDATE plans SET forecast_mode = $3 WHERE id = $1 AND owner_id = $2")
+        .bind(id)
+        .bind(owner_id)
+        .bind(codec::forecast_mode(mode))
+        .execute(transaction.as_mut())
+        .await?;
     transaction.commit().await?;
     load(pool, owner_id, id).await?.ok_or(StoreError::NotFound)
 }
@@ -157,14 +250,21 @@ pub async fn duplicate(
         return Err(StoreError::NotFound);
     };
     source.plan.name = new_name.into();
+    let forecast_mode = ForecastMode::Quick;
     let id: PlanId = sqlx::query_scalar(
-        "INSERT INTO plans (owner_id, name, season_year, note) \
-         VALUES ($1, $2, $3, $4) RETURNING id",
+        "INSERT INTO plans (
+            owner_id, name, season_year, note, forecast_mode,
+            quick_sellable_yield_kg, quick_average_price_per_kg, quick_total_cost
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
     )
     .bind(owner_id)
     .bind(&source.plan.name)
     .bind(season_year)
     .bind(note.trim())
+    .bind(codec::forecast_mode(forecast_mode))
+    .bind(source.quick_estimate.sellable_yield_kg)
+    .bind(source.quick_estimate.average_price_per_kg)
+    .bind(source.quick_estimate.total_cost)
     .fetch_one(transaction.as_mut())
     .await
     .map_err(season_write_error)?;
@@ -177,6 +277,8 @@ pub async fn duplicate(
         season_year: Some(season_year),
         note: note.trim().into(),
         closed: false,
+        forecast_mode,
+        quick_estimate: source.quick_estimate,
         plan: source.plan,
     })
 }

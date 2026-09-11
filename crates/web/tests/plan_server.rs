@@ -41,6 +41,26 @@ async fn plan_flow(auth_session: store::AuthSession) -> StatusCode {
             Ok(record) => record,
             Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
         };
+    if created.forecast_mode != calc::ForecastMode::Quick
+        || created.quick_estimate != calc::QuickEstimate::default()
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    for (field, value) in [
+        (
+            calc::QuickInputField::SellableYieldKg,
+            Decimal::from(20_000),
+        ),
+        (calc::QuickInputField::AveragePricePerKg, Decimal::from(80)),
+        (calc::QuickInputField::TotalCost, Decimal::from(900_000)),
+    ] {
+        if web::plans::save_quick_value_for_owner(pool, user.id, created.id, field, value)
+            .await
+            .is_err()
+        {
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        }
+    }
     let mut expected = calc::workbook_sample();
     expected.name = "ฤดูทดสอบฉบับเต็ม".into();
     expected.production.grades = (1..=10)
@@ -65,6 +85,26 @@ async fn plan_flow(auth_session: store::AuthSession) -> StatusCode {
     if loaded.form.to_plan().ok().as_ref() != Some(&expected) {
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
+    let quick = calc::analyze_quick(&loaded.quick_estimate);
+    if quick.net_profit != Some(Decimal::from(700_000)) {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    let detailed = match web::plans::set_forecast_mode_for_owner(
+        pool,
+        user.id,
+        created.id,
+        calc::ForecastMode::Detailed,
+    )
+    .await
+    {
+        Ok(record) => record,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    if detailed.form.to_plan().ok().as_ref() != Some(&expected)
+        || detailed.quick_estimate != loaded.quick_estimate
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
 
     let duplicate =
         match web::plans::duplicate_for_owner(pool, user.id, created.id, 2570, "ฤดูถัดไป", "").await
@@ -72,7 +112,11 @@ async fn plan_flow(auth_session: store::AuthSession) -> StatusCode {
             Ok(record) => record,
             Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
         };
-    if duplicate.closed || duplicate.form.name != "ฤดูถัดไป" || duplicate.season_year != Some(2570)
+    if duplicate.closed
+        || duplicate.form.name != "ฤดูถัดไป"
+        || duplicate.season_year != Some(2570)
+        || duplicate.forecast_mode != calc::ForecastMode::Quick
+        || duplicate.quick_estimate != loaded.quick_estimate
     {
         return StatusCode::INTERNAL_SERVER_ERROR;
     }

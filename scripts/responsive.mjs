@@ -269,13 +269,37 @@ async function signIn(browser) {
   await page.fill('input[name="name"]', 'สวนรวมสำหรับ responsive proof');
   await page.fill('textarea[name="note"]', 'ข้อมูลทดสอบที่สคริปต์ลบพร้อมบัญชี');
   await page.click('button:has-text("สร้างฤดูกาล")');
-  await page.waitForURL(/\/plans\/\d+$/);
-  const planId = page.url().match(/\/plans\/(\d+)$/)?.[1];
-  if (!planId) throw new Error('the real season was not created');
+  await page.waitForURL(/\/plans\/\d+\/quick\/production$/);
+  const planId = page.url().match(/\/plans\/(\d+)\/quick\/production$/)?.[1];
+  if (!planId) throw new Error('the quick season was not created');
+
+  await page.fill('input[name="value"]', '20000');
+  await page.click('button:has-text("ถัดไป")');
+  await page.waitForURL(new RegExp(`/plans/${planId}/quick/price$`));
+  await page.fill('input[name="value"]', '80');
+  await page.click('button:has-text("ถัดไป")');
+  await page.waitForURL(new RegExp(`/plans/${planId}/quick/cost$`));
+  await page.fill('input[name="value"]', '900000');
+  await page.click('button:has-text("ดูผลประมาณการ")');
+  await page.waitForURL(new RegExp(`/plans/${planId}/quick/result$`));
+
+  // Keep a separate detailed-mode season in the same account so this proof
+  // covers the new quick surfaces without dropping the pre-existing detailed
+  // dashboard, analysis, and long-form input regression.
+  await page.goto(`${BASE}/plans/new`);
+  await page.fill('input[name="season_year"]', '2570');
+  await page.fill('input[name="name"]', 'สวนรวม detailed responsive proof');
+  await page.click('button:has-text("สร้างฤดูกาล")');
+  await page.waitForURL(/\/plans\/\d+\/quick\/production$/);
+  const detailedPlanId = page.url().match(/\/plans\/(\d+)\/quick\/production$/)?.[1];
+  if (!detailedPlanId) throw new Error('the detailed proof season was not created');
+  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await page.click('button:has-text("เปลี่ยนเป็นแผนละเอียด")');
+  await page.waitForURL(new RegExp(`/plans/${detailedPlanId}$`));
 
   const cookies = await context.cookies();
   await context.close();
-  return { cookies, planId };
+  return { cookies, planId, detailedPlanId };
 }
 
 /** No sheet may be left standing between measurements. */
@@ -327,16 +351,21 @@ async function openEachExplanation(page, size, where) {
 
 const browser = await chromium.launch({ channel: 'chrome' });
 try {
-  const { cookies, planId } = await signIn(browser);
+  const { cookies, planId, detailedPlanId } = await signIn(browser);
   const routes = [
     ['demo', `${BASE}/demo`],
     ['new-season', `${BASE}/plans/new`],
     ['plans', `${BASE}/plans`],
-    ['hub', `${BASE}/plans/${planId}`],
-    ['dashboard', `${BASE}/plans/${planId}/dashboard`],
-    ['analysis', `${BASE}/plans/${planId}/analysis`],
-    ['production', `${BASE}/plans/${planId}/production`],
-    ['health', `${BASE}/plans/${planId}/health`],
+    ['quick-hub', `${BASE}/plans/${planId}`],
+    ['quick-production', `${BASE}/plans/${planId}/quick/production`],
+    ['quick-price', `${BASE}/plans/${planId}/quick/price`],
+    ['quick-cost', `${BASE}/plans/${planId}/quick/cost`],
+    ['quick-result', `${BASE}/plans/${planId}/quick/result`],
+    ['detailed-hub', `${BASE}/plans/${detailedPlanId}`],
+    ['dashboard', `${BASE}/plans/${detailedPlanId}/dashboard`],
+    ['analysis', `${BASE}/plans/${detailedPlanId}/analysis`],
+    ['production', `${BASE}/plans/${detailedPlanId}/production`],
+    ['health', `${BASE}/plans/${detailedPlanId}/health`],
   ];
 
   for (const size of WIDTHS) {

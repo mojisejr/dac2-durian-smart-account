@@ -135,6 +135,17 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 .season-metadata dt { color: var(--muted); font-size: 0.82rem; }
 .season-metadata dd { margin: 0; white-space: pre-wrap; }
 .copy-source { background: color-mix(in srgb, var(--primary) 9%, var(--surface)); border-left: 4px solid var(--primary); padding: 0.7rem 0.8rem; }
+.step-count, .field-hint, .result-label { color: var(--muted); }
+.step-count { font-size: 0.88rem; font-weight: 700; margin-bottom: 0.5rem; }
+.field-hint { font-size: 0.82rem; font-weight: 400; }
+.quick-mode-card, .detailed-mode-card, .quick-question-card, .quick-result-card, .quick-source-card, .quick-result-actions { display: grid; gap: 1rem; }
+.quick-mode-card > .button, .quick-question-card button, .quick-result-actions > .button, .quick-result-actions form button { width: 100%; }
+.quick-back { justify-self: start; }
+.result-label { margin-bottom: -0.75rem; }
+.quick-figure-list { display: grid; gap: 0.75rem; }
+.quick-figure-list > div { align-items: end; border-top: 1px solid var(--border); display: grid; gap: 0.25rem; padding-top: 0.75rem; }
+.quick-figure-list span { color: var(--muted); }
+.quick-figure-list strong { font-size: 1.15rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .demo-banner { background: var(--surface); border: 1px solid var(--warn); border-left-width: 4px; border-radius: 0.7rem; color: var(--text); display: grid; gap: 0.15rem; padding: 0.8rem 1rem; }
 .demo-banner span { color: var(--muted); }
 .status { border: 1px solid currentcolor; border-radius: 999px; flex: 0 0 auto; font-size: 0.82rem; margin-left: 0.5rem; padding: 0.2rem 0.55rem; }

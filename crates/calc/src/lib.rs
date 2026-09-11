@@ -13,6 +13,7 @@ pub mod cost;
 pub mod efficiency;
 pub mod health;
 pub mod plan;
+pub mod quick;
 pub mod revenue;
 pub mod sample;
 pub mod scenario;
@@ -22,6 +23,7 @@ pub mod validation;
 
 pub use analysis::*;
 pub use plan::*;
+pub use quick::*;
 pub use sample::workbook_sample;
 pub use targets::*;
 pub use validation::*;

@@ -1,6 +1,6 @@
 use calc::{
     FixedCostLine, Grade, HealthAnswer, KpiTargets, MarketPlan, Plan, ProductionPlan,
-    VariableCostLine,
+    QuickEstimate, VariableCostLine,
 };
 use rust_decimal::Decimal;
 use sqlx::{PgConnection, Row};
@@ -15,7 +15,10 @@ pub async fn load(
     plan_id: PlanId,
 ) -> Result<Option<StoredPlan>, StoreError> {
     let Some(plan_row) = sqlx::query(
-        "SELECT name, season_year, note, closed_at IS NOT NULL AS closed FROM plans
+        "SELECT name, season_year, note, closed_at IS NOT NULL AS closed,
+                forecast_mode, quick_sellable_yield_kg,
+                quick_average_price_per_kg, quick_total_cost
+         FROM plans
          WHERE id = $1 AND owner_id = $2",
     )
     .bind(plan_id)
@@ -190,6 +193,12 @@ pub async fn load(
         season_year: plan_row.try_get("season_year")?,
         note: plan_row.try_get("note")?,
         closed: plan_row.try_get("closed")?,
+        forecast_mode: codec::parse_forecast_mode(plan_row.try_get("forecast_mode")?)?,
+        quick_estimate: QuickEstimate {
+            sellable_yield_kg: plan_row.try_get("quick_sellable_yield_kg")?,
+            average_price_per_kg: plan_row.try_get("quick_average_price_per_kg")?,
+            total_cost: plan_row.try_get("quick_total_cost")?,
+        },
         plan: Plan {
             name: plan_row.try_get("name")?,
             market,

@@ -1,6 +1,24 @@
-use calc::{CashKind, HealthQuestion, VariableCostKind};
+use calc::{CashKind, ForecastMode, HealthQuestion, VariableCostKind};
 
 use super::StoreError;
+
+pub fn forecast_mode(value: ForecastMode) -> &'static str {
+    match value {
+        ForecastMode::Quick => "quick",
+        ForecastMode::Detailed => "detailed",
+    }
+}
+
+pub fn parse_forecast_mode(value: String) -> Result<ForecastMode, StoreError> {
+    match value.as_str() {
+        "quick" => Ok(ForecastMode::Quick),
+        "detailed" => Ok(ForecastMode::Detailed),
+        _ => Err(StoreError::InvalidValue {
+            field: "plans.forecast_mode",
+            value,
+        }),
+    }
+}
 
 pub fn variable_cost_kind(value: VariableCostKind) -> &'static str {
     match value {

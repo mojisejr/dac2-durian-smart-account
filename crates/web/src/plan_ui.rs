@@ -9,7 +9,10 @@ use crate::{
     analysis_ui::{PlanAnalysisView, PlanDashboardView},
     auth::{Logout, current_user_email},
     plan_form::{FixedCostForm, GradeForm, PlanForm, VariableCostForm},
-    plans::{ClosePlan, CreateSeason, PlanRecord, SavePlan, UpdateSeasonMetadata, list_plans},
+    plans::{
+        ClosePlan, CreateSeason, PlanRecord, SavePlan, SaveQuickStep, SwitchForecastMode,
+        UpdateSeasonMetadata, list_plans, quick_resume_path,
+    },
 };
 
 const SECTIONS: [(&str, &str, &str); 6] = [
@@ -279,6 +282,8 @@ fn PlanHub(record: PlanRecord) -> impl IntoView {
     let year = record.season_year;
     let note = record.note;
     let closed = record.closed;
+    let forecast_mode = record.forecast_mode;
+    let quick_estimate = record.quick_estimate;
 
     view! {
         <section class="page-stack plan-page">
@@ -312,25 +317,14 @@ fn PlanHub(record: PlanRecord) -> impl IntoView {
                     }.into_any()
                 }}
             </section>
-            <section class="section-list">
-                <A attr:class="section-card" href=format!("/plans/{id}/dashboard")>
-                    <span><strong>"หน้าแรก"</strong><small>"ตัวเลขสรุปของฤดูกาลนี้"</small></span>
-                    <span class="status muted">"เปิด"</span>
-                </A>
-                <A attr:class="section-card" href=format!("/plans/{id}/analysis")>
-                    <span><strong>"วิเคราะห์"</strong><small>"ประสิทธิภาพ ตรวจสอบ ภาษี สถานการณ์"</small></span>
-                    <span class="status muted">"เปิด"</span>
-                </A>
-                {SECTIONS.into_iter().map(|(slug, title, description)| {
-                    let complete = form.section_complete(slug);
-                    view! {
-                        <A attr:class="section-card" href=format!("/plans/{id}/{slug}")>
-                            <span><strong>{title}</strong><small>{description}</small></span>
-                            <span class=if complete { "status good" } else { "status muted" }>{if complete { "ครบ" } else { "ยังไม่ครบ" }}</span>
-                        </A>
-                    }
-                }).collect_view()}
-            </section>
+            {match forecast_mode {
+                calc::ForecastMode::Quick => view! {
+                    <QuickModeHub id estimate=quick_estimate.clone() closed/>
+                }.into_any(),
+                calc::ForecastMode::Detailed => view! {
+                    <DetailedModeHub id form=form.clone() closed/>
+                }.into_any(),
+            }}
             // No live total here. The bar exists so a figure moves while the
             // owner types, and nothing on this page is typed; it only covered
             // the cards below it. The dashboard carries the figure instead.
@@ -349,6 +343,297 @@ fn PlanHub(record: PlanRecord) -> impl IntoView {
                 </Show>
             </section>
             <BottomNav plan_id=id active=NavSection::Input/>
+        </section>
+    }
+}
+
+#[component]
+fn QuickModeHub(id: i64, estimate: calc::QuickEstimate, closed: bool) -> impl IntoView {
+    let switch = ServerAction::<SwitchForecastMode>::new();
+    let complete = estimate.first_incomplete().is_none();
+    let answered = calc::QuickInputField::ALL
+        .into_iter()
+        .filter(|field| {
+            estimate
+                .value(*field)
+                .is_some_and(|value| value > rust_decimal::Decimal::ZERO)
+        })
+        .count();
+    let destination = quick_resume_path(id, &estimate);
+
+    view! {
+        <section class="card quick-mode-card">
+            <div class="section-title">
+                <div>
+                    <p class="eyebrow">"โหมดที่ใช้อยู่"</p>
+                    <h2>"ประมาณการเร็ว"</h2>
+                    <p>"ตอบ 3 ข้อเพื่อดูรายได้ กำไร ต้นทุนต่อกิโลกรัม และราคาคุ้มทุน"</p>
+                </div>
+                <strong>{format!("{answered}/3")}</strong>
+            </div>
+            <A attr:class="button primary" href=destination>
+                {if complete { "ดูผลประมาณการ" } else { "ทำประมาณการต่อ" }}
+            </A>
+            <Show when=move || !closed>
+                <ActionForm action=switch>
+                    <input type="hidden" name="id" value=id/>
+                    <input type="hidden" name="mode" value="detailed"/>
+                    <button class="text-button" type="submit">"เปลี่ยนเป็นแผนละเอียด"</button>
+                </ActionForm>
+            </Show>
+            <ServerErrorMessage action=switch/>
+        </section>
+    }
+}
+
+#[component]
+fn DetailedModeHub(id: i64, form: PlanForm, closed: bool) -> impl IntoView {
+    let switch = ServerAction::<SwitchForecastMode>::new();
+    view! {
+        <section class="card detailed-mode-card">
+            <p class="eyebrow">"โหมดที่ใช้อยู่"</p>
+            <h2>"แผนละเอียด"</h2>
+            <p>"คำนวณจากข้อมูลตลาด ผลผลิต เกรด และรายการต้นทุนด้านล่าง"</p>
+            <Show when=move || !closed>
+                <ActionForm action=switch>
+                    <input type="hidden" name="id" value=id/>
+                    <input type="hidden" name="mode" value="quick"/>
+                    <button class="text-button" type="submit">"ใช้ประมาณการเร็ว"</button>
+                </ActionForm>
+            </Show>
+            <ServerErrorMessage action=switch/>
+        </section>
+        <section class="section-list">
+            <A attr:class="section-card" href=format!("/plans/{id}/dashboard")>
+                <span><strong>"หน้าแรก"</strong><small>"ตัวเลขสรุปของฤดูกาลนี้"</small></span>
+                <span class="status muted">"เปิด"</span>
+            </A>
+            <A attr:class="section-card" href=format!("/plans/{id}/analysis")>
+                <span><strong>"วิเคราะห์"</strong><small>"ประสิทธิภาพ ตรวจสอบ ภาษี สถานการณ์"</small></span>
+                <span class="status muted">"เปิด"</span>
+            </A>
+            {SECTIONS.into_iter().map(|(slug, title, description)| {
+                let complete = form.section_complete(slug);
+                view! {
+                    <A attr:class="section-card" href=format!("/plans/{id}/{slug}")>
+                        <span><strong>{title}</strong><small>{description}</small></span>
+                        <span class=if complete { "status good" } else { "status muted" }>{if complete { "ครบ" } else { "ยังไม่ครบ" }}</span>
+                    </A>
+                }
+            }).collect_view()}
+        </section>
+    }
+}
+
+#[component]
+pub fn QuickPlanRoute() -> impl IntoView {
+    let params = use_params_map();
+    let key = move || {
+        params.with(|params| {
+            let id = params.get("id").and_then(|id| id.parse::<i64>().ok());
+            let step = params.get("step").unwrap_or_default();
+            (id, step)
+        })
+    };
+    let record = Resource::new(key, |(id, _)| async move {
+        match id {
+            Some(id) => crate::plans::load_plan(id).await,
+            None => Ok(None),
+        }
+    });
+
+    view! {
+        <Suspense fallback=move || view! { <p>"กำลังอ่านประมาณการ…"</p> }>
+            {move || record.get().map(|result| {
+                let (_, step) = key();
+                match result {
+                    Ok(Some(record)) if record.forecast_mode == calc::ForecastMode::Detailed =>
+                        view! { <QuickModeRequired record/> }.into_any(),
+                    Ok(Some(record)) if step == "result" || record.closed =>
+                        view! { <QuickResultView record/> }.into_any(),
+                    Ok(Some(record)) if matches!(step.as_str(), "production" | "price" | "cost") =>
+                        view! { <QuickQuestionView record step/> }.into_any(),
+                    _ => view! { <section class="card"><h1>"ไม่พบขั้นตอนนี้"</h1><A href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
+                }
+            })}
+        </Suspense>
+    }
+}
+
+#[component]
+pub fn QuickQuestionView(record: PlanRecord, step: String) -> impl IntoView {
+    let save = ServerAction::<SaveQuickStep>::new();
+    let id = record.id;
+    let (position, question, hint, unit, value, back) = match step.as_str() {
+        "production" => (
+            1,
+            "ฤดูกาลนี้คาดว่าจะขายทุเรียนได้กี่กิโลกรัม",
+            "ใช้ยอดที่คาดว่าจะขายได้จริงหลังหักผลเสียและผลที่ไม่ได้ขาย",
+            "กก.",
+            record.quick_estimate.sellable_yield_kg,
+            format!("/plans/{id}"),
+        ),
+        "price" => (
+            2,
+            "คาดว่าจะขายได้ราคาเฉลี่ยกี่บาทต่อกิโลกรัม",
+            "ถ้ามีหลายเกรด ให้ใช้ราคาเฉลี่ยคร่าว ๆ ของทั้งฤดูกาล",
+            "บาท/กก.",
+            record.quick_estimate.average_price_per_kg,
+            format!("/plans/{id}/quick/production"),
+        ),
+        _ => (
+            3,
+            "คาดว่าฤดูกาลนี้มีต้นทุนรวมประมาณเท่าไร",
+            "รวมค่าใช้จ่ายทั้งหมดแบบคร่าว ๆ ก่อน รายละเอียดแยกทีหลังได้",
+            "บาท",
+            record.quick_estimate.total_cost,
+            format!("/plans/{id}/quick/price"),
+        ),
+    };
+    let value = value
+        .map(|value| value.normalize().to_string())
+        .unwrap_or_default();
+    let season = format!(
+        "{} · {}",
+        season_year_label(record.season_year),
+        record.form.name
+    );
+
+    view! {
+        <section class="page-stack quick-question-page">
+            <header class="page-heading compact-heading">
+                <div>
+                    <p class="eyebrow">{season}</p>
+                    <p class="step-count">{format!("ขั้น {position} จาก 3")}</p>
+                    <h1>{question}</h1>
+                </div>
+                <A attr:class="icon-button" href=format!("/plans/{id}") attr:aria-label="พักและกลับหน้าฤดูกาล">"×"</A>
+            </header>
+            <section class="card quick-question-card">
+                <ActionForm action=save>
+                    <input type="hidden" name="id" value=id/>
+                    <input type="hidden" name="step" value=step/>
+                    <label>
+                        <span>{question}</span>
+                        <span class="input-with-unit">
+                            <input type="text" name="value" inputmode="decimal" value=value required autofocus/>
+                            <span class="unit">{unit}</span>
+                        </span>
+                        <small class="field-hint">{hint}</small>
+                    </label>
+                    <button class="primary" type="submit">{if position == 3 { "ดูผลประมาณการ" } else { "ถัดไป" }}</button>
+                </ActionForm>
+                <ServerErrorMessage action=save/>
+            </section>
+            <A attr:class="button secondary quick-back" href=back>"‹ ย้อนกลับ"</A>
+        </section>
+    }
+}
+
+#[component]
+pub fn QuickResultView(record: PlanRecord) -> impl IntoView {
+    let switch = ServerAction::<SwitchForecastMode>::new();
+    let id = record.id;
+    let estimate = record.quick_estimate;
+    let analysis = calc::analyze_quick(&estimate);
+    let resume = quick_resume_path(id, &estimate);
+    let complete = analysis.input_issues.is_empty();
+    let season = format!(
+        "{} · {}",
+        season_year_label(record.season_year),
+        record.form.name
+    );
+    let result = if complete {
+        let profit = analysis
+            .net_profit
+            .expect("complete quick result has profit");
+        let (profit_label, profit_class) = if profit >= rust_decimal::Decimal::ZERO {
+            ("กำไรโดยประมาณ", "hero-value good-text")
+        } else {
+            ("ขาดทุนโดยประมาณ", "hero-value bad-text")
+        };
+        view! {
+            <section class="card quick-result-card">
+                <p class="eyebrow">"ประมาณการเร็ว"</p>
+                <p class="result-label">{profit_label}</p>
+                <strong class=profit_class>{format!("{} บาท", money(profit.abs()))}</strong>
+                <div class="quick-figure-list">
+                    <div><span>"รายได้โดยประมาณ"</span><strong>{format!("{} บาท", money(analysis.revenue.expect("complete revenue")))}</strong></div>
+                    <div><span>"ต้นทุนต่อกิโลกรัม"</span><strong>{format!("{} บาท/กก.", money(analysis.cost_per_kg.expect("complete cost per kg")))}</strong></div>
+                    <div><span>"ราคาขายคุ้มทุน"</span><strong>{format!("{} บาท/กก.", money(analysis.break_even_price_per_kg.expect("complete break-even price")))}</strong></div>
+                </div>
+            </section>
+            <section class="card quick-source-card">
+                <h2>"คำนวณจาก 3 ค่านี้"</h2>
+                <dl class="season-metadata">
+                    <div><dt>"ผลผลิตที่ขายได้"</dt><dd>{format!("{} กก.", money(estimate.sellable_yield_kg.expect("complete yield")))}</dd></div>
+                    <div><dt>"ราคาขายเฉลี่ย"</dt><dd>{format!("{} บาท/กก.", money(estimate.average_price_per_kg.expect("complete price")))}</dd></div>
+                    <div><dt>"ต้นทุนรวม"</dt><dd>{format!("{} บาท", money(estimate.total_cost.expect("complete total cost")))}</dd></div>
+                </dl>
+                <p class="caption">"ผลนี้ใช้ประมาณการรวม ยังไม่ใช้เกรด รายการต้นทุน ROI ภาษี หรือคะแนนสุขภาพสวน"</p>
+            </section>
+        }.into_any()
+    } else {
+        view! {
+            <section class="card empty-state">
+                <p class="eyebrow">"ประมาณการเร็ว"</p>
+                <h1>"ตอบให้ครบ 3 ข้อก่อนดูผล"</h1>
+                <p>"ระบบจะไม่เติมค่าที่ขาดหรือแสดงผลลัพธ์บางส่วนแทนข้อมูลจริง"</p>
+                <A attr:class="button primary" href=resume>"ทำประมาณการต่อ"</A>
+            </section>
+        }
+        .into_any()
+    };
+
+    view! {
+        <section class="page-stack quick-result-page">
+            <header class="page-heading compact-heading">
+                <div><p class="eyebrow">{season}</p><h1>"ผลประมาณการ"</h1></div>
+                <A attr:class="icon-button" href=format!("/plans/{id}") attr:aria-label="กลับหน้าฤดูกาล">"×"</A>
+            </header>
+            <Show when=move || record.closed>
+                <div class="closed-banner" role="status">"ฤดูกาลนี้ปิดแล้ว · แก้ไขไม่ได้"</div>
+            </Show>
+            {result}
+            <Show when=move || complete && !record.closed>
+                <section class="card quick-result-actions">
+                    <h2>"ทำต่ออย่างไร"</h2>
+                    <A attr:class="button secondary" href=format!("/plans/{id}/quick/production")>"แก้ประมาณการ"</A>
+                    <ActionForm action=switch>
+                        <input type="hidden" name="id" value=id/>
+                        <input type="hidden" name="mode" value="detailed"/>
+                        <button class="primary" type="submit">"เปลี่ยนเป็นแผนละเอียด"</button>
+                    </ActionForm>
+                    <ServerErrorMessage action=switch/>
+                </section>
+            </Show>
+            <BottomNav plan_id=id active=NavSection::Home/>
+        </section>
+    }
+}
+
+#[component]
+fn QuickModeRequired(record: PlanRecord) -> impl IntoView {
+    let switch = ServerAction::<SwitchForecastMode>::new();
+    let id = record.id;
+    view! {
+        <section class="page-stack">
+            <header class="page-heading compact-heading">
+                <div><p class="eyebrow">{season_year_label(record.season_year)}</p><h1>"ประมาณการเร็วกำลังใช้งาน"</h1></div>
+                <A attr:class="icon-button" href=format!("/plans/{id}") attr:aria-label="กลับหน้าฤดูกาล">"×"</A>
+            </header>
+            <section class="card">
+                <p>"ผลของฤดูกาลนี้คำนวณจากประมาณการเร็ว ระบบจึงไม่สลับไปใช้ข้อมูลละเอียดโดยอัตโนมัติ"</p>
+                <A attr:class="button primary" href=quick_resume_path(id, &record.quick_estimate)>"กลับไปประมาณการเร็ว"</A>
+                <Show when=move || !record.closed>
+                    <ActionForm action=switch>
+                        <input type="hidden" name="id" value=id/>
+                        <input type="hidden" name="mode" value="detailed"/>
+                        <button class="text-button" type="submit">"เปลี่ยนเป็นแผนละเอียด"</button>
+                    </ActionForm>
+                </Show>
+                <ServerErrorMessage action=switch/>
+            </section>
         </section>
     }
 }
@@ -374,6 +659,10 @@ pub fn PlanSectionRoute() -> impl IntoView {
             {move || record.get().map(|result| {
                 let (_, section) = key();
                 match result {
+                    Ok(Some(record)) if section == "dashboard" && record.forecast_mode == calc::ForecastMode::Quick =>
+                        view! { <QuickResultView record/> }.into_any(),
+                    Ok(Some(record)) if section == "analysis" && record.forecast_mode == calc::ForecastMode::Quick =>
+                        view! { <QuickResultView record/> }.into_any(),
                     Ok(Some(record)) if section == "dashboard" =>
                         view! { <PlanDashboardView record/> }.into_any(),
                     Ok(Some(record)) if section == "analysis" =>
@@ -389,6 +678,9 @@ pub fn PlanSectionRoute() -> impl IntoView {
 
 #[component]
 pub fn PlanSectionView(record: PlanRecord, section: String) -> impl IntoView {
+    if record.forecast_mode == calc::ForecastMode::Quick {
+        return view! { <QuickModeRequired record/> }.into_any();
+    }
     let form = RwSignal::new(record.form);
     let save = ServerAction::<SavePlan>::new();
     let id = record.id;
@@ -426,7 +718,7 @@ pub fn PlanSectionView(record: PlanRecord, section: String) -> impl IntoView {
             <LiveTotal form/>
             <BottomNav plan_id=id active=NavSection::Input/>
         </section>
-    }
+    }.into_any()
 }
 
 #[component]

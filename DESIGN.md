@@ -1,6 +1,6 @@
 # DAC2 — Design
 
-**Status:** draft, revision 0.3
+**Status:** draft, revision 0.4
 **Home:** this file moves to the application repository root in slice 1. There is
 one copy of it, never two.
 
@@ -236,6 +236,44 @@ Inside a season, the current item has a visible surface treatment and
 screen does not show three plan tabs that have no selected plan. If it was
 opened from a season it shows one explicit route back; direct entry has no
 invented back destination.
+
+### Two explicit planning modes
+
+A newly created season starts in `ประมาณการเร็ว`; an existing season remains in
+`แผนละเอียด`. The active mode is always named under `โหมดที่ใช้อยู่`. Changing
+mode is an explicit owner action (`เปลี่ยนเป็นแผนละเอียด` or
+`ใช้ประมาณการเร็ว`), never an automatic conversion. Each mode keeps its own
+inputs, so switching does not delete work.
+
+Quick mode asks one question per page, in this fixed order:
+
+1. `ฤดูกาลนี้คาดว่าจะขายทุเรียนได้กี่กิโลกรัม` with unit `กก.` and hint
+   `ใช้ยอดที่คาดว่าจะขายได้จริงหลังหักผลเสียและผลที่ไม่ได้ขาย`
+2. `คาดว่าจะขายได้ราคาเฉลี่ยกี่บาทต่อกิโลกรัม` with unit `บาท/กก.` and hint
+   `ถ้ามีหลายเกรด ให้ใช้ราคาเฉลี่ยคร่าว ๆ ของทั้งฤดูกาล`
+3. `คาดว่าฤดูกาลนี้มีต้นทุนรวมประมาณเท่าไร` with unit `บาท` and hint
+   `รวมค่าใช้จ่ายทั้งหมดแบบคร่าว ๆ ก่อน รายละเอียดแยกทีหลังได้`
+
+Each page says `ขั้น 1 จาก 3`, `ขั้น 2 จาก 3`, or `ขั้น 3 จาก 3`, offers
+`‹ ย้อนกลับ`, and can be left through a close target labelled
+`พักและกลับหน้าฤดูกาล`. The primary actions are `ถัดไป` and, on the last page,
+`ดูผลประมาณการ`. A saved quick-mode hub reports `1/3`, `2/3`, or `3/3` and uses
+`ทำประมาณการต่อ` until it can use `ดูผลประมาณการ`.
+
+The result begins with `ผลประมาณการ`, then `กำไรโดยประมาณ` or
+`ขาดทุนโดยประมาณ` as the hero. Supporting rows are `รายได้โดยประมาณ`,
+`ต้นทุนต่อกิโลกรัม`, and `ราคาขายคุ้มทุน`. A second card says
+`คำนวณจาก 3 ค่านี้` and repeats `ผลผลิตที่ขายได้`, `ราคาขายเฉลี่ย`, and
+`ต้นทุนรวม`. Its boundary is explicit:
+`ผลนี้ใช้ประมาณการรวม ยังไม่ใช้เกรด รายการต้นทุน ROI ภาษี หรือคะแนนสุขภาพสวน`.
+Actions are `แก้ประมาณการ` and `เปลี่ยนเป็นแผนละเอียด`.
+
+Missing or invalid input never produces a partial answer. The result instead
+says `ตอบให้ครบ 3 ข้อก่อนดูผล` and
+`ระบบจะไม่เติมค่าที่ขาดหรือแสดงผลลัพธ์บางส่วนแทนข้อมูลจริง`, with the one action
+`ทำประมาณการต่อ`. If a detailed route is opened while quick mode is active, it
+says `ประมาณการเร็วกำลังใช้งาน` and
+`ผลของฤดูกาลนี้คำนวณจากประมาณการเร็ว ระบบจึงไม่สลับไปใช้ข้อมูลละเอียดโดยอัตโนมัติ`.
 
 ### หน้าแรก — dashboard
 
