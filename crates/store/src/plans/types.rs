@@ -1,6 +1,6 @@
 use std::fmt;
 
-use calc::{ActualOutcome, ForecastMode, OutcomeMetrics, Plan, QuickEstimate};
+use calc::{ActualOutcome, AssetAllocation, ForecastMode, OutcomeMetrics, Plan, QuickEstimate};
 
 use crate::users::UserId;
 
@@ -24,6 +24,8 @@ pub struct StoredPlan {
     pub closed: bool,
     pub forecast_mode: ForecastMode,
     pub quick_estimate: QuickEstimate,
+    pub starting_capital: Option<rust_decimal::Decimal>,
+    pub asset_allocations: Vec<AssetAllocation>,
     pub actual_outcome: Option<StoredActualOutcome>,
     pub plan: Plan,
 }

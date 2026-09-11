@@ -1,8 +1,20 @@
 use rust_decimal::Decimal;
 
-use crate::{CashKind, CostAnalysis, Plan, RevenueAnalysis, VariableCostKind, VariableCostResult};
+use crate::{
+    AssetAllocation, CashKind, CostAnalysis, Plan, RevenueAnalysis, VariableCostKind,
+    VariableCostResult,
+};
 
 pub fn calculate(plan: &Plan, revenue: &RevenueAnalysis) -> CostAnalysis {
+    calculate_with_assets(plan, revenue, &[], None)
+}
+
+pub fn calculate_with_assets(
+    plan: &Plan,
+    revenue: &RevenueAnalysis,
+    assets: &[AssetAllocation],
+    starting_capital: Option<Decimal>,
+) -> CostAnalysis {
     let mut variable_lines: Vec<_> = plan
         .variable_costs
         .iter()
@@ -34,15 +46,30 @@ pub fn calculate(plan: &Plan, revenue: &RevenueAnalysis) -> CostAnalysis {
     let variable_cost_per_kg = variable_cost
         .zip(revenue.sellable_yield_kg)
         .and_then(|(cost, yield_kg)| nonzero_ratio(cost, yield_kg));
-    let fixed_cost = complete_sum(plan.fixed_costs.iter().map(|line| line.amount_per_year));
-    let cash_fixed_cost = fixed_cost.map(|_| {
+    let manual_fixed_cost = complete_sum(plan.fixed_costs.iter().map(|line| line.amount_per_year));
+    let asset_depreciation =
+        present_sum(assets.iter().map(|asset| Some(asset.annual_depreciation)));
+    let fixed_cost = if plan.fixed_costs.is_empty() {
+        asset_depreciation
+    } else {
+        manual_fixed_cost.map(|manual| manual + asset_depreciation.unwrap_or(Decimal::ZERO))
+    };
+    let cash_fixed_cost = manual_fixed_cost.map(|_| {
         plan.fixed_costs
             .iter()
             .filter(|line| line.cash_kind == CashKind::Cash)
             .filter_map(|line| line.amount_per_year)
             .sum()
     });
-    let investment_base = present_sum(plan.fixed_costs.iter().map(|line| line.investment_base));
+    let manual_investment_base =
+        present_sum(plan.fixed_costs.iter().map(|line| line.investment_base));
+    let asset_investment_base =
+        present_sum(assets.iter().map(|asset| Some(asset.investment_value)));
+    let investment_base = present_sum([
+        manual_investment_base,
+        asset_investment_base,
+        starting_capital,
+    ]);
     let total_cost = variable_cost
         .zip(fixed_cost)
         .map(|(variable, fixed)| variable + fixed);
@@ -58,8 +85,13 @@ pub fn calculate(plan: &Plan, revenue: &RevenueAnalysis) -> CostAnalysis {
         area_rai: plan.production.area_rai,
         variable_cost,
         variable_cost_per_kg,
+        manual_fixed_cost,
+        asset_depreciation,
         fixed_cost,
         cash_fixed_cost,
+        manual_investment_base,
+        asset_investment_base,
+        starting_capital,
         investment_base,
         total_cost,
         cost_per_kg,
