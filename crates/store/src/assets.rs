@@ -141,7 +141,7 @@ pub async fn choices_for_plan(
             let id: AssetId = row.try_get("id")?;
             let asset = owner_asset(id, owner_id, &row)?;
             let allocation = calc::allocate(&asset.facts, season_year).map_err(asset_rule_error)?;
-            let selected = row.try_get::<bool, _>("selected")? && allocation.is_some();
+            let selected = row.try_get::<bool, _>("selected")?;
             Ok(AssetChoice {
                 asset,
                 selected,

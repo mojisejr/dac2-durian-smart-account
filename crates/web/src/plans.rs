@@ -20,6 +20,8 @@ pub struct PlanRecord {
     pub closed: bool,
     pub forecast_mode: calc::ForecastMode,
     pub quick_estimate: calc::QuickEstimate,
+    pub starting_capital: Option<rust_decimal::Decimal>,
+    pub asset_allocations: Vec<calc::AssetAllocation>,
     pub actual_outcome: Option<ActualOutcomeRecord>,
     pub form: PlanForm,
 }
@@ -365,6 +367,8 @@ fn record(stored: store::plans::StoredPlan) -> PlanRecord {
         closed: stored.closed,
         forecast_mode: stored.forecast_mode,
         quick_estimate: stored.quick_estimate,
+        starting_capital: stored.starting_capital,
+        asset_allocations: stored.asset_allocations,
         actual_outcome: stored.actual_outcome.map(actual_record),
         form: PlanForm::from_plan(&stored.plan),
     }

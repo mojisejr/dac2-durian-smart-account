@@ -54,13 +54,17 @@ pub fn calculate_with_assets(
     } else {
         manual_fixed_cost.map(|manual| manual + asset_depreciation.unwrap_or(Decimal::ZERO))
     };
-    let cash_fixed_cost = manual_fixed_cost.map(|_| {
-        plan.fixed_costs
-            .iter()
-            .filter(|line| line.cash_kind == CashKind::Cash)
-            .filter_map(|line| line.amount_per_year)
-            .sum()
-    });
+    let cash_fixed_cost = if plan.fixed_costs.is_empty() {
+        (!assets.is_empty()).then_some(Decimal::ZERO)
+    } else {
+        manual_fixed_cost.map(|_| {
+            plan.fixed_costs
+                .iter()
+                .filter(|line| line.cash_kind == CashKind::Cash)
+                .filter_map(|line| line.amount_per_year)
+                .sum()
+        })
+    };
     let manual_investment_base =
         present_sum(plan.fixed_costs.iter().map(|line| line.investment_base));
     let asset_investment_base =
@@ -309,5 +313,85 @@ mod tests {
         assert_eq!(result.cost.investment_base, None);
         assert_eq!(result.business.roi, None);
         assert_eq!(result.business.payback_years, None);
+    }
+
+    #[test]
+    fn asset_depreciation_and_starting_capital_keep_distinct_roles() {
+        let plan = workbook_sample();
+        let asset = crate::allocate(
+            &crate::AssetFacts {
+                name: "ระบบน้ำ".into(),
+                kind: crate::AssetKind::Equipment,
+                original_cost: Decimal::from(100_000),
+                start_year: 2568,
+                useful_life_years: Some(5),
+                residual_value: None,
+                retired_year: None,
+            },
+            2569,
+        )
+        .unwrap()
+        .unwrap();
+
+        let without = crate::analyze(&plan);
+        let with = crate::analyze_with_assets(&plan, &[asset], Some(Decimal::from(50_000)));
+
+        assert_eq!(with.cost.manual_fixed_cost, without.cost.fixed_cost);
+        assert_eq!(with.cost.asset_depreciation, Some(Decimal::from(20_000)));
+        assert_eq!(
+            with.cost.total_cost,
+            without
+                .cost
+                .total_cost
+                .map(|value| value + Decimal::from(20_000))
+        );
+        assert_eq!(with.cost.cash_fixed_cost, without.cost.cash_fixed_cost);
+        assert_eq!(
+            with.business.operating_cash_flow,
+            without.business.operating_cash_flow
+        );
+        assert_eq!(
+            with.cost.manual_investment_base,
+            without.cost.investment_base
+        );
+        assert_eq!(
+            with.cost.asset_investment_base,
+            Some(Decimal::from(100_000))
+        );
+        assert_eq!(with.cost.starting_capital, Some(Decimal::from(50_000)));
+        assert_eq!(with.cost.investment_base, Some(Decimal::from(850_000)));
+    }
+
+    #[test]
+    fn asset_only_fixed_cost_has_a_known_zero_cash_component() {
+        let mut plan = workbook_sample();
+        plan.fixed_costs.clear();
+        let asset = crate::allocate(
+            &crate::AssetFacts {
+                name: "ระบบน้ำ".into(),
+                kind: crate::AssetKind::Equipment,
+                original_cost: Decimal::from(100_000),
+                start_year: 2568,
+                useful_life_years: Some(5),
+                residual_value: None,
+                retired_year: None,
+            },
+            2569,
+        )
+        .unwrap()
+        .unwrap();
+
+        let result = crate::analyze_with_assets(&plan, &[asset], None);
+
+        assert_eq!(result.cost.fixed_cost, Some(Decimal::from(20_000)));
+        assert_eq!(result.cost.cash_fixed_cost, Some(Decimal::ZERO));
+        assert_eq!(
+            result.business.operating_cash_flow,
+            result
+                .revenue
+                .revenue
+                .zip(result.cost.variable_cost)
+                .map(|(revenue, variable)| revenue - variable)
+        );
     }
 }

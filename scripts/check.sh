@@ -8,6 +8,7 @@ cargo test -p store --lib
 cargo test -p web --lib --features ssr
 cargo test -p web --test plan_ssr --features ssr
 cargo test -p web --test analysis_ssr --features ssr
+cargo test -p web --test assets_ssr --features ssr
 SQLX_OFFLINE=true cargo check --workspace --all-targets --all-features
 SQLX_OFFLINE=true cargo clippy --workspace --all-targets --all-features -- -D warnings
 SQLX_OFFLINE=true cargo leptos build
@@ -27,6 +28,12 @@ fi
 
 if grep -Eaiq 'sqlx' target/site/pkg/dac2.wasm target/site/pkg/dac2.js; then
   echo "generated browser bundle contains an sqlx symbol" >&2
+  exit 1
+fi
+
+if rg -Piq '(?i)\b(openai|anthropic|ollama|langchain|llama|llm|embeddings?)\b|vector[-_ ]?(database|store|search)|model[-_ ]?api' \
+  crates Cargo.toml Cargo.lock package.json package-lock.json; then
+  echo "application source or dependencies contain an AI/LLM runtime surface" >&2
   exit 1
 fi
 

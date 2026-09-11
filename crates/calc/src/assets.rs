@@ -223,6 +223,11 @@ mod tests {
             validate(&asset),
             Err(AssetRuleError::ResidualValueOutOfRange)
         );
+        asset.residual_value = Some(Decimal::NEGATIVE_ONE);
+        assert_eq!(
+            validate(&asset),
+            Err(AssetRuleError::ResidualValueOutOfRange)
+        );
     }
 
     #[test]
@@ -248,5 +253,8 @@ mod tests {
         assert_eq!(validate(&asset), Err(AssetRuleError::UsefulLifeOutOfRange));
         asset.useful_life_years = Some(MAX_USEFUL_LIFE_YEARS + 1);
         assert_eq!(validate(&asset), Err(AssetRuleError::UsefulLifeOutOfRange));
+        asset.useful_life_years = Some(5);
+        asset.retired_year = Some(2567);
+        assert_eq!(validate(&asset), Err(AssetRuleError::RetiredYearOutOfRange));
     }
 }

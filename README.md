@@ -29,6 +29,40 @@ actual values is a baseline; later seasons show actual change and
 forecast-versus-actual difference for the same six metrics with fixed factual
 wording and visible formulas. It makes no prediction, diagnosis, or generated
 recommendation.
+The fourth batch adds an owner-level asset register. Assets are excluded from
+each season by default and require an explicit per-season inclusion. Equipment
+adds straight-line planning depreciation as a non-cash fixed cost and its
+original value to investment analysis; owned land adds only investment context.
+Starting capital is separate and changes only ROI/payback inputs. Closing a
+season freezes selected asset facts and contributions in the same transaction,
+so later edits or retirement cannot rewrite history. Quick mode continues to
+use exactly its three persisted answers.
+
+## Asset and investment proof
+
+An owner can enter equipment or owned land once and choose it independently in
+multiple open seasons. The interface displays manual fixed cost, automatic
+asset depreciation, manual investment rows, selected asset value, and starting
+capital as separate sources. It warns before selection that the application
+does not guess, migrate, replace, or remove a manually entered row.
+
+Straight-line planning depreciation is `(original cost - residual value) /
+useful life`. The start year is inclusive; useful-life end and retired years are
+exclusive. A blank residual value is visibly treated as zero for this planning
+estimate only. Buddhist-year conversion always uses the selected season year,
+never the machine clock. Owned land never depreciates, while rent remains a
+recurring manual fixed cost.
+
+```bash
+cargo test -p calc
+cargo test -p store --test assets
+cargo test -p web --features ssr --test assets_ssr
+```
+
+These tests cover boundary arithmetic, invalid values, owner isolation,
+multi-season reuse, explicit default exclusion, Quick-mode separation, closed
+snapshot immutability, and the rendered role labels. No AI, LLM, model API,
+prompt, embedding, vector store, or external inference path is added.
 
 ## Quick forecast proof
 
@@ -183,8 +217,9 @@ scroll container never scrolled, and layout is not in a string.
 `scripts/check-responsive.sh` drives real Chrome at 320, 360, 393, and 412
 pixels, exercises the non-persistent demonstration, all three quick questions,
 the quick result, actual close and comparison, season history with a skipped
-year, the advanced-target route, and the existing detailed season surfaces, opens every
-explanation and every tab in turn, and asserts these properties:
+year, the advanced-target route, both open and closed asset states, and the
+existing detailed season surfaces, opens every explanation and every tab in
+turn, and asserts these properties:
 
 - No page is wider than the device, and content may not push the layout viewport
   out to absorb an overflow.

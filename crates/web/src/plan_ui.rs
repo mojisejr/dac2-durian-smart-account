@@ -1003,6 +1003,10 @@ fn DetailedModeHub(id: i64, form: PlanForm, closed: bool) -> impl IntoView {
                 <span><strong>"เป้าหมาย KPI"</strong><small>"ค่าที่ตั้งไว้เดิมยังอยู่และแก้ได้ที่นี่"</small></span>
                 <span aria-hidden="true">"›"</span>
             </A>
+            <A attr:class="section-card" href=format!("/plans/{id}/assets")>
+                <span><strong>"สินทรัพย์และเงินลงทุน"</strong><small>"บันทึกของที่ใช้หลายปี แล้วเลือกว่าจะรวมในฤดูนี้หรือไม่"</small></span>
+                <span aria-hidden="true">"›"</span>
+            </A>
         </details>
     }
 }

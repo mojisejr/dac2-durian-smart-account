@@ -3,6 +3,8 @@
 
 pub mod analysis_ui;
 
+pub mod assets;
+
 pub mod app;
 
 pub mod auth;

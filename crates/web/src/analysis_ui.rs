@@ -231,7 +231,13 @@ pub fn PlanDashboardView(record: PlanRecord) -> impl IntoView {
     let name = record.form.name.clone();
     let year = record.season_year;
     let form = record.form.clone();
-    let analysis = record.form.to_plan().ok().map(|plan| calc::analyze(&plan));
+    let assets = record.asset_allocations.clone();
+    let starting_capital = record.starting_capital;
+    let analysis = record
+        .form
+        .to_plan()
+        .ok()
+        .map(|plan| calc::analyze_with_assets(&plan, &assets, starting_capital));
 
     view! {
         <section class="page-stack plan-page">
@@ -349,7 +355,13 @@ pub fn PlanAnalysisView(record: PlanRecord) -> impl IntoView {
     let name = record.form.name.clone();
     let year = record.season_year;
     let form = record.form.clone();
-    let analysis = record.form.to_plan().ok().map(|plan| calc::analyze(&plan));
+    let assets = record.asset_allocations.clone();
+    let starting_capital = record.starting_capital;
+    let analysis = record
+        .form
+        .to_plan()
+        .ok()
+        .map(|plan| calc::analyze_with_assets(&plan, &assets, starting_capital));
     let tab = RwSignal::new("efficiency");
 
     view! {
