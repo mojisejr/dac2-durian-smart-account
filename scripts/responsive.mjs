@@ -69,7 +69,11 @@ async function inspect(page, intendedWidth) {
           style.overflowX === 'scroll' ||
           style.textOverflow === 'ellipsis';
         if (!deliberate) {
-          clipped.push({ el: name(el), text: (el.textContent || '').trim().slice(0, 40) });
+          clipped.push({
+            el: name(el),
+            field: el instanceof HTMLInputElement ? `${el.type}:${el.name}=${el.value}`.slice(0, 60) : '',
+            text: (el.textContent || '').trim().slice(0, 40),
+          });
         }
       }
     }
@@ -202,7 +206,8 @@ function assess(where, report, intendedWidth) {
     fail(where, `${item.el} runs ${item.over}px past the right edge — "${item.text}"`);
   }
   for (const item of report.clipped.slice(0, 4)) {
-    fail(where, `${item.el} clips its own text — "${item.text}"`);
+    const detail = item.field || item.text;
+    fail(where, `${item.el} clips its own text — "${detail}"`);
   }
   for (const item of report.small.slice(0, 4)) {
     fail(where, `${item.el} is ${item.w}x${item.h}, under the 48px rule — "${item.text}"`);
@@ -288,7 +293,7 @@ async function signIn(browser) {
   // dashboard, analysis, and long-form input regression.
   await page.goto(`${BASE}/plans/new`);
   await page.fill('input[name="season_year"]', '2570');
-  await page.fill('input[name="name"]', 'สวนรวม detailed responsive proof');
+  await page.fill('input[name="name"]', 'สวนทดสอบละเอียด');
   await page.click('button:has-text("สร้างฤดูกาล")');
   await page.waitForURL(/\/plans\/\d+\/quick\/production$/);
   const detailedPlanId = page.url().match(/\/plans\/(\d+)\/quick\/production$/)?.[1];

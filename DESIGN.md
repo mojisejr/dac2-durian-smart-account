@@ -254,6 +254,11 @@ Quick mode asks one question per page, in this fixed order:
 3. `คาดว่าฤดูกาลนี้มีต้นทุนรวมประมาณเท่าไร` with unit `บาท` and hint
    `รวมค่าใช้จ่ายทั้งหมดแบบคร่าว ๆ ก่อน รายละเอียดแยกทีหลังได้`
 
+The number-field labels beneath those headings are deliberately shorter:
+`ผลผลิตที่ขายได้โดยประมาณ`, `ราคาขายเฉลี่ยโดยประมาณ`, and
+`ต้นทุนรวมโดยประมาณ`. They keep the question as the page title without
+repeating the whole sentence inside the card.
+
 Each page says `ขั้น 1 จาก 3`, `ขั้น 2 จาก 3`, or `ขั้น 3 จาก 3`, offers
 `‹ ย้อนกลับ`, and can be left through a close target labelled
 `พักและกลับหน้าฤดูกาล`. The primary actions are `ถัดไป` and, on the last page,

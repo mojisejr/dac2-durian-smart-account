@@ -177,26 +177,30 @@ fn quick_mode_renders_one_ordered_question_per_page() {
             "production",
             "ขั้น 1 จาก 3",
             "ฤดูกาลนี้คาดว่าจะขายทุเรียนได้กี่กิโลกรัม",
+            "ผลผลิตที่ขายได้โดยประมาณ",
             "/plans/42",
         ),
         (
             "price",
             "ขั้น 2 จาก 3",
             "คาดว่าจะขายได้ราคาเฉลี่ยกี่บาทต่อกิโลกรัม",
+            "ราคาขายเฉลี่ยโดยประมาณ",
             "/plans/42/quick/production",
         ),
         (
             "cost",
             "ขั้น 3 จาก 3",
             "คาดว่าฤดูกาลนี้มีต้นทุนรวมประมาณเท่าไร",
+            "ต้นทุนรวมโดยประมาณ",
             "/plans/42/quick/price",
         ),
     ];
 
-    for (step, progress, question, back) in cases {
+    for (step, progress, question, field_label, back) in cases {
         let html = render_quick_question(step, estimate.clone());
         assert!(html.contains(progress), "{step}");
         assert!(html.contains(question), "{step}");
+        assert!(html.contains(field_label), "{step}");
         assert_eq!(html.matches("name=\"value\"").count(), 1, "{step}");
         assert!(html.contains(back), "{step}");
         assert!(!html.contains("กำไรโดยประมาณ"), "{step}");

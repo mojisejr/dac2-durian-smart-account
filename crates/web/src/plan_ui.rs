@@ -464,10 +464,11 @@ pub fn QuickPlanRoute() -> impl IntoView {
 pub fn QuickQuestionView(record: PlanRecord, step: String) -> impl IntoView {
     let save = ServerAction::<SaveQuickStep>::new();
     let id = record.id;
-    let (position, question, hint, unit, value, back) = match step.as_str() {
+    let (position, question, field_label, hint, unit, value, back) = match step.as_str() {
         "production" => (
             1,
             "ฤดูกาลนี้คาดว่าจะขายทุเรียนได้กี่กิโลกรัม",
+            "ผลผลิตที่ขายได้โดยประมาณ",
             "ใช้ยอดที่คาดว่าจะขายได้จริงหลังหักผลเสียและผลที่ไม่ได้ขาย",
             "กก.",
             record.quick_estimate.sellable_yield_kg,
@@ -476,6 +477,7 @@ pub fn QuickQuestionView(record: PlanRecord, step: String) -> impl IntoView {
         "price" => (
             2,
             "คาดว่าจะขายได้ราคาเฉลี่ยกี่บาทต่อกิโลกรัม",
+            "ราคาขายเฉลี่ยโดยประมาณ",
             "ถ้ามีหลายเกรด ให้ใช้ราคาเฉลี่ยคร่าว ๆ ของทั้งฤดูกาล",
             "บาท/กก.",
             record.quick_estimate.average_price_per_kg,
@@ -484,6 +486,7 @@ pub fn QuickQuestionView(record: PlanRecord, step: String) -> impl IntoView {
         _ => (
             3,
             "คาดว่าฤดูกาลนี้มีต้นทุนรวมประมาณเท่าไร",
+            "ต้นทุนรวมโดยประมาณ",
             "รวมค่าใช้จ่ายทั้งหมดแบบคร่าว ๆ ก่อน รายละเอียดแยกทีหลังได้",
             "บาท",
             record.quick_estimate.total_cost,
@@ -514,7 +517,7 @@ pub fn QuickQuestionView(record: PlanRecord, step: String) -> impl IntoView {
                     <input type="hidden" name="id" value=id/>
                     <input type="hidden" name="step" value=step/>
                     <label>
-                        <span>{question}</span>
+                        <span>{field_label}</span>
                         <span class="input-with-unit">
                             <input type="text" name="value" inputmode="decimal" value=value required autofocus/>
                             <span class="unit">{unit}</span>
