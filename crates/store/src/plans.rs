@@ -3,9 +3,11 @@ mod read;
 mod types;
 mod write;
 
-pub use types::{PlanId, PlanSummary, StoreError, StoredActualOutcome, StoredPlan};
+pub use types::{
+    PlanId, PlanSummary, StoreError, StoredActualOutcome, StoredPlan, StoredSeasonHistory,
+};
 
-use calc::{ActualOutcome, ForecastMode, Plan, QuickEstimate};
+use calc::{ActualOutcome, ForecastMode, OutcomeMetrics, Plan, QuickEstimate};
 use sqlx::{PgConnection, PgPool, Row};
 
 use crate::users::UserId;
@@ -27,6 +29,67 @@ pub async fn list(pool: &PgPool, owner_id: UserId) -> Result<Vec<PlanSummary>, S
                 season_year: row.try_get("season_year")?,
                 note: row.try_get("note")?,
                 closed: row.try_get("closed")?,
+            })
+        })
+        .collect()
+}
+
+pub async fn history(
+    pool: &PgPool,
+    owner_id: UserId,
+) -> Result<Vec<StoredSeasonHistory>, StoreError> {
+    let rows = sqlx::query(
+        "SELECT p.id, p.name, p.season_year,
+                a.finalized_at IS NOT NULL AS has_actual,
+                a.sellable_yield_kg, a.revenue, a.total_cost, a.note AS actual_note,
+                a.forecast_mode, a.forecast_sellable_yield_kg, a.forecast_revenue,
+                a.forecast_total_cost, a.forecast_profit,
+                a.forecast_average_price_per_kg, a.forecast_cost_per_kg
+         FROM plans p
+         LEFT JOIN season_actual_outcomes a
+           ON a.plan_id = p.id AND a.owner_id = p.owner_id AND a.finalized_at IS NOT NULL
+         WHERE p.owner_id = $1 AND p.closed_at IS NOT NULL
+         ORDER BY p.season_year ASC NULLS LAST, p.id ASC",
+    )
+    .bind(owner_id)
+    .fetch_all(pool)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            let has_actual: bool = row.try_get("has_actual")?;
+            let actual_outcome = has_actual
+                .then(|| {
+                    let forecast_mode = row
+                        .try_get::<Option<String>, _>("forecast_mode")?
+                        .map(codec::parse_forecast_mode)
+                        .transpose()?;
+                    Ok::<_, StoreError>(StoredActualOutcome {
+                        outcome: ActualOutcome {
+                            sellable_yield_kg: row.try_get("sellable_yield_kg")?,
+                            revenue: row.try_get("revenue")?,
+                            total_cost: row.try_get("total_cost")?,
+                            note: row.try_get("actual_note")?,
+                        },
+                        finalized: true,
+                        forecast_mode,
+                        forecast: Some(OutcomeMetrics {
+                            sellable_yield_kg: row.try_get("forecast_sellable_yield_kg")?,
+                            revenue: row.try_get("forecast_revenue")?,
+                            total_cost: row.try_get("forecast_total_cost")?,
+                            profit: row.try_get("forecast_profit")?,
+                            average_price_per_kg: row.try_get("forecast_average_price_per_kg")?,
+                            cost_per_kg: row.try_get("forecast_cost_per_kg")?,
+                        }),
+                    })
+                })
+                .transpose()?;
+
+            Ok(StoredSeasonHistory {
+                id: row.try_get("id")?,
+                name: row.try_get("name")?,
+                season_year: row.try_get("season_year")?,
+                actual_outcome,
             })
         })
         .collect()
