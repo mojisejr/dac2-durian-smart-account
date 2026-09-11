@@ -21,6 +21,9 @@ history. The first decision-support batch gives a new season a separate quick
 mode: three persisted owner inputs produce revenue, profit or loss, cost per
 kilogram, and break-even average sale price. It is deterministic and uses no
 AI, LLM, model API, prompt, embedding, vector store, or inference path.
+The second decision-support batch replaces immediate close with a persisted
+actual-outcome draft, explicit review, atomic finalization, and a deterministic
+comparison against the active forecast frozen at close.
 
 ## Quick forecast proof
 
@@ -54,12 +57,34 @@ cargo test -p calc
 cargo build -p calc --target wasm32-unknown-unknown
 ```
 
+## Actual outcome and comparison proof
+
+An open season stores a draft containing actual sellable kilograms, revenue,
+approximate total cost, and an optional note without closing. Final confirmation
+freezes that actual outcome and the active Quick or Detailed forecast in the
+same PostgreSQL transaction that sets the season closed. Repeating the same
+confirmation is idempotent; a changed payload remains rejected by the closed
+boundary. Existing closed seasons have no synthetic outcome, and a duplicated
+season never inherits one.
+
+`analyze_actual` derives actual profit, average price, and cost per kilogram.
+`compare` returns six rows with forecast, actual, and `actual - forecast`; a
+missing or zero denominator stays unavailable. The UI labels the forecast
+source and formula and uses neutral higher/lower/equal wording without claiming
+a cause.
+
+```bash
+cargo test -p calc
+./scripts/test-plans.sh
+```
+
 ## Persistence proof
 
 The store saves one complete `calc::Plan` aggregate into section-specific
 tables. Every plan query carries its owner ID, every replacement is atomic, and
-a closed plan rejects update, close, and delete operations. Duplicating a plan
-creates a new open aggregate, including when the source season is closed.
+a closed plan rejects update and delete operations. A season closes only with
+an actual snapshot. Duplicating a plan creates a new open aggregate without an
+actual outcome, including when the source season is closed.
 PostgreSQL also enforces one season per owner and harvest year. Metadata is
 editable only while the season is open, and list order follows the stored year
 rather than insertion order.

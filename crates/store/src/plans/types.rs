@@ -1,6 +1,6 @@
 use std::fmt;
 
-use calc::{ForecastMode, Plan, QuickEstimate};
+use calc::{ActualOutcome, ForecastMode, OutcomeMetrics, Plan, QuickEstimate};
 
 use crate::users::UserId;
 
@@ -24,7 +24,16 @@ pub struct StoredPlan {
     pub closed: bool,
     pub forecast_mode: ForecastMode,
     pub quick_estimate: QuickEstimate,
+    pub actual_outcome: Option<StoredActualOutcome>,
     pub plan: Plan,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StoredActualOutcome {
+    pub outcome: ActualOutcome,
+    pub finalized: bool,
+    pub forecast_mode: Option<ForecastMode>,
+    pub forecast: Option<OutcomeMetrics>,
 }
 
 #[derive(Debug)]

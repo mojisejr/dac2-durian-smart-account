@@ -120,7 +120,31 @@ async fn plan_flow(auth_session: store::AuthSession) -> StatusCode {
     {
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
-    if web::plans::close_for_owner(pool, user.id, created.id)
+    let actual = calc::ActualOutcome {
+        sellable_yield_kg: Some(Decimal::from(18_000)),
+        revenue: Some(Decimal::from(1_530_000)),
+        total_cost: Some(Decimal::from(990_000)),
+        note: "ผลผลิตน้อยกว่าคาด".into(),
+    };
+    if web::plans::save_actual_draft_for_owner(pool, user.id, created.id, &actual)
+        .await
+        .is_err()
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    let finalized = match web::plans::finalize_actual_for_owner(pool, user.id, created.id).await {
+        Ok(record) => record,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    if !finalized.closed
+        || !finalized
+            .actual_outcome
+            .as_ref()
+            .is_some_and(|outcome| outcome.finalized)
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    if web::plans::finalize_actual_for_owner(pool, user.id, created.id)
         .await
         .is_err()
     {

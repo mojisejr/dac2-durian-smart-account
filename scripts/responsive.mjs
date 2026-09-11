@@ -302,6 +302,25 @@ async function signIn(browser) {
   await page.click('button:has-text("ดูผลประมาณการ")');
   await page.waitForURL(new RegExp(`/plans/${planId}/quick/result$`));
 
+  // Save a reviewable actual draft. Leaving review must keep the season open
+  // and the draft available when the owner returns.
+  await page.goto(`${BASE}/plans/${planId}/close`);
+  await page.fill('input[name="sellable_yield_kg"]', '18000');
+  await page.fill('input[name="revenue"]', '1530000');
+  await page.fill('input[name="total_cost"]', '990000');
+  await page.fill('textarea[name="note"]', 'ผลผลิตน้อยกว่าคาด');
+  await page.click('button:has-text("บันทึกและตรวจทาน")');
+  await page.waitForURL(new RegExp(`/plans/${planId}/close/review$`));
+  await page.click('a:has-text("ยกเลิก · ยังไม่ปิดฤดูกาล")');
+  await page.waitForURL(new RegExp(`/plans/${planId}$`));
+  await page
+    .locator('a:has-text("บันทึกผลจริงและปิดฤดูกาล")')
+    .waitFor({ state: 'visible', timeout: 10000 })
+    .catch(() => {
+      throw new Error('leaving actual review closed the season unexpectedly');
+    });
+  await page.goto(`${BASE}/plans/${planId}/close/review`);
+
   // Keep a separate detailed-mode season in the same account so this proof
   // covers the new quick surfaces without dropping the pre-existing detailed
   // dashboard, analysis, and long-form input regression.
@@ -316,9 +335,51 @@ async function signIn(browser) {
   await page.click('button:has-text("เปลี่ยนเป็นแผนละเอียด")');
   await page.waitForURL(new RegExp(`/plans/${detailedPlanId}$`));
 
+  // A separate season reaches final comparison so the responsive matrix can
+  // measure both the editable draft and immutable result states.
+  await page.goto(`${BASE}/plans/new`);
+  await page.fill('input[name="season_year"]', '2571');
+  await page.fill('input[name="name"]', 'สวนทดสอบผลจริง');
+  await page.click('button:has-text("สร้างฤดูกาล")');
+  await page.waitForURL(/\/plans\/\d+\/quick\/production$/);
+  const comparisonPlanId = page.url().match(/\/plans\/(\d+)\/quick\/production$/)?.[1];
+  if (!comparisonPlanId) throw new Error('the comparison proof season was not created');
+  for (const [step, value, action] of [
+    ['production', '20000', 'ถัดไป'],
+    ['price', '80', 'ถัดไป'],
+    ['cost', '900000', 'ดูผลประมาณการ'],
+  ]) {
+    await page.waitForURL(new RegExp(`/plans/${comparisonPlanId}/quick/${step}$`));
+    await page.fill('input[name="value"]', value);
+    await page.click(`button:has-text("${action}")`);
+  }
+  await page.waitForURL(new RegExp(`/plans/${comparisonPlanId}/quick/result$`));
+  await page.goto(`${BASE}/plans/${comparisonPlanId}/close`);
+  await page.fill('input[name="sellable_yield_kg"]', '18000');
+  await page.fill('input[name="revenue"]', '1530000');
+  await page.fill('input[name="total_cost"]', '990000');
+  await page.fill('textarea[name="note"]', 'ผลผลิตน้อยกว่าคาด');
+  await page.click('button:has-text("บันทึกและตรวจทาน")');
+  await page.waitForURL(new RegExp(`/plans/${comparisonPlanId}/close/review$`));
+  await page.click('a:has-text("กลับไปแก้ผลจริง")');
+  await page.waitForURL(new RegExp(`/plans/${comparisonPlanId}/close$`));
+  if (await page.locator('input[name="total_cost"]').inputValue() !== '990000') {
+    throw new Error('returning from review lost the persisted actual draft');
+  }
+  await page.click('button:has-text("บันทึกและตรวจทาน")');
+  await page.waitForURL(new RegExp(`/plans/${comparisonPlanId}/close/review$`));
+  await page.click('button:has-text("ยืนยันผลจริงและปิดฤดูกาล")');
+  await page.waitForURL(new RegExp(`/plans/${comparisonPlanId}/comparison$`));
+  await page
+    .getByText('ต่ำกว่าประมาณการ 2,000.00 กก.', { exact: true })
+    .waitFor({ state: 'visible', timeout: 10000 })
+    .catch(() => {
+      throw new Error('final comparison did not show the deterministic yield delta');
+    });
+
   const cookies = await context.cookies();
   await context.close();
-  return { cookies, planId, detailedPlanId };
+  return { cookies, planId, detailedPlanId, comparisonPlanId };
 }
 
 /** No sheet may be left standing between measurements. */
@@ -370,7 +431,7 @@ async function openEachExplanation(page, size, where) {
 
 const browser = await chromium.launch({ channel: 'chrome' });
 try {
-  const { cookies, planId, detailedPlanId } = await signIn(browser);
+  const { cookies, planId, detailedPlanId, comparisonPlanId } = await signIn(browser);
   const routes = [
     ['demo', `${BASE}/demo`],
     ['new-season', `${BASE}/plans/new`],
@@ -380,6 +441,9 @@ try {
     ['quick-price', `${BASE}/plans/${planId}/quick/price`],
     ['quick-cost', `${BASE}/plans/${planId}/quick/cost`],
     ['quick-result', `${BASE}/plans/${planId}/quick/result`],
+    ['actual-entry', `${BASE}/plans/${planId}/close`],
+    ['actual-review', `${BASE}/plans/${planId}/close/review`],
+    ['actual-comparison', `${BASE}/plans/${comparisonPlanId}/comparison`],
     ['detailed-hub', `${BASE}/plans/${detailedPlanId}`],
     ['dashboard', `${BASE}/plans/${detailedPlanId}/dashboard`],
     ['analysis', `${BASE}/plans/${detailedPlanId}/analysis`],

@@ -1,5 +1,6 @@
 use calc::{
-    ForecastMode, Grade, QuickEstimate, VariableCostKind, VariableCostLine, workbook_sample,
+    ActualOutcome, ForecastMode, Grade, QuickEstimate, VariableCostKind, VariableCostLine,
+    workbook_sample,
 };
 use rust_decimal::Decimal;
 use sqlx::PgPool;
@@ -25,6 +26,15 @@ fn assert_not_found<T>(result: Result<T, StoreError>) {
 
 fn assert_closed<T>(result: Result<T, StoreError>) {
     assert!(matches!(result, Err(StoreError::Closed)));
+}
+
+fn actual_outcome() -> ActualOutcome {
+    ActualOutcome {
+        sellable_yield_kg: Some(Decimal::from(18_000)),
+        revenue: Some(Decimal::from(1_530_000)),
+        total_cost: Some(Decimal::from(990_000)),
+        note: "ผลผลิตน้อยกว่าคาด".into(),
+    }
 }
 
 #[sqlx::test(migrations = "../../migrations")]
@@ -116,7 +126,12 @@ async fn every_exposed_operation_enforces_owner_scope(pool: PgPool) -> Result<()
     assert_not_found(
         plans::set_forecast_mode(&pool, other.id, created.id, ForecastMode::Quick).await,
     );
-    assert_not_found(plans::close(&pool, other.id, created.id).await);
+    assert_not_found(
+        plans::save_actual_draft(&pool, other.id, created.id, &actual_outcome()).await,
+    );
+    assert_not_found(
+        plans::finalize_with_actual(&pool, other.id, created.id, &actual_outcome()).await,
+    );
     assert_not_found(plans::duplicate(&pool, other.id, created.id, 2570, "ขโมยสำเนา", "").await);
     assert_not_found(plans::delete(&pool, other.id, created.id).await);
 
@@ -131,7 +146,7 @@ async fn every_mutation_of_a_closed_plan_is_refused(pool: PgPool) -> Result<(), 
     let owner = users::create(&pool, "owner@example.test").await?;
     let plan = ten_grade_plan();
     let created = plans::create(&pool, owner.id, 2569, "", &plan).await?;
-    plans::close(&pool, owner.id, created.id).await?;
+    plans::finalize_with_actual(&pool, owner.id, created.id, &actual_outcome()).await?;
 
     let closed = plans::load(&pool, owner.id, created.id)
         .await?
@@ -140,11 +155,17 @@ async fn every_mutation_of_a_closed_plan_is_refused(pool: PgPool) -> Result<(), 
     assert_closed(plans::save(&pool, owner.id, created.id, &plan).await);
     assert_closed(plans::save_quick(&pool, owner.id, created.id, &QuickEstimate::default()).await);
     assert_closed(plans::set_forecast_mode(&pool, owner.id, created.id, ForecastMode::Quick).await);
-    assert_closed(plans::close(&pool, owner.id, created.id).await);
+    assert_closed(plans::save_actual_draft(&pool, owner.id, created.id, &actual_outcome()).await);
+    let changed_actual = ActualOutcome {
+        revenue: Some(Decimal::ONE),
+        ..actual_outcome()
+    };
+    assert_closed(plans::finalize_with_actual(&pool, owner.id, created.id, &changed_actual).await);
     assert_closed(plans::delete(&pool, owner.id, created.id).await);
 
     let next_season = plans::duplicate(&pool, owner.id, created.id, 2570, "ฤดูกาลถัดไป", "").await?;
     assert!(!next_season.closed);
+    assert!(next_season.actual_outcome.is_none());
     assert_eq!(next_season.plan.name, "ฤดูกาลถัดไป");
     assert!(
         plans::load(&pool, owner.id, created.id)
@@ -227,7 +248,7 @@ async fn list_returns_only_the_owners_plans_and_closed_state(
         ..calc::Plan::default()
     };
     let latest = plans::create(&pool, owner.id, 2569, "ฤดูล่าสุด", &named).await?;
-    plans::close(&pool, owner.id, first.id).await?;
+    plans::finalize_with_actual(&pool, owner.id, first.id, &actual_outcome()).await?;
     plans::create(&pool, other.id, 2569, "", &workbook_sample()).await?;
 
     let summaries = plans::list(&pool, owner.id).await?;
@@ -281,9 +302,102 @@ async fn metadata_is_editable_only_while_the_season_is_open(
     assert_eq!(updated.plan.name, "สวนรวม");
     assert_eq!(updated.note, "บันทึกใหม่");
 
-    plans::close(&pool, owner.id, created.id).await?;
+    plans::finalize_with_actual(&pool, owner.id, created.id, &actual_outcome()).await?;
     assert_closed(
         plans::update_metadata(&pool, owner.id, created.id, 2570, "ห้ามแก้", "ห้ามแก้").await,
     );
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn actual_draft_round_trips_without_closing_the_season(
+    pool: PgPool,
+) -> Result<(), StoreError> {
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let created = plans::create_quick(&pool, owner.id, 2569, "", &calc::Plan::default()).await?;
+    let draft = ActualOutcome {
+        sellable_yield_kg: Some(Decimal::from(18_000)),
+        revenue: None,
+        total_cost: None,
+        note: "กรอกค้างไว้".into(),
+    };
+
+    let saved = plans::save_actual_draft(&pool, owner.id, created.id, &draft).await?;
+    assert!(!saved.closed);
+    let actual = saved.actual_outcome.expect("draft is stored");
+    assert_eq!(actual.outcome, draft);
+    assert!(!actual.finalized);
+    assert!(actual.forecast.is_none());
+    assert!(actual.forecast_mode.is_none());
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn finalization_is_atomic_snapshots_the_forecast_and_is_idempotent(
+    pool: PgPool,
+) -> Result<(), StoreError> {
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let created = plans::create_quick(&pool, owner.id, 2569, "", &calc::Plan::default()).await?;
+    let quick = QuickEstimate {
+        sellable_yield_kg: Some(Decimal::from(20_000)),
+        average_price_per_kg: Some(Decimal::from(80)),
+        total_cost: Some(Decimal::from(900_000)),
+    };
+    plans::save_quick(&pool, owner.id, created.id, &quick).await?;
+
+    let first = plans::finalize_with_actual(&pool, owner.id, created.id, &actual_outcome()).await?;
+    let repeated =
+        plans::finalize_with_actual(&pool, owner.id, created.id, &actual_outcome()).await?;
+
+    assert!(first.closed);
+    assert_eq!(first, repeated);
+    let actual = first.actual_outcome.expect("final snapshot exists");
+    assert!(actual.finalized);
+    assert_eq!(actual.forecast_mode, Some(ForecastMode::Quick));
+    let forecast = actual.forecast.expect("forecast is frozen at close");
+    assert_eq!(forecast.revenue, Some(Decimal::from(1_600_000)));
+    assert_eq!(forecast.profit, Some(Decimal::from(700_000)));
+    assert_eq!(forecast.cost_per_kg, Some(Decimal::from(45)));
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn failed_snapshot_write_does_not_close_the_plan(pool: PgPool) -> Result<(), StoreError> {
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let created = plans::create_quick(&pool, owner.id, 2569, "", &calc::Plan::default()).await?;
+    let invalid = ActualOutcome {
+        note: "ก".repeat(2_001),
+        ..actual_outcome()
+    };
+
+    assert!(
+        plans::finalize_with_actual(&pool, owner.id, created.id, &invalid)
+            .await
+            .is_err()
+    );
+    let reloaded = plans::load(&pool, owner.id, created.id)
+        .await?
+        .expect("plan remains");
+    assert!(!reloaded.closed);
+    assert!(reloaded.actual_outcome.is_none());
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_legacy_closed_season_has_no_invented_actual_outcome(
+    pool: PgPool,
+) -> Result<(), StoreError> {
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let created = plans::create(&pool, owner.id, 2568, "", &ten_grade_plan()).await?;
+    sqlx::query("UPDATE plans SET closed_at = CURRENT_TIMESTAMP WHERE id = $1")
+        .bind(created.id)
+        .execute(&pool)
+        .await?;
+
+    let loaded = plans::load(&pool, owner.id, created.id)
+        .await?
+        .expect("legacy season remains readable");
+    assert!(loaded.closed);
+    assert!(loaded.actual_outcome.is_none());
     Ok(())
 }

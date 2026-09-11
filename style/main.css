@@ -146,6 +146,13 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 .quick-figure-list > div { align-items: end; border-top: 1px solid var(--border); display: grid; gap: 0.25rem; padding-top: 0.75rem; }
 .quick-figure-list span { color: var(--muted); }
 .quick-figure-list strong { font-size: 1.15rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.actual-entry-card, .actual-result-card, .comparison-list, .comparison-card { display: grid; gap: 1rem; }
+.actual-entry-card button, .actual-review-page form button { width: 100%; }
+.comparison-values { display: grid; gap: 0.5rem; margin: 0; }
+.comparison-values div { align-items: baseline; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: space-between; padding-top: 0.5rem; }
+.comparison-values dt { color: var(--muted); }
+.comparison-values dd { font-variant-numeric: tabular-nums; margin: 0; overflow-wrap: anywhere; text-align: right; }
+.comparison-card > strong { font-size: 1.05rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .demo-banner { background: var(--surface); border: 1px solid var(--warn); border-left-width: 4px; border-radius: 0.7rem; color: var(--text); display: grid; gap: 0.15rem; padding: 0.8rem 1rem; }
 .demo-banner span { color: var(--muted); }
 .status { border: 1px solid currentcolor; border-radius: 999px; flex: 0 0 auto; font-size: 0.82rem; margin-left: 0.5rem; padding: 0.2rem 0.55rem; }

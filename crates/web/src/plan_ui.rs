@@ -1,4 +1,4 @@
-use calc::{CashKind, HealthQuestion, VariableCostKind};
+use calc::{CashKind, ComparisonMetric, HealthQuestion, VariableCostKind};
 use leptos::{form::ActionForm, prelude::*};
 use leptos_router::{
     components::A,
@@ -10,8 +10,8 @@ use crate::{
     auth::{Logout, current_user_email},
     plan_form::{FixedCostForm, GradeForm, PlanForm, VariableCostForm},
     plans::{
-        ClosePlan, CreateSeason, PlanRecord, SavePlan, SaveQuickStep, SwitchForecastMode,
-        UpdateSeasonMetadata, list_plans, quick_resume_path,
+        CreateSeason, FinalizeActual, PlanRecord, SaveActualDraft, SavePlan, SaveQuickStep,
+        SwitchForecastMode, UpdateSeasonMetadata, list_plans, quick_resume_path,
     },
 };
 
@@ -274,7 +274,6 @@ pub fn PlanHubPage() -> impl IntoView {
 
 #[component]
 fn PlanHub(record: PlanRecord) -> impl IntoView {
-    let close = ServerAction::<ClosePlan>::new();
     let update_metadata = ServerAction::<UpdateSeasonMetadata>::new();
     let id = record.id;
     let form = record.form;
@@ -331,20 +330,298 @@ fn PlanHub(record: PlanRecord) -> impl IntoView {
             <section class="card plan-actions">
                 <h2>"จัดการฤดูกาล"</h2>
                 <A attr:class="button secondary" href=format!("/plans/new?source={id}")>"ทำฤดูกาลถัดไปจากฤดูนี้"</A>
-                <Show when=move || !closed>
-                    <details class="confirm-box">
-                        <summary>"ปิดฤดูกาล"</summary>
-                        <p>"เมื่อปิดแล้ว ฤดูกาลนี้จะอ่านได้อย่างเดียว และแก้กลับไม่ได้"</p>
-                        <ActionForm action=close>
-                            <input type="hidden" name="id" value=id/>
-                            <button class="danger" type="submit">"ยืนยัน ปิดฤดูกาล"</button>
-                        </ActionForm>
-                    </details>
-                </Show>
+                {if closed {
+                    if record.actual_outcome.as_ref().is_some_and(|actual| actual.finalized) {
+                        view! { <A attr:class="button primary" href=format!("/plans/{id}/comparison")>"ดูผลจริงเทียบประมาณการ"</A> }.into_any()
+                    } else {
+                        view! { <p class="caption">"ฤดูกาลนี้ปิดก่อนมีการบันทึกผลจริง จึงไม่มีตัวเลขเปรียบเทียบ"</p> }.into_any()
+                    }
+                } else {
+                    view! { <A attr:class="button danger" href=format!("/plans/{id}/close")>"บันทึกผลจริงและปิดฤดูกาล"</A> }.into_any()
+                }}
             </section>
             <BottomNav plan_id=id active=NavSection::Input/>
         </section>
     }
+}
+
+#[component]
+pub fn ActualClosePage() -> impl IntoView {
+    let id = route_plan_id();
+    let record = Resource::new(id, |id| async move {
+        match id {
+            Some(id) => crate::plans::load_plan(id).await,
+            None => Ok(None),
+        }
+    });
+    view! {
+        <Suspense fallback=move || view! { <p>"กำลังอ่านฤดูกาล…"</p> }>
+            {move || record.get().map(|result| match result {
+                Ok(Some(record)) => view! { <ActualCloseView record/> }.into_any(),
+                _ => not_found_view(),
+            })}
+        </Suspense>
+    }
+}
+
+#[component]
+pub fn ActualCloseView(record: PlanRecord) -> impl IntoView {
+    let save = ServerAction::<SaveActualDraft>::new();
+    let id = record.id;
+    let season = format!(
+        "{} · {}",
+        season_year_label(record.season_year),
+        record.form.name
+    );
+    let draft = record
+        .actual_outcome
+        .as_ref()
+        .map(|actual| actual.outcome.clone())
+        .unwrap_or_default();
+
+    if record.closed {
+        return view! {
+            <section class="page-stack actual-close-page">
+                <header class="page-heading compact-heading"><div><p class="eyebrow">{season}</p><h1>"ฤดูกาลนี้ปิดแล้ว"</h1></div></header>
+                {if record.actual_outcome.as_ref().is_some_and(|actual| actual.finalized) {
+                    view! { <A attr:class="button primary" href=format!("/plans/{id}/comparison")>"ดูผลจริงเทียบประมาณการ"</A> }.into_any()
+                } else {
+                    view! { <section class="card empty-state"><p>"ฤดูกาลนี้ปิดก่อนมีการบันทึกผลจริง จึงไม่มีตัวเลขเปรียบเทียบ"</p><A href=format!("/plans/{id}")>"กลับหน้าฤดูกาล"</A></section> }.into_any()
+                }}
+            </section>
+        }
+        .into_any();
+    }
+
+    view! {
+        <section class="page-stack actual-close-page">
+            <header class="page-heading compact-heading">
+                <div><p class="eyebrow">{season}</p><h1>"บันทึกผลจริง"</h1></div>
+                <A attr:class="icon-button" href=format!("/plans/{id}") attr:aria-label="ยกเลิกและกลับหน้าฤดูกาล">"×"</A>
+            </header>
+            <section class="card actual-entry-card">
+                <p>"กรอกยอดรวมเมื่อจบฤดู ระบบจะให้ตรวจทานอีกครั้งก่อนปิดถาวร"</p>
+                <ActionForm action=save>
+                    <input type="hidden" name="id" value=id/>
+                    <label><span>"ผลผลิตที่ขายได้จริง"</span><span class="input-with-unit"><input type="text" name="sellable_yield_kg" inputmode="decimal" value=decimal_input(draft.sellable_yield_kg) required autofocus/><span class="unit">"กก."</span></span></label>
+                    <label><span>"รายได้จริง"</span><span class="input-with-unit"><input type="text" name="revenue" inputmode="decimal" value=decimal_input(draft.revenue) required/><span class="unit">"บาท"</span></span></label>
+                    <label><span>"ต้นทุนรวมจริงโดยประมาณ"</span><span class="input-with-unit"><input type="text" name="total_cost" inputmode="decimal" value=decimal_input(draft.total_cost) required/><span class="unit">"บาท"</span></span></label>
+                    <label><span>"บันทึกว่าเกิดอะไรขึ้น (ไม่บังคับ)"</span><textarea name="note" maxlength="2000" rows="4">{draft.note}</textarea></label>
+                    <button class="primary" type="submit">"บันทึกและตรวจทาน"</button>
+                </ActionForm>
+                <ServerErrorMessage action=save/>
+            </section>
+            <A attr:class="button secondary" href=format!("/plans/{id}")>"ยกเลิก · เก็บฤดูกาลไว้เปิดอยู่"</A>
+        </section>
+    }
+    .into_any()
+}
+
+#[component]
+pub fn ActualReviewPage() -> impl IntoView {
+    let id = route_plan_id();
+    let record = Resource::new(id, |id| async move {
+        match id {
+            Some(id) => crate::plans::load_plan(id).await,
+            None => Ok(None),
+        }
+    });
+    view! {
+        <Suspense fallback=move || view! { <p>"กำลังอ่านผลจริง…"</p> }>
+            {move || record.get().map(|result| match result {
+                Ok(Some(record)) => view! { <ActualReviewView record/> }.into_any(),
+                _ => not_found_view(),
+            })}
+        </Suspense>
+    }
+}
+
+#[component]
+pub fn ActualReviewView(record: PlanRecord) -> impl IntoView {
+    let finalize = ServerAction::<FinalizeActual>::new();
+    let id = record.id;
+    let season = format!(
+        "{} · {}",
+        season_year_label(record.season_year),
+        record.form.name
+    );
+    let Some(actual_record) = record.actual_outcome.clone() else {
+        return view! {
+            <section class="page-stack actual-review-page"><section class="card empty-state"><h1>"ยังไม่มีผลจริงให้ตรวจทาน"</h1><A attr:class="button primary" href=format!("/plans/{id}/close")>"กรอกผลจริง"</A></section></section>
+        }.into_any();
+    };
+    if actual_record.finalized || record.closed {
+        return view! {
+            <section class="page-stack actual-review-page"><section class="card"><h1>"ฤดูกาลนี้ปิดแล้ว"</h1><A attr:class="button primary" href=format!("/plans/{id}/comparison")>"ดูผลจริงเทียบประมาณการ"</A></section></section>
+        }.into_any();
+    }
+    let actual = actual_record.outcome;
+    let analysis = calc::analyze_actual(&actual);
+    if !analysis.input_issues.is_empty() {
+        return view! {
+            <section class="page-stack actual-review-page"><section class="card empty-state"><h1>"ผลจริงยังไม่ครบ"</h1><p>"กลับไปกรอกผลผลิต รายได้ และต้นทุนให้ครบก่อนปิดฤดูกาล"</p><A attr:class="button primary" href=format!("/plans/{id}/close")>"กลับไปแก้"</A></section></section>
+        }.into_any();
+    }
+
+    view! {
+        <section class="page-stack actual-review-page">
+            <header class="page-heading compact-heading"><div><p class="eyebrow">{season}</p><h1>"ตรวจทานก่อนปิดฤดูกาล"</h1></div><A attr:class="icon-button" href=format!("/plans/{id}") attr:aria-label="ยกเลิกและกลับหน้าฤดูกาล">"×"</A></header>
+            <section class="card">
+                <h2>"ข้อมูลที่กำลังจะล็อก"</h2>
+                <dl class="season-metadata">
+                    <div><dt>"ผลผลิตที่ขายได้จริง"</dt><dd>{format!("{} กก.", money(actual.sellable_yield_kg.expect("complete actual yield")))}</dd></div>
+                    <div><dt>"รายได้จริง"</dt><dd>{format!("{} บาท", money(actual.revenue.expect("complete actual revenue")))}</dd></div>
+                    <div><dt>"ต้นทุนรวมจริง"</dt><dd>{format!("{} บาท", money(actual.total_cost.expect("complete actual cost")))}</dd></div>
+                    <div><dt>"กำไรหรือขาดทุนจริง"</dt><dd>{format!("{} บาท", money(analysis.metrics.profit.expect("complete actual profit")))}</dd></div>
+                    <div><dt>"บันทึก"</dt><dd>{if actual.note.is_empty() { "—".into() } else { actual.note.clone() }}</dd></div>
+                </dl>
+            </section>
+            <section class="card confirm-box">
+                <h2>"ยืนยันครั้งสุดท้าย"</h2>
+                <p>"เมื่อยืนยันแล้ว ผลจริงและประมาณการ ณ ตอนนี้จะถูกเก็บเป็นภาพนิ่ง ฤดูกาลนี้จะแก้ไขไม่ได้"</p>
+                <ActionForm action=finalize><input type="hidden" name="id" value=id/><button class="danger" type="submit">"ยืนยันผลจริงและปิดฤดูกาล"</button></ActionForm>
+                <ServerErrorMessage action=finalize/>
+            </section>
+            <A attr:class="button secondary" href=format!("/plans/{id}/close")>"กลับไปแก้ผลจริง"</A>
+            <A attr:class="button secondary" href=format!("/plans/{id}")>"ยกเลิก · ยังไม่ปิดฤดูกาล"</A>
+        </section>
+    }.into_any()
+}
+
+#[component]
+pub fn ActualComparisonPage() -> impl IntoView {
+    let id = route_plan_id();
+    let record = Resource::new(id, |id| async move {
+        match id {
+            Some(id) => crate::plans::load_plan(id).await,
+            None => Ok(None),
+        }
+    });
+    view! {
+        <Suspense fallback=move || view! { <p>"กำลังเปรียบเทียบ…"</p> }>
+            {move || record.get().map(|result| match result {
+                Ok(Some(record)) => view! { <ActualComparisonView record/> }.into_any(),
+                _ => not_found_view(),
+            })}
+        </Suspense>
+    }
+}
+
+#[component]
+pub fn ActualComparisonView(record: PlanRecord) -> impl IntoView {
+    let id = record.id;
+    let season = format!(
+        "{} · {}",
+        season_year_label(record.season_year),
+        record.form.name
+    );
+    let Some(actual_record) = record.actual_outcome else {
+        return legacy_actual_unavailable(id, season);
+    };
+    let (Some(forecast), Some(mode)) = (actual_record.forecast, actual_record.forecast_mode) else {
+        return legacy_actual_unavailable(id, season);
+    };
+    if !record.closed || !actual_record.finalized {
+        return view! { <section class="page-stack"><section class="card empty-state"><h1>"ฤดูกาลนี้ยังไม่ปิด"</h1><A attr:class="button primary" href=format!("/plans/{id}/close/review")>"กลับไปตรวจทาน"</A></section></section> }.into_any();
+    }
+    let actual = actual_record.outcome;
+    let actual_metrics = calc::analyze_actual(&actual).metrics;
+    let comparisons = calc::compare(&forecast, &actual);
+
+    view! {
+        <section class="page-stack actual-comparison-page">
+            <header class="page-heading compact-heading"><div><p class="eyebrow">{season}</p><h1>"ผลจริงเทียบประมาณการ"</h1></div><A attr:class="icon-button" href=format!("/plans/{id}") attr:aria-label="กลับหน้าฤดูกาล">"×"</A></header>
+            <section class="card actual-result-card">
+                <p class="eyebrow">"ผลจริง"</p>
+                <p class="result-label">{if actual_metrics.profit.is_some_and(|value| value >= rust_decimal::Decimal::ZERO) { "กำไรจริง" } else { "ขาดทุนจริง" }}</p>
+                <strong class="hero-value">{format!("{} บาท", money(actual_metrics.profit.unwrap_or_default().abs()))}</strong>
+                <dl class="season-metadata">
+                    <div><dt>"ผลผลิตที่ขายได้"</dt><dd>{actual_metric(actual_metrics.sellable_yield_kg, "กก.")}</dd></div>
+                    <div><dt>"รายได้"</dt><dd>{actual_metric(actual_metrics.revenue, "บาท")}</dd></div>
+                    <div><dt>"ต้นทุนรวม"</dt><dd>{actual_metric(actual_metrics.total_cost, "บาท")}</dd></div>
+                    <div><dt>"ราคาขายเฉลี่ย"</dt><dd>{actual_metric(actual_metrics.average_price_per_kg, "บาท/กก.")}</dd></div>
+                    <div><dt>"ต้นทุนต่อกิโลกรัม"</dt><dd>{actual_metric(actual_metrics.cost_per_kg, "บาท/กก.")}</dd></div>
+                </dl>
+                <p class="caption">{if actual.note.is_empty() { "ไม่มีบันทึกผลจริง".into() } else { actual.note.clone() }}</p>
+            </section>
+            <section class="comparison-list" aria-label="รายการเปรียบเทียบผลจริงกับประมาณการ">
+                <div class="section-title"><div><p class="eyebrow">"สูตรทุกแถว: ผลจริง - ประมาณการ"</p><h2>"ต่างจากที่วางไว้เท่าไร"</h2><p>{format!("แหล่งประมาณการ: {}", forecast_mode_label(mode))}</p></div></div>
+                {comparisons.into_iter().map(comparison_card).collect_view()}
+            </section>
+            <A attr:class="button secondary" href=format!("/plans/{id}")>"กลับหน้าฤดูกาล"</A>
+        </section>
+    }.into_any()
+}
+
+fn legacy_actual_unavailable(id: i64, season: String) -> AnyView {
+    view! {
+        <section class="page-stack actual-comparison-page">
+            <header class="page-heading compact-heading"><div><p class="eyebrow">{season}</p><h1>"ผลจริงเทียบประมาณการ"</h1></div></header>
+            <section class="card empty-state"><h2>"ไม่มีผลจริงที่บันทึกไว้"</h2><p>"ฤดูกาลนี้ปิดก่อนมีขั้นตอนบันทึกผลจริง ระบบจึงไม่เติมศูนย์หรือสร้างตัวเลขแทน"</p><A attr:class="button secondary" href=format!("/plans/{id}")>"กลับหน้าฤดูกาล"</A></section>
+        </section>
+    }.into_any()
+}
+
+fn comparison_card(row: calc::MetricComparison) -> impl IntoView {
+    let (label, unit) = comparison_metric_label(row.metric);
+    let result = row.delta.map_or_else(
+        || "ยังเปรียบเทียบไม่ได้".into(),
+        |delta| {
+            let direction = if delta > rust_decimal::Decimal::ZERO {
+                "สูงกว่าประมาณการ"
+            } else if delta < rust_decimal::Decimal::ZERO {
+                "ต่ำกว่าประมาณการ"
+            } else {
+                "เท่ากับประมาณการ"
+            };
+            format!("{direction} {} {unit}", money(delta.abs()))
+        },
+    );
+    view! {
+        <article class="card comparison-card">
+            <h3>{label}</h3><strong>{result}</strong>
+            <dl class="comparison-values">
+                <div><dt>"ประมาณการ"</dt><dd>{actual_metric(row.forecast, unit)}</dd></div>
+                <div><dt>"ผลจริง"</dt><dd>{actual_metric(row.actual, unit)}</dd></div>
+            </dl>
+            <p class="caption">"ผลต่าง = ผลจริง - ประมาณการ"</p>
+        </article>
+    }
+}
+
+fn comparison_metric_label(metric: ComparisonMetric) -> (&'static str, &'static str) {
+    match metric {
+        ComparisonMetric::SellableYieldKg => ("ผลผลิตที่ขายได้", "กก."),
+        ComparisonMetric::Revenue => ("รายได้", "บาท"),
+        ComparisonMetric::TotalCost => ("ต้นทุนรวม", "บาท"),
+        ComparisonMetric::Profit => ("กำไรหรือขาดทุน", "บาท"),
+        ComparisonMetric::AveragePricePerKg => ("ราคาขายเฉลี่ย", "บาท/กก."),
+        ComparisonMetric::CostPerKg => ("ต้นทุนต่อกิโลกรัม", "บาท/กก."),
+    }
+}
+
+fn actual_metric(value: Option<rust_decimal::Decimal>, unit: &str) -> String {
+    value.map_or_else(
+        || "ยังไม่มีข้อมูล".into(),
+        |value| format!("{} {unit}", money(value)),
+    )
+}
+
+fn forecast_mode_label(mode: calc::ForecastMode) -> &'static str {
+    match mode {
+        calc::ForecastMode::Quick => "ประมาณการเร็ว",
+        calc::ForecastMode::Detailed => "แผนละเอียด",
+    }
+}
+
+fn decimal_input(value: Option<rust_decimal::Decimal>) -> String {
+    value
+        .map(|value| value.normalize().to_string())
+        .unwrap_or_default()
+}
+
+fn not_found_view() -> AnyView {
+    view! { <section class="card"><h1>"ไม่พบฤดูกาลนี้"</h1><A href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any()
 }
 
 #[component]
