@@ -10,6 +10,8 @@ pub type PlanId = i64;
 pub struct PlanSummary {
     pub id: PlanId,
     pub name: String,
+    pub season_year: Option<i32>,
+    pub note: String,
     pub closed: bool,
 }
 
@@ -17,6 +19,8 @@ pub struct PlanSummary {
 pub struct StoredPlan {
     pub id: PlanId,
     pub owner_id: UserId,
+    pub season_year: Option<i32>,
+    pub note: String,
     pub closed: bool,
     pub plan: Plan,
 }
@@ -29,6 +33,7 @@ pub enum StoreError {
     InvalidEmail,
     InvalidPassword,
     DuplicateEmail,
+    DuplicateSeasonYear,
     InvalidToken,
     Crypto(String),
     InvalidValue { field: &'static str, value: String },
@@ -43,6 +48,9 @@ impl fmt::Display for StoreError {
             Self::InvalidEmail => formatter.write_str("invalid email address"),
             Self::InvalidPassword => formatter.write_str("password does not meet policy"),
             Self::DuplicateEmail => formatter.write_str("email address is already registered"),
+            Self::DuplicateSeasonYear => {
+                formatter.write_str("a season already exists for this owner and year")
+            }
             Self::InvalidToken => formatter.write_str("token is invalid or expired"),
             Self::Crypto(error) => write!(formatter, "credential operation failed: {error}"),
             Self::InvalidValue { field, value } => {
@@ -61,6 +69,7 @@ impl std::error::Error for StoreError {
             | Self::InvalidEmail
             | Self::InvalidPassword
             | Self::DuplicateEmail
+            | Self::DuplicateSeasonYear
             | Self::InvalidToken
             | Self::Crypto(_)
             | Self::InvalidValue { .. } => None,

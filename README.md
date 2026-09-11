@@ -6,14 +6,18 @@ Leptos SSR plus hydration web crate.
 
 This repository is being built in owner-reviewed slices. Slices 1–3 proved the
 stack, calculation engine, and PostgreSQL persistence. Slice 4 adds local
-account registration and recovery. Slice 5 adds the usable plan workspace: six
-Thai input sections, the workbook sample, a one-action clear flow, season
-duplication and close, and live in-browser totals. Slice 6 adds the analysis
+account registration and recovery. Slice 5 added the initial plan workspace;
+the season UX follow-up now supplies six Thai input sections, a non-persistent
+workbook demonstration, season duplication and close, and quiet live browser
+calculation. Slice 6 adds the analysis
 experience: a dashboard, nine efficiency KPIs against owner-set targets, the six
 completeness rules, both preliminary tax methods, and the price-by-yield scenario
-matrix. The screen keeps user
-information to the email address only; there is no profile image, avatar, or
-social login.
+matrix. The screen keeps user information to the email address only; there is
+no profile image, avatar, or social login. The season UX follow-up gives every
+stored season an independent Buddhist harvest year, name, and note; makes one
+season the combined forecast for all plots in that year; and turns the workbook
+sample into an editable, resettable browser demonstration that never creates
+history.
 
 ## Calculation proof
 
@@ -34,6 +38,9 @@ The store saves one complete `calc::Plan` aggregate into section-specific
 tables. Every plan query carries its owner ID, every replacement is atomic, and
 a closed plan rejects update, close, and delete operations. Duplicating a plan
 creates a new open aggregate, including when the source season is closed.
+PostgreSQL also enforces one season per owner and harvest year. Metadata is
+editable only while the season is open, and list order follows the stored year
+rather than insertion order.
 
 The integration tests use SQLx-managed isolated databases on the real local
 PostgreSQL container. Start the database, then run:
@@ -100,8 +107,8 @@ asserted all twenty-five of its cells were present. The markup was correct; the
 scroll container never scrolled, and layout is not in a string.
 
 `scripts/check-responsive.sh` drives real Chrome at 320, 360, 393, and 412
-pixels, opens every explanation and every tab in turn, and asserts three
-properties:
+pixels, exercises the non-persistent demonstration and real season creation,
+opens every explanation and every tab in turn, and asserts these properties:
 
 - No page is wider than the device, and content may not push the layout viewport
   out to absorb an overflow.

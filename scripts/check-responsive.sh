@@ -26,7 +26,17 @@ cargo leptos build
 
 cargo leptos serve &
 server=$!
-trap 'kill "$server" 2>/dev/null || true' EXIT
+cleanup() {
+  kill "$server" 2>/dev/null || true
+  docker compose exec -T database psql -U postgres -d dac2 -v ON_ERROR_STOP=1 \
+    -c "DELETE FROM users WHERE email_canonical = 'responsive-proof@dac2.local'" \
+    >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+docker compose exec -T database psql -U postgres -d dac2 -v ON_ERROR_STOP=1 \
+  -c "DELETE FROM users WHERE email_canonical = 'responsive-proof@dac2.local'" \
+  >/dev/null
 
 for _ in $(seq 1 120); do
   if curl -sf -o /dev/null "$APP_BASE_URL/" 2>/dev/null; then break; fi

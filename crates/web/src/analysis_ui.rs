@@ -15,7 +15,7 @@ use rust_decimal::Decimal;
 use crate::{
     explanations::{self, Explanation},
     plan_form::PlanForm,
-    plan_ui::{BottomNav, money},
+    plan_ui::{BottomNav, NavSection, money},
     plans::PlanRecord,
 };
 
@@ -53,6 +53,37 @@ fn score(value: Option<Decimal>) -> String {
     value.map_or_else(|| ABSENT.into(), |value| format!("{}/5", money(value)))
 }
 
+fn has_positive_investment(value: Option<Decimal>) -> bool {
+    value.is_some_and(|value| value > Decimal::ZERO)
+}
+
+fn roi_figure(analysis: &Analysis) -> Result<String, &'static str> {
+    match analysis.business.roi {
+        Some(value) => Ok(percent(Some(value))),
+        None if !has_positive_investment(analysis.cost.investment_base) => {
+            Err("กรอกเงินลงทุนอย่างน้อย 1 รายการ")
+        }
+        None => Err(ABSENT),
+    }
+}
+
+fn payback_figure(analysis: &Analysis) -> Result<String, &'static str> {
+    match analysis.business.payback_years {
+        Some(value) => Ok(with_unit(Some(value), "ปี")),
+        None if !has_positive_investment(analysis.cost.investment_base) => {
+            Err("กรอกเงินลงทุนอย่างน้อย 1 รายการ")
+        }
+        None if analysis
+            .business
+            .operating_cash_flow
+            .is_some_and(|value| value <= Decimal::ZERO) =>
+        {
+            Err("ยังคืนทุนไม่ได้ เพราะกระแสเงินสดไม่เป็นบวก")
+        }
+        None => Err(ABSENT),
+    }
+}
+
 // -------------------------------------------------------------------- labels
 
 const fn kpi_label(kind: KpiKind) -> (&'static str, &'static str) {
@@ -79,7 +110,7 @@ const fn check_label(kind: CheckKind) -> (&'static str, &'static str) {
         CheckKind::GradeSharesTotalOne => ("สัดส่วนเกรดรวมได้ 100%", "production"),
         CheckKind::SellableYieldPositive => ("มีผลผลิตที่ขายได้", "production"),
         CheckKind::PriceAboveVariableCost => ("ราคาขายสูงกว่าต้นทุนผันแปร", "variable-costs"),
-        CheckKind::InvestmentPositive => ("มีฐานเงินลงทุน", "fixed-costs"),
+        CheckKind::InvestmentPositive => ("มีเงินลงทุนอย่างน้อย 1 รายการ", "fixed-costs"),
         CheckKind::TotalCostLinked => ("ต้นทุนรวมตรงกับรายการที่กรอก", "variable-costs"),
         CheckKind::HealthAnswersComplete => ("ตอบคำถามสุขภาพครบ 12 ข้อ", "health"),
     }
@@ -201,14 +232,15 @@ fn MissingInputs(id: i64, form: PlanForm) -> impl IntoView {
 pub fn PlanDashboardView(record: PlanRecord) -> impl IntoView {
     let id = record.id;
     let name = record.form.name.clone();
+    let year = record.season_year;
     let form = record.form.clone();
     let analysis = record.form.to_plan().ok().map(|plan| calc::analyze(&plan));
 
     view! {
         <section class="page-stack plan-page">
             <header class="page-heading">
-                <div><p class="eyebrow">"หน้าแรก"</p><h1>{name}</h1></div>
-                <A attr:class="icon-button" href="/plans" attr:aria-label="กลับไปรายการแผน">"×"</A>
+                <div><p class="eyebrow">{year.map_or_else(|| "ฤดูกาล".into(), |year| format!("ฤดูกาล {year}"))}</p><h1>{name}</h1></div>
+                <A attr:class="icon-button" href=format!("/plans?from={id}") attr:aria-label="เปิดรายการฤดูกาล">"×"</A>
             </header>
             {match analysis {
                 Some(analysis) if analysis.business.net_profit.is_some() =>
@@ -216,13 +248,15 @@ pub fn PlanDashboardView(record: PlanRecord) -> impl IntoView {
                 _ => view! { <MissingInputs id form/> }.into_any(),
             }}
             <AnalysisLinks id/>
-            <BottomNav plan_id=Some(id)/>
+            <BottomNav plan_id=id active=NavSection::Home/>
         </section>
     }
 }
 
 #[component]
-fn DashboardFigures(analysis: Analysis) -> impl IntoView {
+pub(crate) fn DashboardFigures(analysis: Analysis) -> impl IntoView {
+    let roi = roi_figure(&analysis);
+    let payback = payback_figure(&analysis);
     let business = analysis.business;
     let revenue = analysis.revenue;
     let cost = analysis.cost;
@@ -257,14 +291,20 @@ fn DashboardFigures(analysis: Analysis) -> impl IntoView {
                     "ROI"
                     <Explain explanation=explanations::ROI label="ROI".into()/>
                 </span>
-                <strong>{percent(business.roi)}</strong>
+                {match roi {
+                    Ok(value) => view! { <strong>{value}</strong> }.into_any(),
+                    Err(reason) => view! { <span class="figure-missing">{reason}</span> }.into_any(),
+                }}
             </div>
             <div class="card figure-tile">
                 <span class="figure-label">
                     "ระยะคืนทุน"
                     <Explain explanation=explanations::PAYBACK label="ระยะคืนทุน".into()/>
                 </span>
-                <strong>{with_unit(business.payback_years, "ปี")}</strong>
+                {match payback {
+                    Ok(value) => view! { <strong>{value}</strong> }.into_any(),
+                    Err(reason) => view! { <span class="figure-missing">{reason}</span> }.into_any(),
+                }}
             </div>
         </section>
 
@@ -310,6 +350,7 @@ fn AnalysisLinks(id: i64) -> impl IntoView {
 pub fn PlanAnalysisView(record: PlanRecord) -> impl IntoView {
     let id = record.id;
     let name = record.form.name.clone();
+    let year = record.season_year;
     let form = record.form.clone();
     let analysis = record.form.to_plan().ok().map(|plan| calc::analyze(&plan));
     let tab = RwSignal::new("efficiency");
@@ -317,14 +358,14 @@ pub fn PlanAnalysisView(record: PlanRecord) -> impl IntoView {
     view! {
         <section class="page-stack plan-page">
             <header class="page-heading">
-                <div><p class="eyebrow">"วิเคราะห์"</p><h1>{name}</h1></div>
+                <div><p class="eyebrow">{year.map_or_else(|| "วิเคราะห์".into(), |year| format!("วิเคราะห์ · ฤดูกาล {year}"))}</p><h1>{name}</h1></div>
                 <A attr:class="icon-button" href=format!("/plans/{id}/dashboard") attr:aria-label="กลับไปหน้าแรกของแผน">"×"</A>
             </header>
             {match analysis {
                 Some(analysis) => view! { <AnalysisTabs id analysis tab/> }.into_any(),
                 None => view! { <MissingInputs id form/> }.into_any(),
             }}
-            <BottomNav plan_id=Some(id)/>
+            <BottomNav plan_id=id active=NavSection::Analysis/>
         </section>
     }
 }
