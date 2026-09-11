@@ -16,7 +16,7 @@ const SECTIONS: [(&str, &str, &str); 6] = [
     ("market", "ตลาด", "ลูกค้า ความต้องการ และช่องทางขาย"),
     ("production", "ผลผลิตและเกรด", "พื้นที่ ผลผลิต สูญเสีย และสัดส่วนเกรด"),
     ("variable-costs", "ต้นทุนผันแปร", "รายการที่เปลี่ยนตามการผลิต"),
-    ("fixed-costs", "ต้นทุนคงที่", "เงินสด ค่าเสื่อม และฐานลงทุน"),
+    ("fixed-costs", "ต้นทุนคงที่", "เงินสด ค่าเสื่อม และเงินลงทุน"),
     ("targets", "เป้าหมาย", "ตัวเลขเปรียบเทียบที่เจ้าของกำหนด"),
     ("health", "สุขภาพสวน", "12 คำถาม 6 มิติ"),
 ];
@@ -502,13 +502,14 @@ fn VariableCostFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
 #[component]
 fn FixedCostFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
     view! { <section class="card field-stack">
+        <p class="section-intro">"กรอกเงินลงทุนเฉพาะรายการที่ใช้เงินก้อนซื้อหรือสร้างสิ่งที่ใช้ได้หลายปี เช่น ระบบน้ำ รถ หรือเครื่องมือ ค่าใช้จ่ายประจำที่ไม่มีเงินก้อนเริ่มต้น เว้นช่องนี้ได้"</p>
         <details class="explanation"><summary>"ⓘ เงินสด กับ ไม่ใช่เงินสด ต่างกันอย่างไร"</summary><h3>"คืออะไร"</h3><p>"ค่าเสื่อมระบบน้ำและค่าเสื่อมรถ เป็นต้นทุนที่ลงบัญชีแต่ปีนี้ไม่ได้ควักเงินจ่าย ส่วนค่าเช่า ดอกเบี้ย และค่าแรงประจำ จ่ายจริงทุกปี"</p><h3>"ใช้ยังไง"</h3><p>"เลือกประเภทให้ถูกตอนกรอกต้นทุนคงที่"</p><h3>"ทำไมต้องมี"</h3><p>"เป็นสิ่งเดียวที่ทำให้กระแสเงินสดกับกำไรสุทธิต่างกันได้"</p><h3>"ไม่ใส่ได้ไหม"</h3><p>"ใส่ผิดประเภทได้ แต่กระแสเงินสดจะผิดตาม"</p></details>
         {move || form.get().fixed_costs.into_iter().enumerate().map(|(index, line)| view! {
             <div class="repeat-row">
                 <PlanField label="รายการ" value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.name.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.name = v })) closed/>
                 <label><span>"ประเภท"</span>{if closed { view! { <p class="readonly-value">{cash_kind_label(line.cash_kind)}</p> }.into_any() } else { view! { <select on:change=move |event| { let kind = if event_target_value(&event) == "non-cash" { CashKind::NonCash } else { CashKind::Cash }; form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.cash_kind = kind }); }><option value="cash" selected=line.cash_kind == CashKind::Cash>"เงินสด"</option><option value="non-cash" selected=line.cash_kind == CashKind::NonCash>"ไม่ใช่เงินสด"</option></select> }.into_any() }}</label>
                 <PlanField label="จำนวนต่อปี" unit="บาท" numeric=true value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.amount_per_year.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.amount_per_year = v })) closed/>
-                <PlanField label="ฐานเงินลงทุน" unit="บาท" numeric=true value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.investment_base.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.investment_base = v })) closed/>
+                <PlanField label="เงินที่ลงทุนกับรายการนี้ (ถ้ามี)" unit="บาท" numeric=true value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.investment_base.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.investment_base = v })) closed/>
                 <Show when=move || !closed><button class="text-button bad-text" type="button" on:click=move |_| form.update(|f| { if index < f.fixed_costs.len() { f.fixed_costs.remove(index); } })>"ลบรายการ"</button></Show>
             </div>
         }).collect_view()}

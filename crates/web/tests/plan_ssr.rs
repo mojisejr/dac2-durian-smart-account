@@ -101,3 +101,16 @@ fn all_six_input_routes_render_closed_values_without_edit_controls() {
         assert!(html.contains("readonly-value"), "{section}");
     }
 }
+
+#[test]
+fn fixed_costs_explain_that_investment_is_optional_per_item() {
+    let html = render(
+        "fixed-costs",
+        false,
+        PlanForm::from_plan(&calc::workbook_sample()),
+    );
+
+    assert!(html.contains("เงินที่ลงทุนกับรายการนี้ (ถ้ามี)"));
+    assert!(html.contains("ค่าใช้จ่ายประจำที่ไม่มีเงินก้อนเริ่มต้น เว้นช่องนี้ได้"));
+    assert!(!html.contains("ฐานเงินลงทุน"));
+}

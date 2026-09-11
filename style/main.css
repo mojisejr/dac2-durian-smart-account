@@ -181,6 +181,7 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 .figure-grid { display: grid; gap: 0.7rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .figure-tile { display: grid; gap: 0.3rem; }
 .figure-tile strong { font-size: 1.15rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; text-wrap: balance; }
+.figure-missing { color: var(--muted); font-size: 0.82rem; line-height: 1.35; }
 .figure-list { display: grid; gap: 0.2rem; }
 .figure-row, .kpi-row { align-items: center; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; justify-content: space-between; min-height: 48px; padding: 0.5rem 0; }
 .figure-list .figure-row:first-of-type, .kpi-list .kpi-row:first-of-type { border-top: 0; }

@@ -42,7 +42,7 @@ pub fn calculate(plan: &Plan, revenue: &RevenueAnalysis) -> CostAnalysis {
             .filter_map(|line| line.amount_per_year)
             .sum()
     });
-    let investment_base = complete_sum(plan.fixed_costs.iter().map(|line| line.investment_base));
+    let investment_base = present_sum(plan.fixed_costs.iter().map(|line| line.investment_base));
     let total_cost = variable_cost
         .zip(fixed_cost)
         .map(|(variable, fixed)| variable + fixed);
@@ -75,6 +75,18 @@ fn complete_sum(values: impl IntoIterator<Item = Option<Decimal>>) -> Option<Dec
     values.into_iter().try_fold(Decimal::ZERO, |total, value| {
         value.map(|value| total + value)
     })
+}
+
+fn present_sum(values: impl IntoIterator<Item = Option<Decimal>>) -> Option<Decimal> {
+    let mut found = false;
+    let total = values
+        .into_iter()
+        .flatten()
+        .fold(Decimal::ZERO, |total, value| {
+            found = true;
+            total + value
+        });
+    found.then_some(total)
 }
 
 fn nonzero_ratio(numerator: Decimal, denominator: Decimal) -> Option<Decimal> {
@@ -221,5 +233,49 @@ mod tests {
             calculate(&plan, &revenue).cash_fixed_cost,
             Some(Decimal::ZERO)
         );
+    }
+
+    #[test]
+    fn blank_investment_on_a_recurring_cost_does_not_hide_other_investments() {
+        let mut blank = workbook_sample();
+        blank.fixed_costs.push(FixedCostLine {
+            name: "ค่าแรงประจำเพิ่ม".into(),
+            cash_kind: CashKind::Cash,
+            amount_per_year: Some(Decimal::from(60_000)),
+            investment_base: None,
+        });
+        let mut explicit_zero = blank.clone();
+        explicit_zero
+            .fixed_costs
+            .last_mut()
+            .expect("the recurring cost exists")
+            .investment_base = Some(Decimal::ZERO);
+
+        let blank_result = crate::analyze(&blank);
+        let zero_result = crate::analyze(&explicit_zero);
+
+        assert_eq!(
+            blank_result.cost.investment_base,
+            Some(Decimal::from(700_000))
+        );
+        assert_eq!(blank_result.business.roi, zero_result.business.roi);
+        assert_eq!(
+            blank_result.business.payback_years,
+            zero_result.business.payback_years
+        );
+    }
+
+    #[test]
+    fn all_blank_investments_keep_roi_and_payback_unavailable() {
+        let mut plan = workbook_sample();
+        for line in &mut plan.fixed_costs {
+            line.investment_base = None;
+        }
+
+        let result = crate::analyze(&plan);
+
+        assert_eq!(result.cost.investment_base, None);
+        assert_eq!(result.business.roi, None);
+        assert_eq!(result.business.payback_years, None);
     }
 }

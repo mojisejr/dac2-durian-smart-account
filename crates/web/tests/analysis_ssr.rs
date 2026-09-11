@@ -129,6 +129,23 @@ fn the_dashboard_renders_every_business_figure_the_workbook_caches() {
 }
 
 #[test]
+fn missing_investment_and_non_positive_cash_flow_name_the_actual_blocker() {
+    let mut no_investment = workbook_sample();
+    for line in &mut no_investment.fixed_costs {
+        line.investment_base = None;
+    }
+    let html = dashboard(PlanForm::from_plan(&no_investment));
+    assert!(html.contains("กรอกเงินลงทุนอย่างน้อย 1 รายการ"));
+
+    let mut no_cash_return = workbook_sample();
+    for grade in &mut no_cash_return.production.grades {
+        grade.price_per_kg = Some(Decimal::ZERO);
+    }
+    let html = dashboard(PlanForm::from_plan(&no_cash_return));
+    assert!(html.contains("ยังคืนทุนไม่ได้ เพราะกระแสเงินสดไม่เป็นบวก"));
+}
+
+#[test]
 fn an_empty_plan_names_what_is_missing_instead_of_showing_a_figure() {
     let html = dashboard(PlanForm::from_plan(&Plan::default()));
 
@@ -200,7 +217,7 @@ fn all_six_completeness_rules_render_with_a_route_that_would_fix_them() {
         "สัดส่วนเกรดรวมได้ 100%",
         "มีผลผลิตที่ขายได้",
         "ราคาขายสูงกว่าต้นทุนผันแปร",
-        "มีฐานเงินลงทุน",
+        "มีเงินลงทุนอย่างน้อย 1 รายการ",
         "ต้นทุนรวมตรงกับรายการที่กรอก",
         "ตอบคำถามสุขภาพครบ 12 ข้อ",
     ] {
