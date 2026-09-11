@@ -8,6 +8,7 @@
 
 pub mod actual;
 pub mod analysis;
+pub mod assets;
 pub mod breakeven;
 pub mod checks;
 pub mod comparison;
@@ -26,6 +27,7 @@ pub mod validation;
 
 pub use actual::*;
 pub use analysis::*;
+pub use assets::*;
 pub use comparison::*;
 pub use plan::*;
 pub use quick::*;
@@ -36,8 +38,18 @@ pub use validation::*;
 
 /// Calculate every derived workbook surface from one input aggregate.
 pub fn analyze(plan: &Plan) -> Analysis {
+    analyze_with_assets(plan, &[], None)
+}
+
+/// Calculate a detailed plan with explicitly selected owner assets and an
+/// optional starting-capital context. Neither source mutates the plan rows.
+pub fn analyze_with_assets(
+    plan: &Plan,
+    assets: &[AssetAllocation],
+    starting_capital: Option<rust_decimal::Decimal>,
+) -> Analysis {
     let revenue = revenue::calculate(plan);
-    let cost = cost::calculate(plan, &revenue);
+    let cost = cost::calculate_with_assets(plan, &revenue, assets, starting_capital);
     let business = breakeven::calculate(&revenue, &cost);
     let health = health::calculate(plan);
     let efficiency = efficiency::calculate(plan, &revenue, &cost);

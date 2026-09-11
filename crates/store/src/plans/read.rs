@@ -16,6 +16,7 @@ pub async fn load(
 ) -> Result<Option<StoredPlan>, StoreError> {
     let Some(plan_row) = sqlx::query(
         "SELECT name, season_year, note, closed_at IS NOT NULL AS closed,
+                starting_capital,
                 forecast_mode, quick_sellable_yield_kg,
                 quick_average_price_per_kg, quick_total_cost
          FROM plans
@@ -232,18 +233,26 @@ pub async fn load(
     })
     .transpose()?;
 
+    let season_year = plan_row.try_get("season_year")?;
+    let closed = plan_row.try_get("closed")?;
+    let asset_allocations =
+        crate::assets::allocations_for_plan(connection, owner_id, plan_id, season_year, closed)
+            .await?;
+
     Ok(Some(StoredPlan {
         id: plan_id,
         owner_id,
-        season_year: plan_row.try_get("season_year")?,
+        season_year,
         note: plan_row.try_get("note")?,
-        closed: plan_row.try_get("closed")?,
+        closed,
         forecast_mode: codec::parse_forecast_mode(plan_row.try_get("forecast_mode")?)?,
         quick_estimate: QuickEstimate {
             sellable_yield_kg: plan_row.try_get("quick_sellable_yield_kg")?,
             average_price_per_kg: plan_row.try_get("quick_average_price_per_kg")?,
             total_cost: plan_row.try_get("quick_total_cost")?,
         },
+        starting_capital: plan_row.try_get("starting_capital")?,
+        asset_allocations,
         actual_outcome,
         plan: Plan {
             name: plan_row.try_get("name")?,

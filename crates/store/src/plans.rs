@@ -171,6 +171,8 @@ async fn create_with_mode(
         closed: false,
         forecast_mode,
         quick_estimate: quick_estimate.clone(),
+        starting_capital: None,
+        asset_allocations: Vec::new(),
         actual_outcome: None,
         plan: plan.clone(),
     })
@@ -275,6 +277,33 @@ pub async fn update_metadata(
     Ok(())
 }
 
+pub async fn save_starting_capital(
+    pool: &PgPool,
+    owner_id: UserId,
+    id: PlanId,
+    starting_capital: Option<rust_decimal::Decimal>,
+) -> Result<StoredPlan, StoreError> {
+    if starting_capital.is_some_and(|value| {
+        value <= rust_decimal::Decimal::ZERO
+            || value > rust_decimal::Decimal::from(calc::MAX_ASSET_VALUE)
+    }) {
+        return Err(StoreError::InvalidValue {
+            field: "plans.starting_capital",
+            value: starting_capital.unwrap_or_default().to_string(),
+        });
+    }
+    let mut transaction = pool.begin().await?;
+    ensure_open(transaction.as_mut(), owner_id, id).await?;
+    sqlx::query("UPDATE plans SET starting_capital = $3 WHERE id = $1 AND owner_id = $2")
+        .bind(id)
+        .bind(owner_id)
+        .bind(starting_capital)
+        .execute(transaction.as_mut())
+        .await?;
+    transaction.commit().await?;
+    load(pool, owner_id, id).await?.ok_or(StoreError::NotFound)
+}
+
 pub async fn save_actual_draft(
     pool: &PgPool,
     owner_id: UserId,
@@ -349,8 +378,13 @@ pub async fn finalize_with_actual(
     let stored = read::load(transaction.as_mut(), owner_id, id)
         .await?
         .ok_or(StoreError::NotFound)?;
-    let forecast =
-        calc::forecast_metrics(stored.forecast_mode, &stored.quick_estimate, &stored.plan);
+    let forecast = calc::forecast_metrics_with_assets(
+        stored.forecast_mode,
+        &stored.quick_estimate,
+        &stored.plan,
+        &stored.asset_allocations,
+        stored.starting_capital,
+    );
     let outcome = normalized(outcome);
     sqlx::query(
         "INSERT INTO season_actual_outcomes (
@@ -391,6 +425,7 @@ pub async fn finalize_with_actual(
     .bind(forecast.cost_per_kg)
     .execute(transaction.as_mut())
     .await?;
+    crate::assets::snapshot_selected(transaction.as_mut(), owner_id, id).await?;
     sqlx::query("UPDATE plans SET closed_at = CURRENT_TIMESTAMP WHERE id = $1 AND owner_id = $2")
         .bind(id)
         .bind(owner_id)
@@ -431,8 +466,9 @@ pub async fn duplicate(
     let id: PlanId = sqlx::query_scalar(
         "INSERT INTO plans (
             owner_id, name, season_year, note, forecast_mode,
-            quick_sellable_yield_kg, quick_average_price_per_kg, quick_total_cost
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+            quick_sellable_yield_kg, quick_average_price_per_kg, quick_total_cost,
+            starting_capital
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
     )
     .bind(owner_id)
     .bind(&source.plan.name)
@@ -442,6 +478,7 @@ pub async fn duplicate(
     .bind(source.quick_estimate.sellable_yield_kg)
     .bind(source.quick_estimate.average_price_per_kg)
     .bind(source.quick_estimate.total_cost)
+    .bind(source.starting_capital)
     .fetch_one(transaction.as_mut())
     .await
     .map_err(season_write_error)?;
@@ -456,6 +493,8 @@ pub async fn duplicate(
         closed: false,
         forecast_mode,
         quick_estimate: source.quick_estimate,
+        starting_capital: source.starting_capital,
+        asset_allocations: Vec::new(),
         actual_outcome: None,
         plan: source.plan,
     })
@@ -479,7 +518,7 @@ fn season_write_error(error: sqlx::Error) -> StoreError {
     StoreError::Database(error)
 }
 
-async fn ensure_open(
+pub(crate) async fn ensure_open(
     connection: &mut PgConnection,
     owner_id: UserId,
     id: PlanId,

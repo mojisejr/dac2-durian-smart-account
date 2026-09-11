@@ -1,6 +1,6 @@
 # DAC2 — Design
 
-**Status:** draft, revision 0.6
+**Status:** draft, revision 0.7
 **Home:** this file moves to the application repository root in slice 1. There is
 one copy of it, never two.
 
@@ -341,6 +341,39 @@ The hub edits year, name, and note while the season is open. Its management
 area holds `ทำฤดูกาลถัดไปจากฤดูนี้` and
 `บันทึกผลจริงและปิดฤดูกาล`. Reset belongs only to the browser demonstration; a
 real season is never mistaken for disposable sample data.
+
+### สินทรัพย์และเงินลงทุน
+
+This optional detailed-planning screen reuses the existing card, list-row,
+number-field, status-pill, disclosure, and locked-banner patterns. It introduces
+no new navigation level or visual language. Its first card separates five
+sources by name: `ต้นทุนคงที่ที่กรอกเอง`,
+`ค่าเสื่อมจากสินทรัพย์ที่เลือก`, `เงินลงทุนที่กรอกในรายการเดิม`,
+`มูลค่าสินทรัพย์ที่เลือก`, and `เงินทุนเริ่มต้น`.
+
+The warning beside those figures is explicit:
+`ก่อนเลือกสินทรัพย์ ตรวจว่าคุณไม่ได้กรอกค่าเสื่อมหรือเงินลงทุนของชิ้นเดียวกันไว้ในต้นทุนคงที่แล้ว ระบบจะไม่เดาหรือลบรายการเดิมให้`.
+Every asset starts `ยังไม่รวม`; the owner must press `รวมในฤดูนี้`, and can
+reverse it with `เอาออกจากฤดูนี้`. An inactive item says
+`ไม่อยู่ในปีใช้งาน`; a selected item made inactive by a later edit says
+`เลือกไว้ แต่ไม่อยู่ในปีใช้งาน` rather than silently pretending it was never
+selected.
+
+Equipment asks for name, original value, Buddhist start year or approximate
+prior years in use, expected useful life, optional residual value, and optional
+retired year. Blank residual copy says
+`ไม่ได้ระบุมูลค่าคงเหลือ ระบบใช้ 0 บาทเฉพาะค่าประมาณนี้`. The screen always
+states that straight-line depreciation is a planning estimate, not tax
+depreciation or market value. Owned land is labelled
+`ที่ดินที่เป็นเจ้าของ · ไม่คิดค่าเสื่อม`; rented land remains a manually entered
+recurring fixed cost.
+
+Starting capital says
+`ใช้เป็นฐานคำนวณ ROI และระยะคืนทุนเท่านั้น ไม่ใช่ต้นทุนของฤดู และไม่ใช่มูลค่าสินทรัพย์`.
+Quick mode shows `ไม่รวมในประมาณการเร็ว` and retains its three-answer boundary.
+After close, the page uses the locked banner
+`ข้อมูลนี้ถูกเก็บพร้อมตอนปิดฤดู · แก้ไขไม่ได้` and renders the frozen selected
+facts without selection, edit, or capital forms.
 
 ### บันทึกผลจริงและปิดฤดูกาล
 

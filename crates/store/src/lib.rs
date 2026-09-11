@@ -2,6 +2,7 @@
 
 use sqlx::PgPool;
 
+pub mod assets;
 pub mod plans;
 pub mod reset_tokens;
 mod tokens;

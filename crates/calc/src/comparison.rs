@@ -37,6 +37,16 @@ pub fn forecast_metrics(
     quick: &QuickEstimate,
     detailed: &Plan,
 ) -> OutcomeMetrics {
+    forecast_metrics_with_assets(mode, quick, detailed, &[], None)
+}
+
+pub fn forecast_metrics_with_assets(
+    mode: ForecastMode,
+    quick: &QuickEstimate,
+    detailed: &Plan,
+    assets: &[crate::AssetAllocation],
+    starting_capital: Option<Decimal>,
+) -> OutcomeMetrics {
     match mode {
         ForecastMode::Quick => {
             let analysis = crate::analyze_quick(quick);
@@ -50,7 +60,7 @@ pub fn forecast_metrics(
             }
         }
         ForecastMode::Detailed => {
-            let analysis = crate::analyze(detailed);
+            let analysis = crate::analyze_with_assets(detailed, assets, starting_capital);
             OutcomeMetrics {
                 sellable_yield_kg: analysis.revenue.sellable_yield_kg,
                 revenue: analysis.revenue.revenue,

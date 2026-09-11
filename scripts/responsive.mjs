@@ -30,6 +30,22 @@ const WIDTHS = [
 const failures = [];
 const fail = (where, message) => failures.push(`${where}: ${message}`);
 
+async function submitAndReload(page, button, label) {
+  const pending = page.waitForResponse(
+    (response) => response.request().method() === 'POST',
+    { timeout: 10000 },
+  );
+  await button.click();
+  const response = await pending;
+  if (!response.ok()) {
+    throw new Error(`${label} returned HTTP ${response.status()}`);
+  }
+  await page.waitForTimeout(300);
+  const error = (await page.locator('.bad-message').allTextContents()).join(' ').trim();
+  if (error) throw new Error(`${label} failed: ${error}`);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+}
+
 async function inspect(page, intendedWidth) {
   return page.evaluate((intendedWidth) => {
     const inScroller = (el) => {
@@ -438,9 +454,63 @@ async function signIn(browser) {
     throw new Error('advanced target did not persist after leaving and returning');
   }
 
+  // An asset is entered once, starts excluded, and affects only a season the
+  // owner explicitly includes it in. Starting capital stays visibly separate.
+  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await page.click('summary:has-text("การวางแผนขั้นสูง (ไม่บังคับ)")');
+  await page.click('a:has-text("สินทรัพย์และเงินลงทุน")');
+  await page.waitForURL(new RegExp(`/plans/${detailedPlanId}/assets$`));
+  await page.click('summary:has-text("+ เพิ่มสินทรัพย์")');
+  const create = page.locator('details.asset-create');
+  await create.locator('input[name="name"]').fill('ระบบน้ำกลางสวน');
+  await create.locator('input[name="original_cost"]').fill('100000');
+  await create.locator('input[name="start_year"]').fill('2568');
+  await create.locator('input[name="useful_life_years"]').fill('5');
+  await submitAndReload(page, create.locator('button:has-text("บันทึกสินทรัพย์")'), 'asset creation');
+  await page.getByText('ยังไม่รวม', { exact: true }).waitFor({ state: 'visible' });
+  await page.getByText('ระบบจะไม่เดาหรือลบรายการเดิมให้', { exact: false }).waitFor({ state: 'visible' });
+  await submitAndReload(page, page.locator('button:has-text("รวมในฤดูนี้")'), 'asset inclusion');
+  await page.getByText('รวมในฤดูนี้', { exact: true }).waitFor({ state: 'visible' });
+  await page.fill('input[name="starting_capital"]', '50000');
+  await submitAndReload(page, page.locator('button:has-text("บันทึกเงินทุนเริ่มต้น")'), 'starting capital save');
+  if (await page.locator('input[name="starting_capital"]').inputValue() !== '50000') {
+    throw new Error('starting capital did not persist independently');
+  }
+
+  // The same owner asset appears in another season without re-entry, but is
+  // excluded there until the owner makes a second explicit choice.
+  await page.goto(`${BASE}/plans/new`);
+  await page.fill('input[name="season_year"]', '2572');
+  await page.fill('input[name="name"]', 'สวนทดสอบสินทรัพย์เปิด');
+  await page.click('button:has-text("สร้างฤดูกาล")');
+  await page.waitForURL(/\/plans\/\d+\/quick\/production$/);
+  const assetOpenPlanId = page.url().match(/\/plans\/(\d+)\/quick\/production$/)?.[1];
+  if (!assetOpenPlanId) throw new Error('the open asset proof season was not created');
+  await page.goto(`${BASE}/plans/${assetOpenPlanId}`);
+  await submitAndReload(page, page.locator('button:has-text("เปลี่ยนเป็นแผนละเอียด")'), 'asset proof mode switch');
+  await page.goto(`${BASE}/plans/${assetOpenPlanId}/assets`);
+  await page.getByText('ระบบน้ำกลางสวน', { exact: true }).waitFor({ state: 'visible' });
+  await page.getByText('ยังไม่รวม', { exact: true }).waitFor({ state: 'visible' });
+
+  // Closing freezes the selected facts and contribution. The closed asset page
+  // must remain readable and expose no edit or selection controls.
+  await page.goto(`${BASE}/plans/${detailedPlanId}/close`);
+  await page.fill('input[name="sellable_yield_kg"]', '18000');
+  await page.fill('input[name="revenue"]', '1530000');
+  await page.fill('input[name="total_cost"]', '990000');
+  await page.click('button:has-text("บันทึกและตรวจทาน")');
+  await page.waitForURL(new RegExp(`/plans/${detailedPlanId}/close/review$`));
+  await page.click('button:has-text("ยืนยันผลจริงและปิดฤดูกาล")');
+  await page.waitForURL(new RegExp(`/plans/${detailedPlanId}/comparison$`));
+  await page.goto(`${BASE}/plans/${detailedPlanId}/assets`);
+  await page.getByText('ข้อมูลนี้ถูกเก็บพร้อมตอนปิดฤดู · แก้ไขไม่ได้', { exact: true }).waitFor({ state: 'visible' });
+  if (await page.locator('button:has-text("เอาออกจากฤดูนี้")').count()) {
+    throw new Error('closed asset snapshot still exposed a selection control');
+  }
+
   const cookies = await context.cookies();
   await context.close();
-  return { cookies, planId, detailedPlanId, comparisonPlanId };
+  return { cookies, planId, detailedPlanId, comparisonPlanId, assetOpenPlanId };
 }
 
 /** No sheet may be left standing between measurements. */
@@ -492,7 +562,7 @@ async function openEachExplanation(page, size, where) {
 
 const browser = await chromium.launch({ channel: 'chrome' });
 try {
-  const { cookies, planId, detailedPlanId, comparisonPlanId } = await signIn(browser);
+  const { cookies, planId, detailedPlanId, comparisonPlanId, assetOpenPlanId } = await signIn(browser);
   const routes = [
     ['demo', `${BASE}/demo`],
     ['new-season', `${BASE}/plans/new`],
@@ -512,6 +582,8 @@ try {
     ['production', `${BASE}/plans/${detailedPlanId}/production`],
     ['health', `${BASE}/plans/${detailedPlanId}/health`],
     ['targets-advanced', `${BASE}/plans/${detailedPlanId}/targets`],
+    ['assets-closed', `${BASE}/plans/${detailedPlanId}/assets`],
+    ['assets-open', `${BASE}/plans/${assetOpenPlanId}/assets`],
   ];
 
   for (const size of WIDTHS) {
@@ -522,44 +594,40 @@ try {
       deviceScaleFactor: 2,
     });
     await context.addCookies(cookies);
+    const page = await context.newPage();
 
     for (const [routeName, url] of routes) {
-      // Route measurements are independent. A fresh page keeps a transient
-      // explanation, focus state, or hydration navigation from contaminating
-      // the next route's geometry proof.
-      const page = await context.newPage();
-      try {
-        await page.goto(url, { waitUntil: 'domcontentloaded' });
-        await page.waitForTimeout(250);
-        assess(`${size.name}px ${routeName}`, await inspect(page, size.width), size.width);
+      // A full document navigation keeps route measurements independent without
+      // accumulating twenty live page runtimes inside one phone viewport.
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.waitForTimeout(250);
+      assess(`${size.name}px ${routeName}`, await inspect(page, size.width), size.width);
 
-        // Every explanation, one at a time: an open card is the state that failed.
-        // Only visible ones — a panel carrying `hidden` is not on screen to tap.
-        await openEachExplanation(page, size, routeName);
+      // Every explanation, one at a time: an open card is the state that failed.
+      // Only visible ones — a panel carrying `hidden` is not on screen to tap.
+      await openEachExplanation(page, size, routeName);
 
-        if (routeName === 'analysis') {
-          for (const tab of ['ตรวจสอบ', 'ภาษี', 'สถานการณ์']) {
-            const button = page.locator(`button[role="tab"]:has-text("${tab}")`);
-            if (await button.count()) {
-              await ensureClosed(page);
-              await button.click({ timeout: 10000 });
-              await page.waitForTimeout(200);
-              assess(`${size.name}px analysis:${tab}`, await inspect(page, size.width), size.width);
-              await openEachExplanation(page, size, `analysis:${tab}`);
-            }
-          }
-          await ensureClosed(page);
-          const table = page.locator('details.scenario-table:visible > summary');
-          if (await table.count()) {
-            await table.click({ timeout: 10000 });
-            await page.waitForTimeout(250);
-            assess(`${size.name}px analysis:table`, await inspect(page, size.width), size.width);
+      if (routeName === 'analysis') {
+        for (const tab of ['ตรวจสอบ', 'ภาษี', 'สถานการณ์']) {
+          const button = page.locator(`button[role="tab"]:has-text("${tab}")`);
+          if (await button.count()) {
+            await ensureClosed(page);
+            await button.click({ timeout: 10000 });
+            await page.waitForTimeout(200);
+            assess(`${size.name}px analysis:${tab}`, await inspect(page, size.width), size.width);
+            await openEachExplanation(page, size, `analysis:${tab}`);
           }
         }
-      } finally {
-        await page.close();
+        await ensureClosed(page);
+        const table = page.locator('details.scenario-table:visible > summary');
+        if (await table.count()) {
+          await table.click({ timeout: 10000 });
+          await page.waitForTimeout(250);
+          assess(`${size.name}px analysis:table`, await inspect(page, size.width), size.width);
+        }
       }
     }
+    await page.close();
     await context.close();
   }
 } finally {

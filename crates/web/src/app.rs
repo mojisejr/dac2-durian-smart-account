@@ -5,6 +5,7 @@ use leptos_router::{
     path,
 };
 
+use crate::assets::AssetPage;
 use crate::auth::{
     Login, Register, RequestPasswordReset, ResendVerification, ResetPassword, VerifyEmail,
 };
@@ -37,6 +38,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("plans/:id/close") view=ActualClosePage/>
                     <Route path=path!("plans/:id/close/review") view=ActualReviewPage/>
                     <Route path=path!("plans/:id/comparison") view=ActualComparisonPage/>
+                    <Route path=path!("plans/:id/assets") view=AssetPage/>
                     <Route path=path!("plans/:id/:section") view=PlanSectionRoute/>
                 </Routes>
             </main>

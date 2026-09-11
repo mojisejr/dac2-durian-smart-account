@@ -36,6 +36,8 @@ fn render(section: &str, closed: bool, form: PlanForm) -> String {
                         closed,
                         forecast_mode: calc::ForecastMode::Detailed,
                         quick_estimate: calc::QuickEstimate::default(),
+                        starting_capital: None,
+                        asset_allocations: Vec::new(),
                         actual_outcome: None,
                         form: form.clone(),
                     }
@@ -79,6 +81,8 @@ fn quick_record(estimate: calc::QuickEstimate, closed: bool) -> PlanRecord {
         closed,
         forecast_mode: calc::ForecastMode::Quick,
         quick_estimate: estimate,
+        starting_capital: None,
+        asset_allocations: Vec::new(),
         actual_outcome: None,
         form: PlanForm::from_plan(&calc::Plan::default()),
     }
@@ -145,6 +149,8 @@ fn actual_record(finalized: bool) -> PlanRecord {
         closed: finalized,
         forecast_mode: calc::ForecastMode::Quick,
         quick_estimate: quick,
+        starting_capital: None,
+        asset_allocations: Vec::new(),
         actual_outcome: Some(ActualOutcomeRecord {
             outcome,
             finalized,
@@ -375,6 +381,8 @@ fn detailed_hub_moves_targets_under_an_explicit_advanced_area() {
                     closed: false,
                     forecast_mode: calc::ForecastMode::Detailed,
                     quick_estimate: calc::QuickEstimate::default(),
+                    starting_capital: None,
+                    asset_allocations: Vec::new(),
                     actual_outcome: None,
                     form: PlanForm::from_plan(&calc::workbook_sample()),
                 }/>
