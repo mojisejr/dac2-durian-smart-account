@@ -1,6 +1,6 @@
 # DAC2 — Design
 
-**Status:** draft, revision 0.7
+**Status:** draft, revision 0.8
 **Home:** this file moves to the application repository root in slice 1. There is
 one copy of it, never two.
 
@@ -20,9 +20,12 @@ string a user sees is written here in Thai, verbatim, because that is what ships
 ## Who uses this, and where
 
 An orchard owner, typically in their thirties or older, fluent with phone
-applications and used to Shopee, LINE, food delivery, and mobile banking. They
-do not need an interface explained to them, and padding the screen with
-instructions insults them.
+applications and used to Shopee, LINE, food delivery, and mobile banking. Phone
+fluency does not imply accounting, market-planning, or spreadsheet literacy.
+The interface itself stays familiar and compact, while unfamiliar domain
+questions carry short persistent help at the point of entry. Help explains the
+fact being asked for and what it changes; it never explains how to tap a button
+the user already understands.
 
 They are also standing in an orchard. Sun on the screen, one hand on the phone,
 the other hand doing something else, possibly dirty or wet.
@@ -47,6 +50,9 @@ layout that works with one thumb. Neither excuses the other.
    taught this interaction to the user, use their version of it.
 6. **Nothing moves to attract attention.** Motion confirms what the user just
    did. It never advertises.
+7. **Guide without trapping.** Recommend one useful next question, but keep an
+   open season freely editable. Missing facts stay missing; unrelated sections
+   never become gates to a result that does not need them.
 
 ## Colour
 
@@ -167,6 +173,24 @@ inside on the right (`กก.`, `บาท`, `ไร่`, `%`), `inputmode="deci
 thousands separators applied when focus leaves. Invalid values keep what the
 owner typed and explain underneath in `bad`; the field is never cleared for them.
 
+**Guided field.** The semantic wrapper around a number, text, or choice field.
+It uses this order when each item exists:
+
+1. a familiar primary question;
+2. a correct formal term as readable `caption`-sized secondary text;
+3. a persistent hint and concrete example;
+4. `กรอกแล้วได้อะไร` naming the result this answer changes;
+5. the control and unit;
+6. an explicit optional, `ยังไม่รู้ / ข้ามก่อน`, or `ยืนยันว่าไม่มี` action
+   when the data contract supports it; and
+7. a field-specific error associated with the control.
+
+Essential help never lives only in placeholder text or behind an explain
+button. The formal term is quieter than the question but never hidden, smaller
+than 13px, or lower than the 6:1 text-contrast floor. `ยังไม่รู้`, confirmed
+none, and numeric zero are different states and are never substituted for one
+another.
+
 **Live calculation line.** Pinned above the tab bar on every input screen. It is
 a compact `surface` row with a quiet border, not a dark result card. It says
 `กำไรสุทธิโดยประมาณ` and its value, or `ยังคำนวณกำไรสุทธิไม่ได้`, and updates
@@ -280,6 +304,20 @@ says `ตอบให้ครบ 3 ข้อก่อนดูผล` and
 says `ประมาณการเร็วกำลังใช้งาน` and
 `ผลของฤดูกาลนี้คำนวณจากประมาณการเร็ว ระบบจึงไม่สลับไปใช้ข้อมูลละเอียดโดยอัตโนมัติ`.
 
+### Hybrid guided navigation
+
+The default journey recommends one next question at a time, but it is not a
+locked wizard. After a season exists, every guided page retains back, pause,
+resume, current-result, and `ดูและแก้ข้อมูลทั้งหมด` routes. A returning owner
+may open any section directly. Leaving one page never destroys an answer on
+another.
+
+Optional or explicitly unknown facts may be deferred. A result is unavailable
+only while one of its own dependencies is absent, and the unavailable state
+names and links to that exact question. The first financial result requires
+sellable kilograms, average price, and total cost; market, health, targets,
+assets, and detailed classifications do not gate it.
+
 ### หน้าแรก — dashboard
 
 Borrowed from a mobile banking home screen: the figure that matters is largest
@@ -308,9 +346,11 @@ computed from absent inputs.
 
 ### กรอกข้อมูล — hub
 
-Five main cards show their own completeness. Any order, any time, no wizard,
-nothing lost by leaving. This screen is the workbook's `ตรวจสอบ` sheet made into
-navigation. The nine optional KPI targets move under one collapsed
+The top card states the nearest useful result and one recommended next action.
+Below it, `ดูและแก้ข้อมูลทั้งหมด` exposes every section in any order, at any
+time, with nothing lost by leaving. Cards name result readiness, a specific
+missing dependency, or the additional result an optional section unlocks;
+generic `ครบ` and `ยังไม่ครบ` are forbidden. The nine optional KPI targets move under one collapsed
 `การวางแผนขั้นสูง (ไม่บังคับ)` area after the main cards. Existing target values
 remain stored and editable there, but an empty target never looks like unfinished
 main work.
@@ -318,11 +358,11 @@ main work.
 ```
 ฤดู 2569                     ⋯
 ┌────────────────────────────┐
-│ ✓ แผนตลาด               › │
-│ ✓ ประมาณการผลผลิต       › │
-│ ⚠ ปัจจัยและต้นทุน  3/16 › │
-│ ○ ต้นทุนคงที่           › │
-│ ○ สุขภาพธุรกิจ     0/12 › │
+│ เพิ่มได้เพื่อเทียบยอดผู้ซื้อ │
+│ ยังขาดราคาขายแต่ละเกรด   │
+│ พอคำนวณต้นทุนรวมแล้ว      │
+│ เพิ่มได้เพื่อดูกระแสเงินสด │
+│ เพิ่มได้เพื่อทบทวนสุขภาพสวน │
 └────────────────────────────┘
 
 การวางแผนขั้นสูง (ไม่บังคับ)
@@ -900,6 +940,13 @@ reachable from both.
    1.55.
 8. No screen shows a verdict against a target the owner has not set, and no
    screen shows a confident figure derived from inputs that are missing.
+9. Essential field guidance is persistent and programmatically associated; a
+   placeholder or hidden explanation is never its only copy.
+10. An open season always has both a recommended next action and a route to edit
+    all sections freely. Only a requested result's real dependencies may block
+    that result.
+11. Familiar language is primary. Correct accounting or farm-management terms
+    remain visible as readable secondary text.
 
 ## Open questions
 
