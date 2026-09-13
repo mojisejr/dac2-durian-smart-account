@@ -387,6 +387,111 @@ async function signIn(browser) {
     .getByRole('heading', { name: 'ประมาณการเร็วกำลังใช้งาน', exact: true })
     .waitFor({ state: 'visible', timeout: 10000 });
 
+  // Batch 2: the production page offers two ways to answer each question.
+  // Switching branches must keep the other branch's typed facts, refresh and
+  // back must keep the saved selection, and the unselected branch's figure is
+  // quoted beside the entry rather than applied.
+  const production = `${BASE}/plans/${detailedPlanId}/production`;
+  await page.goto(production);
+  await page.locator('#production-trees').waitFor({ state: 'visible', timeout: 10000 });
+  if (!(await page.isChecked('input[name="yield-source"][value="derived"]'))) {
+    throw new Error('a new detailed plan does not start on the derived yield branch');
+  }
+  await page.fill('#production-trees', '200');
+  await page.fill('#production-fruits-per-tree', '35');
+  await page.fill('#production-fruit-weight', '3');
+  await page.fill('#production-loss', '5');
+  await page.getByText('คำนวณได้ประมาณ 19,950.00 กก. หลังหักส่วนที่เสีย').waitFor({ timeout: 5000 });
+  await page.check('input[name="yield-source"][value="direct"]');
+  await page.locator('#production-sellable-yield').waitFor({ state: 'visible', timeout: 5000 });
+  if (await page.locator('#production-trees').count()) {
+    throw new Error('the unselected derived fields are still asked on the direct branch');
+  }
+  await page.getByText('จากข้อมูลต้นทุเรียนที่กรอกไว้ คำนวณได้ประมาณ 19,950.00 กก.').waitFor({ timeout: 5000 });
+  await page.fill('#production-sellable-yield', '18000');
+  await page.check('input[name="yield-source"][value="derived"]');
+  if ((await page.locator('#production-trees').inputValue()) !== '200') {
+    throw new Error('switching yield branches lost the derived facts');
+  }
+  await page.check('input[name="yield-source"][value="direct"]');
+  if (!['18000', '18,000'].includes(await page.locator('#production-sellable-yield').inputValue())) {
+    throw new Error('switching yield branches lost the direct figure');
+  }
+  if (await page.isChecked('input[name="grade-entry"][value="kilograms"]')) {
+    throw new Error('grade entry started in kilograms without an explicit choice');
+  }
+  await page.check('input[name="price-source"][value="average"]');
+  await page.fill('#production-average-price', '79');
+  if (await page.locator('input[name="grade-entry"]').count()) {
+    throw new Error('grade entry controls are shown while one average price is selected');
+  }
+  const saveResponse = page.waitForResponse(
+    (response) => response.request().method() === 'POST',
+    { timeout: 10000 },
+  );
+  await page.click('button:has-text("บันทึกส่วนนี้")');
+  if (!(await saveResponse).ok()) {
+    throw new Error('saving the production branches returned a failing HTTP status');
+  }
+  await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('#production-sellable-yield').waitFor({ state: 'visible', timeout: 10000 });
+  if (!(await page.isChecked('input[name="yield-source"][value="direct"]'))) {
+    throw new Error('refresh lost the saved direct yield branch');
+  }
+  if ((await page.locator('#production-sellable-yield').inputValue()) !== '18000') {
+    throw new Error('refresh lost the saved direct sellable kilograms');
+  }
+  if ((await page.locator('#production-average-price').inputValue()) !== '79') {
+    throw new Error('refresh lost the saved average price');
+  }
+  await page.check('input[name="yield-source"][value="derived"]');
+  if ((await page.locator('#production-trees').inputValue()) !== '200') {
+    throw new Error('the unselected derived facts were not persisted with the section');
+  }
+
+  // Interrupted resume: leave for the market page, answer the buyer question,
+  // and come back through browser history without losing either page.
+  await page.goto(`${BASE}/plans/${detailedPlanId}/market`);
+  await page.locator('#market-buyer-committed-kg').waitFor({ state: 'visible', timeout: 10000 });
+  await page.fill('#market-buyer-committed-kg', '25000');
+  const marketSave = page.waitForResponse(
+    (response) => response.request().method() === 'POST',
+    { timeout: 10000 },
+  );
+  await page.click('button:has-text("บันทึกส่วนนี้")');
+  if (!(await marketSave).ok()) {
+    throw new Error('saving the market section returned a failing HTTP status');
+  }
+  await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
+  await page.goto(production);
+  await page.locator('#production-sellable-yield').waitFor({ state: 'visible', timeout: 10000 });
+  await page.goBack({ waitUntil: 'domcontentloaded' });
+  await page.locator('#market-buyer-committed-kg').waitFor({ state: 'visible', timeout: 10000 });
+  // A restored history entry keeps the blur-formatted text; a re-rendered
+  // one shows the stored figure. Either is the same saved answer.
+  const buyerAfterBack = await page.locator('#market-buyer-committed-kg').inputValue();
+  if (!['25000', '25,000'].includes(buyerAfterBack)) {
+    throw new Error(`browser back lost the saved buyer quantity (saw ${JSON.stringify(buyerAfterBack)} at ${page.url()})`);
+  }
+  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await page.getByText('พร้อมเทียบยอดผู้ซื้อกับผลผลิต').waitFor({ timeout: 10000 });
+
+  // Grade entry in kilograms converts visibly against the saved total.
+  await page.goto(production);
+  await page.locator('#production-sellable-yield').waitFor({ state: 'visible', timeout: 10000 });
+  await page.check('input[name="price-source"][value="by_grade"]');
+  await page.click('button:has-text("+ เพิ่มเกรด")');
+  await page.check('input[name="grade-entry"][value="kilograms"]');
+  await page.getByLabel('เกรดนี้กี่กิโล').fill('9000');
+  await page.getByText('≈ 50.00% ของกิโลที่คาดว่าจะขายได้').waitFor({ timeout: 5000 });
+  await page.check('input[name="grade-entry"][value="percent"]');
+  if ((await page.getByLabel('เกรดนี้กี่เปอร์เซ็นต์ของทั้งหมด').inputValue()) !== '50') {
+    throw new Error('switching grade entry back to percent did not show the converted share');
+  }
+  await page.check('input[name="price-source"][value="average"]');
+  await page.getByText('เกรดที่เคยกรอกไว้ยังเก็บอยู่').waitFor({ timeout: 5000 });
+
   // A separate season reaches final comparison so the responsive matrix can
   // measure both the editable draft and immutable result states.
   await page.goto(`${BASE}/plans/new`);

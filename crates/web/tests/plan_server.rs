@@ -108,6 +108,44 @@ async fn plan_flow(auth_session: store::AuthSession) -> StatusCode {
     {
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
+    // Switching the production branches through the section endpoint keeps
+    // the unselected branch's facts and feeds only the selected ones.
+    let mut branch_submission = loaded.form.clone();
+    branch_submission.production.yield_source = calc::YieldSource::Direct;
+    branch_submission.production.sellable_yield_kg = "18,000".into();
+    branch_submission.production.price_source = calc::PriceSource::Average;
+    branch_submission.production.average_price_per_kg = "79".into();
+    if web::plans::save_section_for_owner(
+        pool,
+        user.id,
+        created.id,
+        "production",
+        &branch_submission,
+    )
+    .await
+    .is_err()
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    expected.production.yield_source = calc::YieldSource::Direct;
+    expected.production.sellable_yield_kg = Some(Decimal::from(18_000));
+    expected.production.price_source = calc::PriceSource::Average;
+    expected.production.average_price_per_kg = Some(Decimal::from(79));
+    loaded = match web::plans::load_for_owner(pool, user.id, created.id).await {
+        Ok(Some(record)) => record,
+        _ => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    let Some(branched) = loaded.form.to_plan().ok() else {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    };
+    if branched != expected
+        || branched.production.grades.len() != 10
+        || branched.production.producing_trees != Some(Decimal::from(200))
+        || calc::analyze(&branched).revenue.revenue != Some(Decimal::from(1_422_000))
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+
     let detailed = match web::plans::set_forecast_mode_for_owner(
         pool,
         user.id,

@@ -5,7 +5,7 @@ use leptos::tachys::view::Position;
 use leptos_router::components::Router;
 use leptos_router::location::RequestUrl;
 use web::{
-    plan_form::PlanForm,
+    plan_form::{GradeEntry, PlanForm},
     plan_ui::{
         ActualCloseView, ActualComparisonView, ActualReviewView, DemoPage,
         DetailedModeActiveNotice, PlanField, PlanHub, PlanSectionView, QuickQuestionView,
@@ -16,7 +16,7 @@ use web::{
 
 const SECTIONS: [(&str, &str); 6] = [
     ("market", "ตลาด"),
-    ("production", "ผลผลิตและเกรด"),
+    ("production", "ผลผลิตและราคา"),
     ("variable-costs", "ต้นทุนผันแปร"),
     ("fixed-costs", "ต้นทุนคงที่"),
     ("targets", "เป้าหมาย"),
@@ -647,4 +647,153 @@ fn quick_url_truthfully_names_when_detailed_mode_is_active() {
     assert!(html.contains("ค่าประมาณการเร็วเดิมยังเก็บไว้"));
     assert!(html.contains("กลับไปดูและแก้แผนละเอียด"));
     assert!(!html.contains("ประมาณการเร็วกำลังใช้งาน"));
+}
+
+fn guided_labels(html: &str) -> Vec<&str> {
+    let mut labels = Vec::new();
+    let mut rest = html;
+    while let Some(start) = rest.find("<label class=\"guided-field\"><span>") {
+        let after = &rest[start + "<label class=\"guided-field\"><span>".len()..];
+        let end = after.find("</span>").expect("primary label closes");
+        labels.push(&after[..end]);
+        rest = &after[end..];
+    }
+    labels
+}
+
+fn guided_field_chunks(html: &str) -> Vec<&str> {
+    html.split("<label class=\"guided-field\">")
+        .skip(1)
+        .collect()
+}
+
+fn headings(html: &str) -> Vec<&str> {
+    let mut found = Vec::new();
+    for tag in ["h2", "h3", "legend"] {
+        let open = format!("<{tag}>");
+        let close = format!("</{tag}>");
+        let mut rest = html;
+        while let Some(start) = rest.find(&open) {
+            let after = &rest[start + open.len()..];
+            let end = after.find(&close).expect("heading closes");
+            found.push(&after[..end]);
+            rest = &after[end..];
+        }
+    }
+    found
+}
+
+#[test]
+fn every_market_field_states_optionality_and_calculation_effect() {
+    let html = render("market", false, PlanForm::from_plan(&calc::Plan::default()));
+    let chunks = guided_field_chunks(&html);
+    assert_eq!(
+        chunks.len(),
+        7,
+        "all seven market questions are guided fields"
+    );
+    for chunk in &chunks {
+        let help_end = chunk.find("</label>").expect("field closes");
+        let field = &chunk[..help_end];
+        assert!(field.contains("ไม่บังคับ"), "optionality missing in {field}");
+        assert!(
+            field.contains("ใช้ในการคำนวณ"),
+            "calculation effect missing in {field}"
+        );
+    }
+    assert!(html.contains("มีใครบอกว่าจะรับกี่กิโล"));
+    assert!(!html.contains("ความต้องการของตลาด"));
+}
+
+#[test]
+fn formal_terms_are_secondary_labels_never_the_primary_question() {
+    for section in ["market", "production"] {
+        let html = render(
+            section,
+            false,
+            PlanForm::from_plan(&calc::workbook_sample()),
+        );
+        let terms = match section {
+            "market" => vec!["ยอดรับซื้อที่คาดไว้"],
+            _ => vec!["ผลผลิตขายได้", "สัดส่วนเกรด", "ราคาขายเฉลี่ยถ่วงน้ำหนัก"],
+        };
+        for term in terms {
+            assert!(
+                html.contains(&format!("<small class=\"formal-term\">{term}</small>")),
+                "{section}: {term} is a secondary label"
+            );
+            for label in guided_labels(&html) {
+                assert!(
+                    !label.contains(term),
+                    "{section}: {term} leads the question {label}"
+                );
+            }
+            for heading in headings(&html) {
+                assert!(
+                    !heading.contains(term),
+                    "{section}: {term} leads the heading {heading}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn production_offers_both_yield_and_price_branches_and_keeps_the_other() {
+    let derived = render(
+        "production",
+        false,
+        PlanForm::from_plan(&calc::workbook_sample()),
+    );
+    assert!(derived.contains("name=\"yield-source\""));
+    assert!(derived.contains("name=\"price-source\""));
+    assert!(derived.contains("มีต้นที่ให้ลูกกี่ต้น"));
+    assert!(derived.contains("คำนวณได้ประมาณ 19,950.00 กก."));
+    assert!(
+        derived.contains("≈ 9,975.00 กก."),
+        "percent entry shows kilograms beside it"
+    );
+    assert!(derived.contains("ราคาเฉลี่ยถ่วงน้ำหนักจากทุกเกรด ประมาณ 82.50 บาท/กก."));
+
+    let mut plan = calc::workbook_sample();
+    plan.production.yield_source = calc::YieldSource::Direct;
+    plan.production.sellable_yield_kg = Some(18_000.into());
+    plan.production.price_source = calc::PriceSource::Average;
+    plan.production.average_price_per_kg = Some(79.into());
+    let direct = render("production", false, PlanForm::from_plan(&plan));
+    assert!(direct.contains("กิโลที่คาดว่าจะขายได้ทั้งฤดู"));
+    assert!(direct.contains("ขายได้กิโลละเท่าไร"));
+    assert!(
+        direct.contains("จากข้อมูลต้นทุเรียนที่กรอกไว้ คำนวณได้ประมาณ 19,950.00 กก."),
+        "the kept derived figure is shown, not applied"
+    );
+    assert!(
+        direct.contains("จากเกรดที่กรอกไว้ ถ่วงน้ำหนักได้ประมาณ 82.50 บาท/กก."),
+        "the kept grade price is shown, not applied"
+    );
+    assert!(direct.contains("เกรดที่เคยกรอกไว้ยังเก็บอยู่"));
+    assert!(
+        !direct.contains("มีต้นที่ให้ลูกกี่ต้น"),
+        "the unselected branch is not asked"
+    );
+}
+
+#[test]
+fn kilogram_grade_entry_is_unavailable_with_a_reason_until_sellable_is_known() {
+    let mut form = PlanForm::from_plan(&calc::Plan::default());
+    form.grades.push(Default::default());
+    let html = render("production", false, form);
+    assert!(html.contains("กรอกเป็นกิโลกรัมได้เมื่อรู้กิโลที่คาดว่าจะขายได้แล้ว"));
+    assert!(html.contains("value=\"kilograms\" disabled"));
+
+    let mut form = PlanForm::from_plan(&calc::workbook_sample());
+    assert!(form.set_grade_entry(GradeEntry::Kilograms));
+    let html = render("production", false, form);
+    assert!(!html.contains("กรอกเป็นกิโลกรัมได้เมื่อรู้"));
+    assert!(html.contains("เกรดนี้กี่กิโล"));
+    assert!(
+        html.contains("≈ 50.00% ของกิโลที่คาดว่าจะขายได้"),
+        "kilogram entry shows the percentage beside it"
+    );
+    assert!(html.contains("รวม 19,950.00 จาก 19,950.00 กก."));
 }

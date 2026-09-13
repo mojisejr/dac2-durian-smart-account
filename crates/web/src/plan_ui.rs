@@ -1,4 +1,6 @@
-use calc::{CashKind, ComparisonMetric, HealthQuestion, VariableCostKind};
+use calc::{
+    CashKind, ComparisonMetric, HealthQuestion, PriceSource, VariableCostKind, YieldSource,
+};
 use leptos::{form::ActionForm, prelude::*};
 use leptos_router::{
     components::A,
@@ -8,7 +10,7 @@ use leptos_router::{
 use crate::{
     analysis_ui::{PlanAnalysisView, PlanDashboardView},
     auth::{Logout, current_user_email},
-    plan_form::{FixedCostForm, GradeForm, PlanForm, ReadinessTone, VariableCostForm},
+    plan_form::{FixedCostForm, GradeEntry, GradeForm, PlanForm, ReadinessTone, VariableCostForm},
     plans::{
         CreateSeason, FinalizeActual, PlanRecord, SaveActualDraft, SavePlan, SaveQuickStep,
         SeasonHistoryItem, SwitchForecastMode, UpdateSeasonMetadata, list_plans,
@@ -18,15 +20,19 @@ use crate::{
 
 const MAIN_SECTIONS: [(&str, &str, &str); 5] = [
     ("market", "ขายให้ใครและขายทางไหน", "ข้อมูลตลาด"),
-    ("production", "คาดว่าจะขายได้เท่าไร", "ผลผลิตและเกรด"),
+    (
+        "production",
+        "คาดว่าจะขายได้เท่าไร ราคาเท่าไร",
+        "ผลผลิตขายได้และราคาขาย",
+    ),
     ("variable-costs", "ค่าใช้จ่ายที่เพิ่มตามการผลิต", "ต้นทุนผันแปร"),
     ("fixed-costs", "ค่าใช้จ่ายที่ยังมีทุกปี", "ต้นทุนคงที่"),
     ("health", "ทบทวนความพร้อมของสวน", "สุขภาพสวน"),
 ];
 
 const EDITABLE_SECTIONS: [(&str, &str, &str); 6] = [
-    ("market", "ตลาด", "ลูกค้า ความต้องการ และช่องทางขาย"),
-    ("production", "ผลผลิตและเกรด", "พื้นที่ ผลผลิต สูญเสีย และสัดส่วนเกรด"),
+    ("market", "ตลาด", "ผู้ซื้อ ยอดที่คุยไว้ และช่องทางขาย"),
+    ("production", "ผลผลิตและราคา", "กิโลที่คาดว่าจะขายได้ และราคาขาย"),
     ("variable-costs", "ต้นทุนผันแปร", "รายการที่เปลี่ยนตามการผลิต"),
     ("fixed-costs", "ต้นทุนคงที่", "เงินสด ค่าเสื่อม และเงินลงทุน"),
     ("health", "สุขภาพสวน", "12 คำถาม 6 มิติ"),
@@ -1414,38 +1420,150 @@ fn SectionFields(section: String, form: RwSignal<PlanForm>, closed: bool) -> imp
 #[component]
 fn MarketFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
     view! { <section class="card field-stack">
-        <PlanField label="ลูกค้าเป้าหมาย" value=Signal::derive(move || form.get().market.target_customer) on_value=Callback::new(move |v| form.update(|f| f.market.target_customer = v)) closed/>
-        <PlanField label="ความต้องการของตลาด" unit="กก." numeric=true value=Signal::derive(move || form.get().market.demand_kg) on_value=Callback::new(move |v| form.update(|f| f.market.demand_kg = v)) closed/>
-        <PlanField label="ราคาขั้นต่ำที่รับได้" unit="บาท/กก." numeric=true value=Signal::derive(move || form.get().market.minimum_price_per_kg) on_value=Callback::new(move |v| form.update(|f| f.market.minimum_price_per_kg = v)) closed/>
-        <PlanField label="ช่วงเวลาขาย" value=Signal::derive(move || form.get().market.sales_period) on_value=Callback::new(move |v| form.update(|f| f.market.sales_period = v)) closed/>
-        <PlanField label="จำนวนช่องทางขาย" unit="ช่องทาง" numeric=true value=Signal::derive(move || form.get().market.sales_channels) on_value=Callback::new(move |v| form.update(|f| f.market.sales_channels = v)) closed/>
-        <PlanField label="สัดส่วนลูกค้ารายใหญ่ที่สุด" unit="%" numeric=true value=Signal::derive(move || form.get().market.largest_buyer_percent) on_value=Callback::new(move |v| form.update(|f| f.market.largest_buyer_percent = v)) closed/>
-        <PlanField label="ข้อกำหนดคุณภาพ" value=Signal::derive(move || form.get().market.quality_requirements) on_value=Callback::new(move |v| form.update(|f| f.market.quality_requirements = v)) closed/>
+        <p class="section-intro">"ทุกข้อในหน้านี้ไม่บังคับ ผลกำไรหลักคำนวณได้โดยไม่ต้องกรอกส่วนนี้ กรอกเมื่ออยากเทียบกิโลที่คาดว่าจะขายได้กับยอดที่ผู้ซื้อคุยไว้ หรืออยากจดบริบทของปีนี้ไว้"</p>
+        <PlanField field_id="market-target-customer" label="ปีนี้จะขายให้ใคร" formal_term="ลูกค้าเป้าหมาย" hint="ไม่บังคับ · ไม่ใช้ในการคำนวณ เก็บไว้เป็นบริบทวางแผน" example="เช่น ล้งส่งออก ตลาดค้าส่ง ขายหน้าสวน" value=Signal::derive(move || form.get().market.target_customer) on_value=Callback::new(move |v| form.update(|f| f.market.target_customer = v)) closed/>
+        <PlanField field_id="market-buyer-committed-kg" label="มีใครบอกว่าจะรับกี่กิโล" formal_term="ยอดรับซื้อที่คาดไว้" unit="กก." numeric=true hint="ไม่บังคับ · ใช้ในการคำนวณส่วนต่างและสัดส่วนที่ส่งได้ เทียบกับกิโลที่คาดว่าจะขายได้" example="เช่น ล้งบอกว่าจะรับ 25,000" outcome="ถ้าเว้นว่าง ผลกำไรยังคำนวณได้ แต่หน้าวิเคราะห์จะไม่แสดงการเทียบกับผู้ซื้อ" value=Signal::derive(move || form.get().market.buyer_committed_kg) on_value=Callback::new(move |v| form.update(|f| f.market.buyer_committed_kg = v)) closed/>
+        <PlanField field_id="market-minimum-price" label="ราคาต่ำสุดที่ยอมขาย" formal_term="ราคาขั้นต่ำที่รับได้" unit="บาท/กก." numeric=true hint="ไม่บังคับ · ไม่ใช้ในการคำนวณ เก็บไว้เทียบกับราคาที่กรอกในหน้าผลผลิตด้วยตาตัวเอง" example="เช่น ต่ำกว่า 60 ไม่ขาย" value=Signal::derive(move || form.get().market.minimum_price_per_kg) on_value=Callback::new(move |v| form.update(|f| f.market.minimum_price_per_kg = v)) closed/>
+        <PlanField field_id="market-sales-period" label="จะขายช่วงไหน" formal_term="ช่วงเวลาขาย" hint="ไม่บังคับ · ไม่ใช้ในการคำนวณ เก็บไว้เป็นบริบทวางแผน" example="เช่น พฤษภาคม–มิถุนายน" value=Signal::derive(move || form.get().market.sales_period) on_value=Callback::new(move |v| form.update(|f| f.market.sales_period = v)) closed/>
+        <PlanField field_id="market-sales-channels" label="ขายกี่ทาง" formal_term="จำนวนช่องทางขาย" unit="ช่องทาง" numeric=true hint="ไม่บังคับ · ไม่ใช้ในการคำนวณ ใช้ทบทวนตอนประเมินความพร้อมของสวน" example="เช่น ส่งล้ง 1 ทาง กับขายเองอีก 1 ทาง = 2" value=Signal::derive(move || form.get().market.sales_channels) on_value=Callback::new(move |v| form.update(|f| f.market.sales_channels = v)) closed/>
+        <PlanField field_id="market-largest-buyer" label="รายใหญ่สุดรับกี่เปอร์เซ็นต์ของทั้งหมด" formal_term="การกระจุกตัวของลูกค้า" unit="%" numeric=true hint="ไม่บังคับ · ไม่ใช้ในการคำนวณ ใช้ทบทวนว่าพึ่งผู้ซื้อรายเดียวมากแค่ไหน" example="เช่น ล้งเจ้าเดียวรับ 70" value=Signal::derive(move || form.get().market.largest_buyer_percent) on_value=Callback::new(move |v| form.update(|f| f.market.largest_buyer_percent = v)) closed/>
+        <PlanField field_id="market-quality" label="ผู้ซื้อต้องการคุณภาพแบบไหน" formal_term="ข้อกำหนดคุณภาพ" hint="ไม่บังคับ · ไม่ใช้ในการคำนวณ เก็บไว้เป็นบริบทวางแผน" example="เช่น น้ำหนักต่อลูก ความสุก เกรดที่รับ" value=Signal::derive(move || form.get().market.quality_requirements) on_value=Callback::new(move |v| form.update(|f| f.market.quality_requirements = v)) closed/>
     </section> }
 }
 
 #[component]
+fn BranchChoice(
+    legend: &'static str,
+    name: &'static str,
+    options: [(&'static str, &'static str, &'static str); 2],
+    selected: Signal<&'static str>,
+    on_select: Callback<String>,
+    closed: bool,
+) -> impl IntoView {
+    view! { <fieldset class="branch-choice" disabled=closed>
+        <legend>{legend}</legend>
+        {options.into_iter().map(|(value, label, description)| view! {
+            <label class="branch-option">
+                <input type="radio" name=name value=value prop:checked=move || selected.get() == value on:change=move |_| on_select.run(value.to_owned())/>
+                <span><strong>{label}</strong><small>{description}</small></span>
+            </label>
+        }).collect_view()}
+    </fieldset> }
+}
+
+#[component]
 fn ProductionFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
+    let yield_source = Signal::derive(move || match form.get().production.yield_source {
+        YieldSource::Direct => "direct",
+        YieldSource::Derived => "derived",
+    });
+    let price_source = Signal::derive(move || match form.get().production.price_source {
+        PriceSource::Average => "average",
+        PriceSource::ByGrade => "by_grade",
+    });
+    let grade_entry = Signal::derive(move || match form.get().grade_entry {
+        GradeEntry::Percent => "percent",
+        GradeEntry::Kilograms => "kilograms",
+    });
+    let derived_note = move || {
+        form.get().derived_sellable_yield_kg().map(|kg| {
+            format!(
+                "จากข้อมูลต้นทุเรียนที่กรอกไว้ คำนวณได้ประมาณ {} กก. ตัวเลขนี้ไม่ถูกนำไปใช้ จนกว่าจะเลือกคำนวณจากต้น",
+                money(kg)
+            )
+        })
+    };
+    let derived_result = move || {
+        form.get()
+            .derived_sellable_yield_kg()
+            .map(|kg| format!("คำนวณได้ประมาณ {} กก. หลังหักส่วนที่เสีย", money(kg)))
+            .unwrap_or_else(|| "ยังขาดจำนวนต้น ลูกต่อต้น น้ำหนักต่อลูก หรือส่วนที่เสีย จึงยังคำนวณกิโลไม่ได้".into())
+    };
+    let weighted_note = move || {
+        form.get().weighted_grade_price_per_kg().map(|price| {
+            format!(
+                "จากเกรดที่กรอกไว้ ถ่วงน้ำหนักได้ประมาณ {} บาท/กก. ตัวเลขนี้ไม่ถูกนำไปใช้ จนกว่าจะเลือกแยกตามเกรด",
+                money(price)
+            )
+        })
+    };
+    let kg_entry_available = move || form.get().sellable_yield_kg().is_some();
+    let grade_total = move || {
+        let form = form.get();
+        match form.grade_entry {
+            GradeEntry::Percent => (
+                form.grade_total_percent() == Some(rust_decimal::Decimal::ONE_HUNDRED),
+                form.grade_total_percent()
+                    .map(|v| format!("รวม {}%", v.normalize()))
+                    .unwrap_or_else(|| "กรอกสัดส่วน".into()),
+            ),
+            GradeEntry::Kilograms => {
+                let total = form.grade_total_kg();
+                let sellable = form.sellable_yield_kg();
+                (
+                    total.is_some() && total == sellable,
+                    match (total, sellable) {
+                        (Some(total), Some(sellable)) => {
+                            format!("รวม {} จาก {} กก.", money(total), money(sellable))
+                        }
+                        _ => "กรอกกิโลของแต่ละเกรด".into(),
+                    },
+                )
+            }
+        }
+    };
     view! { <div class="field-stack">
         <section class="card field-stack">
-            <PlanField label="พื้นที่ให้ผลผลิต" unit="ไร่" numeric=true value=Signal::derive(move || form.get().production.area_rai) on_value=Callback::new(move |v| form.update(|f| f.production.area_rai = v)) closed/>
-            <PlanField label="ต้นที่ให้ผลผลิต" unit="ต้น" numeric=true value=Signal::derive(move || form.get().production.producing_trees) on_value=Callback::new(move |v| form.update(|f| f.production.producing_trees = v)) closed/>
-            <PlanField label="ผลต่อต้น" unit="ผล" numeric=true value=Signal::derive(move || form.get().production.fruits_per_tree) on_value=Callback::new(move |v| form.update(|f| f.production.fruits_per_tree = v)) closed/>
-            <PlanField label="น้ำหนักเฉลี่ยต่อผล" unit="กก." numeric=true value=Signal::derive(move || form.get().production.average_fruit_weight_kg) on_value=Callback::new(move |v| form.update(|f| f.production.average_fruit_weight_kg = v)) closed/>
-            <PlanField label="สัดส่วนสูญเสีย" unit="%" numeric=true value=Signal::derive(move || form.get().production.loss_percent) on_value=Callback::new(move |v| form.update(|f| f.production.loss_percent = v)) closed/>
+            <div class="section-title"><div><h2>"คาดว่าจะขายได้กี่กิโล"</h2><small class="formal-term">"ผลผลิตขายได้"</small></div></div>
+            <BranchChoice legend="ตอบแบบไหนสะดวกกว่า" name="yield-source" options=[("direct", "รู้ตัวเลขรวมแล้ว", "กรอกกิโลที่คาดว่าจะขายได้ทั้งฤดู"), ("derived", "คำนวณจากต้นทุเรียน", "นับต้น ลูกต่อต้น น้ำหนัก แล้วหักส่วนที่เสีย")] selected=yield_source on_select=Callback::new(move |v: String| form.update(|f| f.production.yield_source = if v == "direct" { YieldSource::Direct } else { YieldSource::Derived })) closed/>
+            <Show when=move || yield_source.get() == "direct">
+                <PlanField field_id="production-sellable-yield" label="กิโลที่คาดว่าจะขายได้ทั้งฤดู" formal_term="ผลผลิตขายได้" unit="กก." numeric=true hint="นับเฉพาะที่ขายได้จริง ไม่รวมลูกที่เสียหรือตกไซซ์ ถ้ายังไม่รู้ ให้เว้นว่างไว้ก่อน ระบบจะบอกว่าผลไหนยังคำนวณไม่ได้ และไม่เดาตัวเลขให้" example="เช่น ปีก่อนขายได้ 19,950" outcome="ใช้คูณกับราคาขาย ได้เป็นรายได้โดยประมาณ" value=Signal::derive(move || form.get().production.sellable_yield_kg) on_value=Callback::new(move |v| form.update(|f| f.production.sellable_yield_kg = v)) closed/>
+                {move || derived_note().map(|note| view! { <p class="branch-note" aria-live="polite">{note}</p> })}
+            </Show>
+            <Show when=move || yield_source.get() == "derived">
+                <PlanField field_id="production-trees" label="มีต้นที่ให้ลูกกี่ต้น" formal_term="ต้นที่ให้ผลผลิต" unit="ต้น" numeric=true hint="นับเฉพาะต้นที่คาดว่าจะเก็บได้ปีนี้" example="เช่น 200" value=Signal::derive(move || form.get().production.producing_trees) on_value=Callback::new(move |v| form.update(|f| f.production.producing_trees = v)) closed/>
+                <PlanField field_id="production-fruits-per-tree" label="ต้นหนึ่งได้กี่ลูก" formal_term="ผลต่อต้น" unit="ลูก" numeric=true hint="ค่าเฉลี่ยทั้งสวน" example="เช่น 35" value=Signal::derive(move || form.get().production.fruits_per_tree) on_value=Callback::new(move |v| form.update(|f| f.production.fruits_per_tree = v)) closed/>
+                <PlanField field_id="production-fruit-weight" label="ลูกหนึ่งหนักกี่กิโล" formal_term="น้ำหนักเฉลี่ยต่อผล" unit="กก." numeric=true hint="ค่าเฉลี่ยต่อลูก" example="เช่น 3" value=Signal::derive(move || form.get().production.average_fruit_weight_kg) on_value=Callback::new(move |v| form.update(|f| f.production.average_fruit_weight_kg = v)) closed/>
+                <PlanField field_id="production-loss" label="เสียไปกี่เปอร์เซ็นต์ก่อนถึงมือผู้ซื้อ" formal_term="สัดส่วนสูญเสีย" unit="%" numeric=true hint="ลูกร่วง หนอน ตกไซซ์ หรือเสียระหว่างทาง" example="เช่น 5" outcome="กิโลที่คาดว่าจะขายได้ = ต้น × ลูกต่อต้น × น้ำหนัก แล้วหักส่วนนี้ออก" value=Signal::derive(move || form.get().production.loss_percent) on_value=Callback::new(move |v| form.update(|f| f.production.loss_percent = v)) closed/>
+                <p class="branch-note" aria-live="polite">{derived_result}</p>
+            </Show>
+            <PlanField field_id="production-area" label="สวนกี่ไร่" formal_term="พื้นที่ให้ผลผลิต" unit="ไร่" numeric=true hint="ไม่บังคับ · ใช้เฉพาะตัวเลขต่อไร่ในหน้าวิเคราะห์ ไม่กระทบกำไร" example="เช่น 10" value=Signal::derive(move || form.get().production.area_rai) on_value=Callback::new(move |v| form.update(|f| f.production.area_rai = v)) closed/>
         </section>
         <section class="card field-stack">
-            <div class="section-title"><div><h2>"สัดส่วนเกรด"</h2><p>"เพิ่มหรือลดได้สูงสุด 10 เกรด"</p></div><strong class=move || if form.get().grade_total_percent() == Some(rust_decimal::Decimal::ONE_HUNDRED) { "good-text" } else { "bad-text" }>{move || form.get().grade_total_percent().map(|v| format!("{}%", v.normalize())).unwrap_or_else(|| "กรอกสัดส่วน".into())}</strong></div>
-            {move || form.get().grades.into_iter().enumerate().map(|(index, grade)| view! {
-                <div class="repeat-row">
-                    <PlanField label="ชื่อเกรด" value=Signal::derive(move || form.get().grades.get(index).map(|g| g.name.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(g) = f.grades.get_mut(index) { g.name = v })) closed/>
-                    <PlanField label="สัดส่วน" unit="%" numeric=true value=Signal::derive(move || form.get().grades.get(index).map(|g| g.share_percent.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(g) = f.grades.get_mut(index) { g.share_percent = v })) closed/>
-                    <PlanField label="ราคาขาย" unit="บาท/กก." numeric=true value=Signal::derive(move || form.get().grades.get(index).map(|g| g.price_per_kg.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(g) = f.grades.get_mut(index) { g.price_per_kg = v })) closed/>
-                    <label class="check-field"><input type="checkbox" prop:checked=grade.counts_as_quality_grade disabled=closed on:change=move |event| form.update(|f| if let Some(g) = f.grades.get_mut(index) { g.counts_as_quality_grade = event_target_checked(&event) })/><span>"นับเป็นเกรดคุณภาพ"</span></label>
-                    <Show when=move || !closed><button class="text-button bad-text" type="button" on:click=move |_| form.update(|f| { if index < f.grades.len() { f.grades.remove(index); } })>"ลบเกรดนี้"</button></Show>
-                </div>
-            }).collect_view()}
-            <Show when=move || !closed && form.get().grades.len() < 10><button class="secondary" type="button" on:click=move |_| form.update(|f| f.grades.push(GradeForm::default()))>"+ เพิ่มเกรด"</button></Show>
+            <div class="section-title"><div><h2>"แต่ละแบบขายราคาเท่าไร"</h2><small class="formal-term">"ราคาขายเฉลี่ยถ่วงน้ำหนัก"</small></div></div>
+            <BranchChoice legend="ตอบแบบไหนสะดวกกว่า" name="price-source" options=[("average", "ราคาเดียวทั้งหมด", "คิดเฉลี่ยทุกลูกเป็นราคาเดียว"), ("by_grade", "แยกตามเกรด", "แต่ละเกรดขายได้ราคาต่างกัน")] selected=price_source on_select=Callback::new(move |v: String| form.update(|f| f.production.price_source = if v == "average" { PriceSource::Average } else { PriceSource::ByGrade })) closed/>
+            <Show when=move || price_source.get() == "average">
+                <PlanField field_id="production-average-price" label="ขายได้กิโลละเท่าไร" formal_term="ราคาขายเฉลี่ย" unit="บาท/กก." numeric=true hint="ราคาเฉลี่ยที่คาดว่าจะได้รับทั้งฤดู ถ้ายังไม่รู้ ให้เว้นว่างไว้ก่อน" example="เช่น 82.5" outcome="ใช้คูณกับกิโลที่คาดว่าจะขายได้ ได้เป็นรายได้โดยประมาณ" value=Signal::derive(move || form.get().production.average_price_per_kg) on_value=Callback::new(move |v| form.update(|f| f.production.average_price_per_kg = v)) closed/>
+                {move || weighted_note().map(|note| view! { <p class="branch-note" aria-live="polite">{note}</p> })}
+                <Show when=move || !form.get().grades.is_empty()><p class="caption">"เกรดที่เคยกรอกไว้ยังเก็บอยู่ กลับมาใช้ได้เมื่อเลือกแยกตามเกรด"</p></Show>
+            </Show>
+            <Show when=move || price_source.get() == "by_grade">
+                <div class="section-title"><div><h3>"แต่ละเกรดมีสัดส่วนเท่าไร"</h3><small class="formal-term">"สัดส่วนเกรด"</small><p>"เพิ่มหรือลดได้สูงสุด 10 เกรด"</p></div><strong class=move || if grade_total().0 { "good-text" } else { "bad-text" }>{move || grade_total().1}</strong></div>
+                <fieldset class="branch-choice compact" disabled=closed>
+                    <legend>"กรอกสัดส่วนเป็น"</legend>
+                    <label class="branch-option"><input type="radio" name="grade-entry" value="percent" prop:checked=move || grade_entry.get() == "percent" on:change=move |_| form.update(|f| { f.set_grade_entry(GradeEntry::Percent); })/><span><strong>"เปอร์เซ็นต์"</strong></span></label>
+                    <label class="branch-option"><input type="radio" name="grade-entry" value="kilograms" prop:checked=move || grade_entry.get() == "kilograms" disabled=move || !kg_entry_available() on:change=move |_| form.update(|f| { f.set_grade_entry(GradeEntry::Kilograms); })/><span><strong>"กิโลกรัม"</strong></span></label>
+                </fieldset>
+                <Show when=move || !kg_entry_available()><p class="branch-note" aria-live="polite">"กรอกเป็นกิโลกรัมได้เมื่อรู้กิโลที่คาดว่าจะขายได้แล้ว ตอนนี้จึงกรอกได้เฉพาะเปอร์เซ็นต์"</p></Show>
+                {move || form.get().grades.into_iter().enumerate().map(|(index, grade)| view! {
+                    <div class="repeat-row">
+                        <PlanField label="ชื่อเกรด" example="เช่น A, B, C, ตกเกรด" value=Signal::derive(move || form.get().grades.get(index).map(|g| g.name.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(g) = f.grades.get_mut(index) { g.name = v })) closed/>
+                        <Show when=move || grade_entry.get() == "percent">
+                            <PlanField label="เกรดนี้กี่เปอร์เซ็นต์ของทั้งหมด" unit="%" numeric=true value=Signal::derive(move || form.get().grades.get(index).map(|g| g.share_percent.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(g) = f.grades.get_mut(index) { g.share_percent = v })) closed/>
+                            {move || form.get().grade_kg_from_percent(index).map(|kg| view! { <p class="conversion">{format!("≈ {} กก.", money(kg))}</p> })}
+                        </Show>
+                        <Show when=move || grade_entry.get() == "kilograms">
+                            <PlanField label="เกรดนี้กี่กิโล" unit="กก." numeric=true value=Signal::derive(move || form.get().grades.get(index).map(|g| g.share_kg.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(g) = f.grades.get_mut(index) { g.share_kg = v })) closed/>
+                            {move || form.get().grade_percent_from_kg(index).map(|p| view! { <p class="conversion">{format!("≈ {}% ของกิโลที่คาดว่าจะขายได้", money(p))}</p> })}
+                        </Show>
+                        <PlanField label="เกรดนี้ขายได้กิโลละเท่าไร" unit="บาท/กก." numeric=true value=Signal::derive(move || form.get().grades.get(index).map(|g| g.price_per_kg.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(g) = f.grades.get_mut(index) { g.price_per_kg = v })) closed/>
+                        <label class="check-field"><input type="checkbox" prop:checked=grade.counts_as_quality_grade disabled=closed on:change=move |event| form.update(|f| if let Some(g) = f.grades.get_mut(index) { g.counts_as_quality_grade = event_target_checked(&event) })/><span>"นับเป็นเกรดคุณภาพ"</span></label>
+                        <Show when=move || !closed><button class="text-button bad-text" type="button" on:click=move |_| form.update(|f| { if index < f.grades.len() { f.grades.remove(index); } })>"ลบเกรดนี้"</button></Show>
+                    </div>
+                }).collect_view()}
+                <Show when=move || !closed && form.get().grades.len() < 10><button class="secondary" type="button" on:click=move |_| form.update(|f| f.grades.push(GradeForm::default()))>"+ เพิ่มเกรด"</button></Show>
+                {move || form.get().weighted_grade_price_per_kg().map(|price| view! { <p class="branch-note" aria-live="polite">{format!("ราคาเฉลี่ยถ่วงน้ำหนักจากทุกเกรด ประมาณ {} บาท/กก.", money(price))}</p> })}
+            </Show>
         </section>
     </div> }
 }
