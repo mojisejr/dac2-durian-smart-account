@@ -29,14 +29,15 @@ pub async fn replace_sections(
 
     sqlx::query(
         "INSERT INTO market_plans (
-            plan_id, owner_id, target_customer, demand_kg, minimum_price_per_kg,
-            sales_period, sales_channels, largest_buyer_share, quality_requirements
+            plan_id, owner_id, target_customer, buyer_committed_kg,
+            minimum_price_per_kg, sales_period, sales_channels,
+            largest_buyer_share, quality_requirements
          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
     )
     .bind(plan_id)
     .bind(owner_id)
     .bind(plan.market.target_customer.as_deref())
-    .bind(plan.market.demand_kg)
+    .bind(plan.market.buyer_committed_kg)
     .bind(plan.market.minimum_price_per_kg)
     .bind(plan.market.sales_period.as_deref())
     .bind(plan.market.sales_channels.map(i64::from))
@@ -47,17 +48,22 @@ pub async fn replace_sections(
 
     sqlx::query(
         "INSERT INTO yield_estimates (
-            plan_id, owner_id, area_rai, producing_trees, fruits_per_tree,
-            average_fruit_weight_kg, loss_share
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            plan_id, owner_id, yield_source, sellable_yield_kg, area_rai,
+            producing_trees, fruits_per_tree, average_fruit_weight_kg, loss_share,
+            price_source, average_price_per_kg
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
     )
     .bind(plan_id)
     .bind(owner_id)
+    .bind(codec::yield_source(plan.production.yield_source))
+    .bind(plan.production.sellable_yield_kg)
     .bind(plan.production.area_rai)
     .bind(plan.production.producing_trees)
     .bind(plan.production.fruits_per_tree)
     .bind(plan.production.average_fruit_weight_kg)
     .bind(plan.production.loss_share)
+    .bind(codec::price_source(plan.production.price_source))
+    .bind(plan.production.average_price_per_kg)
     .execute(&mut *connection)
     .await?;
 

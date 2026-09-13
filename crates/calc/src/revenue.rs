@@ -4,30 +4,19 @@ use crate::{Plan, RevenueAnalysis};
 
 pub fn calculate(plan: &Plan) -> RevenueAnalysis {
     let production = &plan.production;
-    let gross_yield_kg = multiply([
-        production.producing_trees,
-        production.fruits_per_tree,
-        production.average_fruit_weight_kg,
-    ]);
-    let sellable_yield_kg = gross_yield_kg
-        .zip(production.loss_share)
-        .map(|(gross, loss)| gross * (Decimal::ONE - loss));
+    let gross_yield_kg = production.derived_gross_yield_kg();
+    let sellable_yield_kg = production.selected_sellable_yield_kg();
     let market_gap_kg = sellable_yield_kg
-        .zip(plan.market.demand_kg)
-        .map(|(sellable, demand)| sellable - demand);
+        .zip(plan.market.buyer_committed_kg)
+        .map(|(sellable, committed)| sellable - committed);
     let grade_share_total = complete_sum(plan.production.grades.iter().map(|grade| grade.share));
-    let weighted_price_per_kg = complete_sum(plan.production.grades.iter().map(|grade| {
-        grade
-            .share
-            .zip(grade.price_per_kg)
-            .map(|(share, price)| share * price)
-    }));
+    let weighted_price_per_kg = production.selected_price_per_kg();
     let revenue = sellable_yield_kg
         .zip(weighted_price_per_kg)
         .map(|(yield_kg, price)| yield_kg * price);
     let market_fulfillment = sellable_yield_kg
-        .zip(plan.market.demand_kg)
-        .and_then(|(sellable, demand)| nonzero_ratio(sellable, demand));
+        .zip(plan.market.buyer_committed_kg)
+        .and_then(|(sellable, committed)| nonzero_ratio(sellable, committed));
 
     RevenueAnalysis {
         gross_yield_kg,
@@ -38,12 +27,6 @@ pub fn calculate(plan: &Plan) -> RevenueAnalysis {
         revenue,
         market_fulfillment,
     }
-}
-
-fn multiply<const N: usize>(values: [Option<Decimal>; N]) -> Option<Decimal> {
-    values.into_iter().try_fold(Decimal::ONE, |product, value| {
-        value.map(|value| product * value)
-    })
 }
 
 fn complete_sum(values: impl IntoIterator<Item = Option<Decimal>>) -> Option<Decimal> {
@@ -63,7 +46,7 @@ fn nonzero_ratio(numerator: Decimal, denominator: Decimal) -> Option<Decimal> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Grade, workbook_sample};
+    use crate::{Grade, PriceSource, YieldSource, workbook_sample};
 
     #[test]
     fn workbook_revenue_matches_the_four_grade_sheet() {
@@ -77,12 +60,12 @@ mod tests {
     }
 
     #[test]
-    fn zero_and_missing_market_demand_produce_no_ratio() {
+    fn zero_and_missing_buyer_commitment_produce_no_ratio() {
         let mut plan = workbook_sample();
-        plan.market.demand_kg = Some(Decimal::ZERO);
+        plan.market.buyer_committed_kg = Some(Decimal::ZERO);
         assert_eq!(calculate(&plan).market_fulfillment, None);
 
-        plan.market.demand_kg = None;
+        plan.market.buyer_committed_kg = None;
         assert_eq!(calculate(&plan).market_fulfillment, None);
     }
 
@@ -123,5 +106,88 @@ mod tests {
         let mut plan = workbook_sample();
         plan.production.grades[0].price_per_kg = None;
         assert_eq!(calculate(&plan).weighted_price_per_kg, None);
+    }
+
+    #[test]
+    fn direct_and_derived_yield_agree_on_an_equivalent_fixture() {
+        let derived = workbook_sample();
+        let mut direct = workbook_sample();
+        direct.production.yield_source = YieldSource::Direct;
+        direct.production.sellable_yield_kg = Some(Decimal::from(19_950));
+
+        let derived = calculate(&derived);
+        let direct = calculate(&direct);
+        assert_eq!(direct.sellable_yield_kg, derived.sellable_yield_kg);
+        assert_eq!(direct.revenue, derived.revenue);
+        assert_eq!(direct.market_fulfillment, derived.market_fulfillment);
+    }
+
+    #[test]
+    fn only_the_selected_yield_branch_feeds_sellable_kilograms() {
+        let mut plan = workbook_sample();
+        plan.production.sellable_yield_kg = Some(Decimal::from(1));
+        assert_eq!(
+            calculate(&plan).sellable_yield_kg,
+            Some(Decimal::from(19_950)),
+            "a stored direct figure must not leak into the derived branch"
+        );
+
+        plan.production.yield_source = YieldSource::Direct;
+        assert_eq!(calculate(&plan).sellable_yield_kg, Some(Decimal::from(1)));
+        assert_eq!(
+            calculate(&plan).gross_yield_kg,
+            Some(Decimal::from(21_000)),
+            "the derived facts stay available beside the direct entry"
+        );
+
+        plan.production.sellable_yield_kg = None;
+        assert_eq!(
+            calculate(&plan).sellable_yield_kg,
+            None,
+            "a direct branch without its figure never falls back to the derived one"
+        );
+    }
+
+    #[test]
+    fn average_and_by_grade_price_agree_on_an_equivalent_fixture() {
+        let by_grade = workbook_sample();
+        let mut average = workbook_sample();
+        average.production.price_source = PriceSource::Average;
+        average.production.average_price_per_kg = Some(Decimal::new(825, 1));
+
+        assert_eq!(
+            calculate(&average).weighted_price_per_kg,
+            calculate(&by_grade).weighted_price_per_kg
+        );
+        assert_eq!(calculate(&average).revenue, calculate(&by_grade).revenue);
+    }
+
+    #[test]
+    fn only_the_selected_price_branch_feeds_revenue_and_the_other_is_kept() {
+        let mut plan = workbook_sample();
+        plan.production.average_price_per_kg = Some(Decimal::from(1));
+        assert_eq!(
+            calculate(&plan).weighted_price_per_kg,
+            Some(Decimal::new(825, 1)),
+            "a stored average must not leak into the by-grade branch"
+        );
+
+        plan.production.price_source = PriceSource::Average;
+        assert_eq!(
+            calculate(&plan).weighted_price_per_kg,
+            Some(Decimal::from(1))
+        );
+        assert_eq!(
+            plan.production.weighted_grade_price_per_kg(),
+            Some(Decimal::new(825, 1)),
+            "grade facts stay available while the average branch is selected"
+        );
+
+        plan.production.average_price_per_kg = None;
+        assert_eq!(
+            calculate(&plan).weighted_price_per_kg,
+            None,
+            "an average branch without its figure never falls back to grades"
+        );
     }
 }

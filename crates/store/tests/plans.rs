@@ -1,9 +1,13 @@
+use std::borrow::Cow;
+use std::path::Path;
+
 use calc::{
-    ActualOutcome, ForecastMode, Grade, QuickEstimate, VariableCostKind, VariableCostLine,
-    workbook_sample,
+    ActualOutcome, ForecastMode, Grade, PriceSource, QuickEstimate, VariableCostKind,
+    VariableCostLine, YieldSource, workbook_sample,
 };
 use rust_decimal::Decimal;
-use sqlx::PgPool;
+use sqlx::migrate::Migrator;
+use sqlx::{PgPool, Row};
 use store::plans::{self, StoreError};
 use store::users;
 
@@ -69,11 +73,214 @@ async fn an_empty_in_progress_plan_round_trips_as_missing_not_zero(
         .expect("owner can load the in-progress plan");
 
     assert_eq!(loaded.plan, plan);
-    assert!(loaded.plan.market.demand_kg.is_none());
+    assert!(loaded.plan.market.buyer_committed_kg.is_none());
     assert!(loaded.plan.production.grades.is_empty());
     assert!(loaded.plan.targets.yield_per_rai.is_none());
     assert_eq!(loaded.forecast_mode, ForecastMode::Detailed);
     assert_eq!(loaded.quick_estimate, QuickEstimate::default());
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn direct_yield_and_average_price_round_trip_with_both_branches_kept(
+    pool: PgPool,
+) -> Result<(), StoreError> {
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let mut plan = workbook_sample();
+    plan.production.yield_source = YieldSource::Direct;
+    plan.production.sellable_yield_kg = Some(Decimal::from(18_500));
+    plan.production.price_source = PriceSource::Average;
+    plan.production.average_price_per_kg = Some(Decimal::new(7_925, 2));
+
+    let created = plans::create(&pool, owner.id, 2569, "", &plan).await?;
+    let loaded = plans::load(&pool, owner.id, created.id)
+        .await?
+        .expect("owner can load the plan");
+
+    assert_eq!(loaded.plan, plan);
+    assert_eq!(loaded.plan.production.yield_source, YieldSource::Direct);
+    assert_eq!(loaded.plan.production.price_source, PriceSource::Average);
+    assert_eq!(
+        loaded.plan.production.producing_trees,
+        Some(Decimal::from(200)),
+        "the unselected derived facts are kept"
+    );
+    assert_eq!(
+        loaded.plan.production.grades.len(),
+        4,
+        "the unselected grade list is kept"
+    );
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn blank_zero_and_entered_branch_values_round_trip_distinctly(
+    pool: PgPool,
+) -> Result<(), StoreError> {
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let mut plan = calc::Plan::default();
+    plan.production.yield_source = YieldSource::Direct;
+    plan.production.price_source = PriceSource::Average;
+
+    let states = [
+        (None, None),
+        (Some(Decimal::ZERO), Some(Decimal::ZERO)),
+        (Some(Decimal::from(12_000)), Some(Decimal::from(95))),
+    ];
+    for (index, (yield_kg, price)) in states.into_iter().enumerate() {
+        plan.production.sellable_yield_kg = yield_kg;
+        plan.production.average_price_per_kg = price;
+        plan.market.buyer_committed_kg = yield_kg;
+        let year = 2569 + i32::try_from(index).expect("small index");
+        let created = plans::create(&pool, owner.id, year, "", &plan).await?;
+        let loaded = plans::load(&pool, owner.id, created.id)
+            .await?
+            .expect("owner can load the plan");
+        assert_eq!(loaded.plan.production.sellable_yield_kg, yield_kg);
+        assert_eq!(loaded.plan.production.average_price_per_kg, price);
+        assert_eq!(loaded.plan.market.buyer_committed_kg, yield_kg);
+    }
+    Ok(())
+}
+
+const BRANCHES_MIGRATION: i64 = 202609130001;
+
+/// Rows written before the Batch 2 migration keep their values through the
+/// column rename and the new source columns, and again through the rollback
+/// script, so the migration can be stepped in either direction without loss.
+#[sqlx::test(migrations = false)]
+async fn existing_rows_survive_the_branches_migration_and_its_rollback(
+    pool: PgPool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut migrator = Migrator::new(Path::new("../../migrations")).await?;
+    let every_migration = migrator.migrations.to_vec();
+    migrator.migrations = Cow::Owned(
+        every_migration
+            .iter()
+            .filter(|migration| migration.version < BRANCHES_MIGRATION)
+            .cloned()
+            .collect(),
+    );
+    migrator.run(&pool).await?;
+
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let plan_id: i64 = sqlx::query_scalar(
+        "INSERT INTO plans (owner_id, name, season_year) VALUES ($1, 'ปีเก่า', 2568)
+         RETURNING id",
+    )
+    .bind(owner.id)
+    .fetch_one(&pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO market_plans (plan_id, owner_id, demand_kg, target_customer)
+         VALUES ($1, $2, 25000, 'ล้งส่งออก')",
+    )
+    .bind(plan_id)
+    .bind(owner.id)
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO yield_estimates (
+            plan_id, owner_id, area_rai, producing_trees, fruits_per_tree,
+            average_fruit_weight_kg, loss_share
+         ) VALUES ($1, $2, 10, 200, 35, 3, 0.05)",
+    )
+    .bind(plan_id)
+    .bind(owner.id)
+    .execute(&pool)
+    .await?;
+    for statement in [
+        "INSERT INTO grade_mix (plan_id, owner_id, position, name, share, price_per_kg, counts_as_quality_grade)
+         VALUES ($1, $2, 0, 'A', 1, 82.5, TRUE)",
+        "INSERT INTO kpi_targets (plan_id, owner_id) VALUES ($1, $2)",
+    ] {
+        sqlx::query(statement)
+            .bind(plan_id)
+            .bind(owner.id)
+            .execute(&pool)
+            .await?;
+    }
+
+    migrator.migrations = Cow::Owned(every_migration);
+    migrator.run(&pool).await?;
+
+    let migrated = sqlx::query(
+        "SELECT m.buyer_committed_kg, m.target_customer, y.yield_source, y.sellable_yield_kg,
+                y.price_source, y.average_price_per_kg, y.producing_trees
+         FROM market_plans m JOIN yield_estimates y USING (plan_id)
+         WHERE m.plan_id = $1",
+    )
+    .bind(plan_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(
+        migrated.try_get::<Decimal, _>("buyer_committed_kg")?,
+        Decimal::from(25_000),
+        "the renamed column keeps the stored quantity"
+    );
+    assert_eq!(migrated.try_get::<String, _>("target_customer")?, "ล้งส่งออก");
+    assert_eq!(migrated.try_get::<String, _>("yield_source")?, "derived");
+    assert_eq!(migrated.try_get::<String, _>("price_source")?, "by_grade");
+    assert_eq!(
+        migrated.try_get::<Option<Decimal>, _>("sellable_yield_kg")?,
+        None
+    );
+    assert_eq!(
+        migrated.try_get::<Option<Decimal>, _>("average_price_per_kg")?,
+        None
+    );
+    assert_eq!(
+        migrated.try_get::<Decimal, _>("producing_trees")?,
+        Decimal::from(200)
+    );
+
+    let loaded = plans::load(&pool, owner.id, plan_id)
+        .await?
+        .expect("the legacy plan loads through the current store");
+    assert_eq!(
+        loaded.plan.market.buyer_committed_kg,
+        Some(Decimal::from(25_000))
+    );
+    assert_eq!(loaded.plan.production.yield_source, YieldSource::Derived);
+    assert_eq!(loaded.plan.production.price_source, PriceSource::ByGrade);
+    assert_eq!(
+        calc::analyze(&loaded.plan).revenue.sellable_yield_kg,
+        Some(Decimal::from(19_950)),
+        "a legacy row still derives its yield exactly as before"
+    );
+
+    let rollback = std::fs::read_to_string(
+        "../../migrations/rollback/202609130001_sell_and_harvest_branches.sql",
+    )?;
+    sqlx::raw_sql(&rollback).execute(&pool).await?;
+
+    let rolled_back =
+        sqlx::query("SELECT demand_kg, target_customer FROM market_plans WHERE plan_id = $1")
+            .bind(plan_id)
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(
+        rolled_back.try_get::<Decimal, _>("demand_kg")?,
+        Decimal::from(25_000),
+        "rollback restores the old name with the same value"
+    );
+    let new_columns: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.columns
+         WHERE table_name = 'yield_estimates'
+           AND column_name IN ('yield_source', 'sellable_yield_kg', 'price_source', 'average_price_per_kg')",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(new_columns, 0, "rollback removes every added column");
+    let recorded: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE version = $1")
+            .bind(BRANCHES_MIGRATION)
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(
+        recorded, 0,
+        "rollback forgets the migration so it can run again"
+    );
     Ok(())
 }
 

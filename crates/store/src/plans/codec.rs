@@ -1,4 +1,4 @@
-use calc::{CashKind, ForecastMode, HealthQuestion, VariableCostKind};
+use calc::{CashKind, ForecastMode, HealthQuestion, PriceSource, VariableCostKind, YieldSource};
 
 use super::StoreError;
 
@@ -15,6 +15,42 @@ pub fn parse_forecast_mode(value: String) -> Result<ForecastMode, StoreError> {
         "detailed" => Ok(ForecastMode::Detailed),
         _ => Err(StoreError::InvalidValue {
             field: "plans.forecast_mode",
+            value,
+        }),
+    }
+}
+
+pub fn yield_source(value: YieldSource) -> &'static str {
+    match value {
+        YieldSource::Direct => "direct",
+        YieldSource::Derived => "derived",
+    }
+}
+
+pub fn parse_yield_source(value: String) -> Result<YieldSource, StoreError> {
+    match value.as_str() {
+        "direct" => Ok(YieldSource::Direct),
+        "derived" => Ok(YieldSource::Derived),
+        _ => Err(StoreError::InvalidValue {
+            field: "yield_estimates.yield_source",
+            value,
+        }),
+    }
+}
+
+pub fn price_source(value: PriceSource) -> &'static str {
+    match value {
+        PriceSource::Average => "average",
+        PriceSource::ByGrade => "by_grade",
+    }
+}
+
+pub fn parse_price_source(value: String) -> Result<PriceSource, StoreError> {
+    match value.as_str() {
+        "average" => Ok(PriceSource::Average),
+        "by_grade" => Ok(PriceSource::ByGrade),
+        _ => Err(StoreError::InvalidValue {
+            field: "yield_estimates.price_source",
             value,
         }),
     }

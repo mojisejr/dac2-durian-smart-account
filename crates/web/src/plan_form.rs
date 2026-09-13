@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use calc::{
     CashKind, FixedCostLine, Grade, HealthAnswer, HealthQuestion, InputIssueKind, KpiTargets,
-    MarketPlan, Plan, ProductionPlan, VariableCostKind, VariableCostLine,
+    MarketPlan, Plan, PriceSource, ProductionPlan, VariableCostKind, VariableCostLine, YieldSource,
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,10 @@ pub struct PlanForm {
     pub name: String,
     pub market: MarketForm,
     pub production: ProductionForm,
+    /// Which unit the owner is typing grade quantities in. The stored share
+    /// is always a fraction; this only decides which text field is read.
+    #[serde(default)]
+    pub grade_entry: GradeEntry,
     pub grades: Vec<GradeForm>,
     pub variable_costs: Vec<VariableCostForm>,
     pub fixed_costs: Vec<FixedCostForm>,
@@ -22,7 +26,7 @@ pub struct PlanForm {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct MarketForm {
     pub target_customer: String,
-    pub demand_kg: String,
+    pub buyer_committed_kg: String,
     pub minimum_price_per_kg: String,
     pub sales_period: String,
     pub sales_channels: String,
@@ -32,17 +36,36 @@ pub struct MarketForm {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProductionForm {
+    #[serde(default)]
+    pub yield_source: YieldSource,
+    #[serde(default)]
+    pub sellable_yield_kg: String,
     pub area_rai: String,
     pub producing_trees: String,
     pub fruits_per_tree: String,
     pub average_fruit_weight_kg: String,
     pub loss_percent: String,
+    #[serde(default)]
+    pub price_source: PriceSource,
+    #[serde(default)]
+    pub average_price_per_kg: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum GradeEntry {
+    #[default]
+    Percent,
+    Kilograms,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct GradeForm {
     pub name: String,
     pub share_percent: String,
+    /// Kilograms for this grade, read only while `grade_entry` is
+    /// `Kilograms`; converted to a share against sellable kilograms.
+    #[serde(default)]
+    pub share_kg: String,
     pub price_per_kg: String,
     pub counts_as_quality_grade: bool,
 }
@@ -121,11 +144,12 @@ pub struct SectionReadiness {
 
 impl PlanForm {
     pub fn from_plan(plan: &Plan) -> Self {
+        let sellable_yield_kg = plan.production.selected_sellable_yield_kg();
         Self {
             name: plan.name.clone(),
             market: MarketForm {
                 target_customer: text(&plan.market.target_customer),
-                demand_kg: decimal(plan.market.demand_kg),
+                buyer_committed_kg: decimal(plan.market.buyer_committed_kg),
                 minimum_price_per_kg: decimal(plan.market.minimum_price_per_kg),
                 sales_period: text(&plan.market.sales_period),
                 sales_channels: plan
@@ -137,12 +161,17 @@ impl PlanForm {
                 quality_requirements: text(&plan.market.quality_requirements),
             },
             production: ProductionForm {
+                yield_source: plan.production.yield_source,
+                sellable_yield_kg: decimal(plan.production.sellable_yield_kg),
                 area_rai: decimal(plan.production.area_rai),
                 producing_trees: decimal(plan.production.producing_trees),
                 fruits_per_tree: decimal(plan.production.fruits_per_tree),
                 average_fruit_weight_kg: decimal(plan.production.average_fruit_weight_kg),
                 loss_percent: percent(plan.production.loss_share),
+                price_source: plan.production.price_source,
+                average_price_per_kg: decimal(plan.production.average_price_per_kg),
             },
+            grade_entry: GradeEntry::Percent,
             grades: plan
                 .production
                 .grades
@@ -150,6 +179,7 @@ impl PlanForm {
                 .map(|grade| GradeForm {
                     name: grade.name.clone(),
                     share_percent: percent(grade.share),
+                    share_kg: decimal(grade.share.zip(sellable_yield_kg).map(|(s, kg)| s * kg)),
                     price_per_kg: decimal(grade.price_per_kg),
                     counts_as_quality_grade: grade.counts_as_quality_grade,
                 })
@@ -204,7 +234,11 @@ impl PlanForm {
         let mut errors = Vec::new();
         let market = MarketPlan {
             target_customer: optional_text(&self.market.target_customer),
-            demand_kg: parse_decimal(&self.market.demand_kg, "market.demand_kg", &mut errors),
+            buyer_committed_kg: parse_decimal(
+                &self.market.buyer_committed_kg,
+                "market.buyer_committed_kg",
+                &mut errors,
+            ),
             minimum_price_per_kg: parse_decimal(
                 &self.market.minimum_price_per_kg,
                 "market.minimum_price_per_kg",
@@ -223,7 +257,13 @@ impl PlanForm {
             ),
             quality_requirements: optional_text(&self.market.quality_requirements),
         };
-        let production = ProductionPlan {
+        let mut production = ProductionPlan {
+            yield_source: self.production.yield_source,
+            sellable_yield_kg: parse_decimal(
+                &self.production.sellable_yield_kg,
+                "production.sellable_yield_kg",
+                &mut errors,
+            ),
             area_rai: parse_decimal(
                 &self.production.area_rai,
                 "production.area_rai",
@@ -249,26 +289,56 @@ impl PlanForm {
                 "production.loss_share",
                 &mut errors,
             ),
-            grades: self
-                .grades
-                .iter()
-                .enumerate()
-                .map(|(index, grade)| Grade {
-                    name: grade.name.trim().to_owned(),
-                    share: parse_percent(
+            price_source: self.production.price_source,
+            average_price_per_kg: parse_decimal(
+                &self.production.average_price_per_kg,
+                "production.average_price_per_kg",
+                &mut errors,
+            ),
+            grades: Vec::new(),
+        };
+        // Kilogram entry converts against the selected sellable figure; the
+        // conversion is visible beside the field, never silent, and it stays
+        // unavailable while that figure is unknown or zero.
+        let sellable_yield_kg = production
+            .selected_sellable_yield_kg()
+            .filter(|kg| !kg.is_zero());
+        production.grades = self
+            .grades
+            .iter()
+            .enumerate()
+            .map(|(index, grade)| Grade {
+                name: grade.name.trim().to_owned(),
+                share: match self.grade_entry {
+                    GradeEntry::Percent => parse_percent(
                         &grade.share_percent,
                         &format!("production.grades[{index}].share"),
                         &mut errors,
                     ),
-                    price_per_kg: parse_decimal(
-                        &grade.price_per_kg,
-                        &format!("production.grades[{index}].price_per_kg"),
-                        &mut errors,
-                    ),
-                    counts_as_quality_grade: grade.counts_as_quality_grade,
-                })
-                .collect(),
-        };
+                    GradeEntry::Kilograms => {
+                        let field = format!("production.grades[{index}].share_kg");
+                        let kg = parse_decimal(&grade.share_kg, &field, &mut errors);
+                        match (kg, sellable_yield_kg) {
+                            (Some(kg), Some(total)) => Some(kg / total),
+                            (Some(_), None) => {
+                                errors.push(FormError {
+                                    field,
+                                    message: GRADE_KG_NEEDS_SELLABLE.into(),
+                                });
+                                None
+                            }
+                            (None, _) => None,
+                        }
+                    }
+                },
+                price_per_kg: parse_decimal(
+                    &grade.price_per_kg,
+                    &format!("production.grades[{index}].price_per_kg"),
+                    &mut errors,
+                ),
+                counts_as_quality_grade: grade.counts_as_quality_grade,
+            })
+            .collect();
         let variable_costs = self
             .variable_costs
             .iter()
@@ -386,7 +456,10 @@ impl PlanForm {
                 message: match issue.kind {
                     InputIssueKind::Negative => "กรุณากรอกตัวเลขตั้งแต่ 0 ขึ้นไป",
                     InputIssueKind::OutsideShareRange => "กรุณากรอกสัดส่วนระหว่าง 0 ถึง 100%",
-                    InputIssueKind::GradeSharesDoNotTotalOne => "สัดส่วนทุกเกรดรวมกันต้องเท่ากับ 100%",
+                    InputIssueKind::GradeSharesDoNotTotalOne => match self.grade_entry {
+                        GradeEntry::Percent => "สัดส่วนทุกเกรดรวมกันต้องเท่ากับ 100%",
+                        GradeEntry::Kilograms => "กิโลกรัมทุกเกรดรวมกันต้องเท่ากับกิโลที่คาดว่าจะขายได้",
+                    },
                     InputIssueKind::HealthScoreOutsideRange => "กรุณาเลือกคะแนนระหว่าง 1 ถึง 5",
                     InputIssueKind::DuplicateHealthAnswer => {
                         "คำถามข้อนี้มีคำตอบซ้ำ กรุณาเลือกเพียงคำตอบเดียว"
@@ -415,7 +488,7 @@ impl PlanForm {
         };
         let analysis = calc::analyze(&plan);
         match section {
-            "market" if plan.market.demand_kg.is_none() => SectionReadiness {
+            "market" if plan.market.buyer_committed_kg.is_none() => SectionReadiness {
                 label: "เพิ่มได้ ถ้ามียอดที่ผู้ซื้ออยากได้",
                 tone: ReadinessTone::Optional,
             },
@@ -519,7 +592,91 @@ impl PlanForm {
                 .map(|share| total + share)
         })
     }
+
+    pub fn grade_total_kg(&self) -> Option<Decimal> {
+        self.grades.iter().try_fold(Decimal::ZERO, |total, grade| {
+            Decimal::from_str(&grade.share_kg.trim().replace(',', ""))
+                .ok()
+                .map(|kg| total + kg)
+        })
+    }
+
+    /// Sellable kilograms from the selected production branch as typed so
+    /// far, ignoring grades; `None` while unknown or zero.
+    pub fn sellable_yield_kg(&self) -> Option<Decimal> {
+        let mut form = self.clone();
+        form.grades.clear();
+        form.to_plan()
+            .ok()?
+            .production
+            .selected_sellable_yield_kg()
+            .filter(|kg| !kg.is_zero())
+    }
+
+    /// Sellable kilograms derived from the orchard facts as typed, whichever
+    /// branch is selected, so it can be shown beside a direct entry.
+    pub fn derived_sellable_yield_kg(&self) -> Option<Decimal> {
+        let mut form = self.clone();
+        form.grades.clear();
+        form.to_plan().ok()?.production.derived_sellable_yield_kg()
+    }
+
+    /// The by-grade weighted price as typed, whichever branch is selected.
+    pub fn weighted_grade_price_per_kg(&self) -> Option<Decimal> {
+        self.to_plan()
+            .ok()?
+            .production
+            .weighted_grade_price_per_kg()
+    }
+
+    /// The kilogram equivalent of one grade's typed percentage.
+    pub fn grade_kg_from_percent(&self, index: usize) -> Option<Decimal> {
+        let share = Decimal::from_str(self.grades.get(index)?.share_percent.trim()).ok()?;
+        Some(share / Decimal::ONE_HUNDRED * self.sellable_yield_kg()?)
+    }
+
+    /// The percentage equivalent of one grade's typed kilograms.
+    pub fn grade_percent_from_kg(&self, index: usize) -> Option<Decimal> {
+        let kg =
+            Decimal::from_str(&self.grades.get(index)?.share_kg.trim().replace(',', "")).ok()?;
+        Some(kg / self.sellable_yield_kg()? * Decimal::ONE_HUNDRED)
+    }
+
+    /// Switch the grade entry unit, filling the other unit's field from the
+    /// typed one so the conversion is visible. Kilogram entry needs a known,
+    /// non-zero sellable figure; without it the switch is refused.
+    pub fn set_grade_entry(&mut self, entry: GradeEntry) -> bool {
+        if entry == self.grade_entry {
+            return true;
+        }
+        let Some(total) = self.sellable_yield_kg() else {
+            return entry == GradeEntry::Percent && {
+                self.grade_entry = entry;
+                true
+            };
+        };
+        for grade in &mut self.grades {
+            match entry {
+                GradeEntry::Kilograms => {
+                    if let Ok(share) = Decimal::from_str(grade.share_percent.trim()) {
+                        grade.share_kg =
+                            decimal(Some((share / Decimal::ONE_HUNDRED * total).round_dp(2)));
+                    }
+                }
+                GradeEntry::Percent => {
+                    if let Ok(kg) = Decimal::from_str(&grade.share_kg.trim().replace(',', "")) {
+                        grade.share_percent =
+                            decimal(Some((kg / total * Decimal::ONE_HUNDRED).round_dp(2)));
+                    }
+                }
+            }
+        }
+        self.grade_entry = entry;
+        true
+    }
 }
+
+pub const GRADE_KG_NEEDS_SELLABLE: &str = "ยังขาดกิโลที่คาดว่าจะขายได้ จึงแปลงกิโลกรัมของเกรดเป็นสัดส่วนไม่ได้";
 
 fn field_belongs_to_section(field: &str, section: &str) -> bool {
     match section {
@@ -615,6 +772,7 @@ mod tests {
             .map(|index| GradeForm {
                 name: format!("เกรด {index}"),
                 share_percent: "10".into(),
+                share_kg: String::new(),
                 price_per_kg: index.to_string(),
                 counts_as_quality_grade: index <= 2,
             })
@@ -699,10 +857,10 @@ mod tests {
             }
         );
 
-        let mut without_market_demand = sample;
-        without_market_demand.market.demand_kg.clear();
+        let mut without_buyer_commitment = sample;
+        without_buyer_commitment.market.buyer_committed_kg.clear();
         assert_eq!(
-            without_market_demand.section_readiness("market").tone,
+            without_buyer_commitment.section_readiness("market").tone,
             ReadinessTone::Optional
         );
     }
@@ -745,6 +903,207 @@ mod tests {
             errors
                 .iter()
                 .any(|error| error.message == "กรุณากรอกตัวเลขตั้งแต่ 0 ขึ้นไป")
+        );
+    }
+
+    fn plan_with_costs_only() -> calc::Plan {
+        let mut plan = calc::workbook_sample();
+        plan.market = calc::MarketPlan::default();
+        plan.production = calc::ProductionPlan::default();
+        plan
+    }
+
+    fn net_profit(form: &PlanForm) -> Option<Decimal> {
+        calc::analyze(&form.to_plan().expect("fixture is valid"))
+            .business
+            .net_profit
+    }
+
+    #[test]
+    fn total_kg_and_one_price_is_enough_for_the_main_result() {
+        let mut form = PlanForm::from_plan(&plan_with_costs_only());
+        form.production.yield_source = YieldSource::Direct;
+        form.production.sellable_yield_kg = "19950".into();
+        form.production.price_source = PriceSource::Average;
+        form.production.average_price_per_kg = "82.5".into();
+
+        assert!(net_profit(&form).is_some());
+        assert_eq!(
+            form.section_readiness("production").tone,
+            ReadinessTone::Ready
+        );
+        assert_eq!(
+            form.section_readiness("market").label,
+            "เพิ่มได้ ถ้ามียอดที่ผู้ซื้ออยากได้",
+            "market comparison is optional and names what would unlock it"
+        );
+    }
+
+    #[test]
+    fn tree_facts_without_grades_name_the_missing_price_not_the_yield() {
+        let mut form = PlanForm::from_plan(&plan_with_costs_only());
+        form.production.producing_trees = "200".into();
+        form.production.fruits_per_tree = "35".into();
+        form.production.average_fruit_weight_kg = "3".into();
+        form.production.loss_percent = "5".into();
+        form.production.price_source = PriceSource::ByGrade;
+
+        assert_eq!(form.sellable_yield_kg(), Some(Decimal::from(19_950)));
+        assert!(net_profit(&form).is_none());
+        assert_eq!(
+            form.section_readiness("production").label,
+            "ยังขาดราคาขายเฉลี่ย"
+        );
+
+        form.production.price_source = PriceSource::Average;
+        form.production.average_price_per_kg = "80".into();
+        assert!(
+            net_profit(&form).is_some(),
+            "an unknown grade mix never blocks the result once one average price exists"
+        );
+    }
+
+    #[test]
+    fn grade_sales_known_in_kilograms_reach_the_result_and_the_stored_share() {
+        let mut form = PlanForm::from_plan(&plan_with_costs_only());
+        form.production.yield_source = YieldSource::Direct;
+        form.production.sellable_yield_kg = "20000".into();
+        form.production.price_source = PriceSource::ByGrade;
+        form.grade_entry = GradeEntry::Kilograms;
+        form.grades = vec![
+            GradeForm {
+                name: "A".into(),
+                share_kg: "15000".into(),
+                price_per_kg: "100".into(),
+                counts_as_quality_grade: true,
+                ..GradeForm::default()
+            },
+            GradeForm {
+                name: "B".into(),
+                share_kg: "5000".into(),
+                price_per_kg: "60".into(),
+                counts_as_quality_grade: false,
+                ..GradeForm::default()
+            },
+        ];
+
+        let plan = form.to_plan().expect("kilogram entry converts to shares");
+        assert_eq!(plan.production.grades[0].share, Some(Decimal::new(75, 2)));
+        assert_eq!(plan.production.grades[1].share, Some(Decimal::new(25, 2)));
+        assert_eq!(
+            form.grade_percent_from_kg(0),
+            Some(Decimal::from(75)),
+            "the converted percentage is available to show beside the entry"
+        );
+        assert!(net_profit(&form).is_some());
+
+        form.grades[1].share_kg = "4000".into();
+        let errors = form
+            .to_plan()
+            .expect_err("kilograms must add up to the total");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("กิโลกรัมทุกเกรดรวมกัน"))
+        );
+    }
+
+    #[test]
+    fn buyer_quantity_unknown_leaves_the_result_available_and_market_optional() {
+        let mut form = PlanForm::from_plan(&calc::workbook_sample());
+        form.market.buyer_committed_kg.clear();
+
+        assert!(net_profit(&form).is_some());
+        assert_eq!(
+            form.section_readiness("market").tone,
+            ReadinessTone::Optional
+        );
+        let analysis = calc::analyze(&form.to_plan().expect("valid"));
+        assert_eq!(analysis.revenue.market_fulfillment, None);
+        assert_eq!(analysis.revenue.market_gap_kg, None);
+    }
+
+    #[test]
+    fn kilogram_entry_is_unavailable_with_a_named_reason_until_sellable_is_known() {
+        let mut form = PlanForm::from_plan(&calc::Plan::default());
+        form.grades.push(GradeForm {
+            name: "A".into(),
+            share_percent: "50".into(),
+            ..GradeForm::default()
+        });
+
+        assert!(!form.set_grade_entry(GradeEntry::Kilograms));
+        assert_eq!(form.grade_entry, GradeEntry::Percent);
+
+        form.grade_entry = GradeEntry::Kilograms;
+        form.grades[0].share_kg = "100".into();
+        let errors = form.to_plan().expect_err("kilograms cannot convert yet");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message == GRADE_KG_NEEDS_SELLABLE)
+        );
+        assert!(
+            !form.section_errors("production").is_empty(),
+            "the reason belongs to the visible production section"
+        );
+
+        form.grade_entry = GradeEntry::Percent;
+        form.production.yield_source = YieldSource::Direct;
+        form.production.sellable_yield_kg = "0".into();
+        assert!(
+            !form.set_grade_entry(GradeEntry::Kilograms),
+            "a zero total cannot convert either"
+        );
+    }
+
+    #[test]
+    fn switching_the_grade_unit_converts_visibly_in_both_directions() {
+        let mut form = PlanForm::from_plan(&calc::workbook_sample());
+        assert_eq!(form.grade_entry, GradeEntry::Percent);
+        assert_eq!(
+            form.grade_kg_from_percent(0),
+            Some(Decimal::from(9_975)),
+            "50% of 19,950 kg is shown beside the percentage"
+        );
+
+        assert!(form.set_grade_entry(GradeEntry::Kilograms));
+        assert_eq!(form.grades[0].share_kg, "9975");
+        assert_eq!(form.grades[3].share_kg, "997.5");
+        assert_eq!(
+            form.to_plan()
+                .expect("kilograms convert back to the same shares"),
+            calc::workbook_sample()
+        );
+
+        form.grades[0].share_kg = "11970".into();
+        form.grades[1].share_kg = "3990".into();
+        assert!(form.set_grade_entry(GradeEntry::Percent));
+        assert_eq!(form.grades[0].share_percent, "60");
+        assert_eq!(form.grades[1].share_percent, "20");
+    }
+
+    #[test]
+    fn the_unselected_branch_survives_the_form_round_trip() {
+        let mut plan = calc::workbook_sample();
+        plan.production.yield_source = YieldSource::Direct;
+        plan.production.sellable_yield_kg = Some(Decimal::from(18_000));
+        plan.production.price_source = PriceSource::Average;
+        plan.production.average_price_per_kg = Some(Decimal::from(79));
+
+        let form = PlanForm::from_plan(&plan);
+        assert_eq!(form.production.producing_trees, "200");
+        assert_eq!(form.grades.len(), 4);
+        assert_eq!(form.to_plan(), Ok(plan));
+        assert_eq!(
+            form.derived_sellable_yield_kg(),
+            Some(Decimal::from(19_950)),
+            "the derived figure can be shown beside the direct entry"
+        );
+        assert_eq!(
+            form.weighted_grade_price_per_kg(),
+            Some(Decimal::new(825, 1)),
+            "the grade price can be shown beside the average entry"
         );
     }
 }

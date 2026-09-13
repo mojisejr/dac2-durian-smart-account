@@ -437,6 +437,36 @@ and `ผลต่าง = ผลจริง - ประมาณการ`. Mis
 `ยังเปรียบเทียบไม่ได้`; a legacy closed season says
 `ไม่มีผลจริงที่บันทึกไว้` and never displays synthetic zeroes.
 
+### ขายและเก็บเกี่ยว — one question, two ways to answer
+
+The market, production, and price questions are asked the way an orchard
+owner already thinks about them, with the accounting or farm-management term
+kept as a readable secondary label under the question. Every market question
+says in its help line whether it is optional and whether it changes a
+calculation or is only kept as planning context; none of them gates the
+profit figure.
+
+Where owners know the answer in different forms, the page offers a branch
+chooser — a two-option radio group under the question — and asks only the
+selected branch's fields:
+
+```
+คาดว่าจะขายได้กี่กิโล                      ผลผลิตขายได้
+  ตอบแบบไหนสะดวกกว่า
+  (•) รู้ตัวเลขรวมแล้ว      ( ) คำนวณจากต้นทุเรียน
+  กิโลที่คาดว่าจะขายได้ทั้งฤดู   [ 19,950 ] กก.
+  ▍จากข้อมูลต้นทุเรียนที่กรอกไว้ คำนวณได้ประมาณ 19,950.00 กก.
+  ▍ตัวเลขนี้ไม่ถูกนำไปใช้ จนกว่าจะเลือกคำนวณจากต้น
+```
+
+The unselected branch keeps its facts. Switching back shows them again, and
+the figure the other branch would give is quoted in a note beside the entry so
+the two never compete silently. The same shape serves price: one average, or a
+share and price per grade. Grade shares may be typed as a percentage or in
+kilograms; the stored value is always a share, the converted figure is shown
+under each entry, and kilogram entry stays unavailable — with the reason
+written out — until the sellable total is known.
+
 ### ประมาณการผลผลิต — grade mix
 
 Grades are not a fixed set; a year may carry ten. The mix is an add-and-remove

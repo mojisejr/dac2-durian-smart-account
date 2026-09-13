@@ -206,6 +206,18 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 .asset-mode-note p, .warning-copy, .asset-row h2, .asset-row p { margin-bottom: 0; }
 .warning-copy { background: color-mix(in srgb, var(--warn) 12%, var(--surface)); border-left: 4px solid var(--warn); padding: 0.7rem 0.8rem; }
 .asset-row form button { width: 100%; }
+.branch-choice { border: 0; display: grid; gap: 0.5rem; margin: 0; padding: 0; }
+.branch-choice legend { font-size: 0.9rem; font-weight: 600; margin-bottom: 0.25rem; padding: 0; }
+.branch-choice.compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.branch-choice.compact legend { grid-column: 1 / -1; }
+.branch-option { align-items: center; border: 1px solid var(--border); border-radius: 0.7rem; cursor: pointer; display: flex; gap: 0.7rem; min-height: 48px; padding: 0.6rem 0.75rem; }
+.branch-option:has(input:checked) { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+.branch-option:has(input:disabled) { color: var(--muted); cursor: not-allowed; }
+.branch-option input { flex: 0 0 auto; height: 24px; margin: 0; width: 24px; }
+.branch-option span { display: grid; gap: 0.1rem; min-width: 0; }
+.branch-option small { color: var(--muted); font-weight: 400; }
+.branch-note { background: color-mix(in srgb, var(--primary) 8%, var(--surface)); border-left: 4px solid var(--primary); font-size: 0.9rem; margin: 0; padding: 0.6rem 0.75rem; }
+.conversion { color: var(--muted); font-size: 0.85rem; margin: -0.4rem 0 0; }
 .check-field { align-items: center; display: flex; min-height: 48px; }
 .check-field input { min-height: 24px; width: 24px; }
 .readonly-value { border-bottom: 1px solid var(--border); font-weight: 400; margin: 0; min-height: 48px; padding: 0.65rem 0; }

@@ -2,7 +2,7 @@ use rust_decimal::Decimal;
 
 use crate::{
     CashKind, FixedCostLine, Grade, HealthAnswer, HealthQuestion, KpiTargets, MarketPlan, Plan,
-    ProductionPlan, VariableCostKind, VariableCostLine,
+    PriceSource, ProductionPlan, VariableCostKind, VariableCostLine, YieldSource,
 };
 
 pub const WORKBOOK_SHA256: &str =
@@ -13,7 +13,7 @@ pub fn workbook_sample() -> Plan {
         name: "ตัวอย่างจากแบบคำนวณ".into(),
         market: MarketPlan {
             target_customer: Some("ล้งส่งออก".into()),
-            demand_kg: Some(Decimal::from(25_000)),
+            buyer_committed_kg: Some(Decimal::from(25_000)),
             minimum_price_per_kg: Some(Decimal::from(60)),
             sales_period: Some("พฤษภาคม–มิถุนายน".into()),
             sales_channels: Some(2),
@@ -21,11 +21,15 @@ pub fn workbook_sample() -> Plan {
             quality_requirements: Some("น้ำหนัก/ความสุก/เกรด".into()),
         },
         production: ProductionPlan {
+            yield_source: YieldSource::Derived,
+            sellable_yield_kg: None,
             area_rai: Some(Decimal::from(10)),
             producing_trees: Some(Decimal::from(200)),
             fruits_per_tree: Some(Decimal::from(35)),
             average_fruit_weight_kg: Some(Decimal::from(3)),
             loss_share: Some(Decimal::new(5, 2)),
+            price_source: PriceSource::ByGrade,
+            average_price_per_kg: None,
             grades: vec![
                 grade("A", 5, 1, 100, true),
                 grade("B", 3, 1, 80, true),
