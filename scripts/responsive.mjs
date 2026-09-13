@@ -544,6 +544,18 @@ async function signIn(browser) {
     throw new Error('the unknown/confirmed-none question is still asked while rows exist');
   }
 
+  // Keystrokes into a repeat-row number field must all land. A list that
+  // re-rendered on every change recreated the focused input after the first
+  // character; the owner saw one digit and then nothing.
+  await page.click('button:has-text("+ เพิ่มค่าใช้จ่าย")');
+  const quantity = page.locator('.repeat-row input[inputmode="decimal"]').last();
+  await quantity.click();
+  await page.keyboard.type('12345', { delay: 40 });
+  if ((await quantity.inputValue()) !== '12345') {
+    throw new Error(`a repeat-row number field dropped keystrokes (saw ${JSON.stringify(await quantity.inputValue())})`);
+  }
+  await page.click('.repeat-row:last-of-type button:has-text("ลบรายการ")');
+
   // With variable costs entered and fixed costs unknown the profit is still
   // unavailable; confirming the fixed section empty makes it a figure.
   await page.goto(`${BASE}/plans/${detailedPlanId}/fixed-costs`);

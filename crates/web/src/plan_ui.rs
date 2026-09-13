@@ -1470,6 +1470,9 @@ fn BranchChoice(
 
 #[component]
 fn ProductionFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
+    // Repeat rows re-render only when a row is added or removed. Re-rendering
+    // on every keystroke recreates the focused input and drops the keystroke.
+    let grade_rows = Memo::new(move |_| form.with(|f| f.grades.len()));
     let yield_source = Signal::derive(move || match form.get().production.yield_source {
         YieldSource::Direct => "direct",
         YieldSource::Derived => "derived",
@@ -1562,7 +1565,7 @@ fn ProductionFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
                     <label class="branch-option"><input type="radio" name="grade-entry" value="kilograms" prop:checked=move || grade_entry.get() == "kilograms" disabled=move || !kg_entry_available() on:change=move |_| form.update(|f| { f.set_grade_entry(GradeEntry::Kilograms); })/><span><strong>"กิโลกรัม"</strong></span></label>
                 </fieldset>
                 <Show when=move || !kg_entry_available()><p class="branch-note" aria-live="polite">"กรอกเป็นกิโลกรัมได้เมื่อรู้กิโลที่คาดว่าจะขายได้แล้ว ตอนนี้จึงกรอกได้เฉพาะเปอร์เซ็นต์"</p></Show>
-                {move || form.get().grades.into_iter().enumerate().map(|(index, grade)| view! {
+                {move || (0..grade_rows.get()).map(|index| view! {
                     <div class="repeat-row">
                         <PlanField label="ชื่อเกรด" example="เช่น A, B, C, ตกเกรด" value=Signal::derive(move || form.get().grades.get(index).map(|g| g.name.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(g) = f.grades.get_mut(index) { g.name = v })) closed/>
                         <Show when=move || grade_entry.get() == "percent">
@@ -1574,7 +1577,7 @@ fn ProductionFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
                             {move || form.get().grade_percent_from_kg(index).map(|p| view! { <p class="conversion">{format!("≈ {}% ของกิโลที่คาดว่าจะขายได้", money(p))}</p> })}
                         </Show>
                         <PlanField label="เกรดนี้ขายได้กิโลละเท่าไร" unit="บาท/กก." numeric=true value=Signal::derive(move || form.get().grades.get(index).map(|g| g.price_per_kg.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(g) = f.grades.get_mut(index) { g.price_per_kg = v })) closed/>
-                        <label class="check-field"><input type="checkbox" prop:checked=grade.counts_as_quality_grade disabled=closed on:change=move |event| form.update(|f| if let Some(g) = f.grades.get_mut(index) { g.counts_as_quality_grade = event_target_checked(&event) })/><span>"นับเป็นเกรดคุณภาพ"</span></label>
+                        <label class="check-field"><input type="checkbox" prop:checked=move || form.with(|f| f.grades.get(index).is_some_and(|g| g.counts_as_quality_grade)) disabled=closed on:change=move |event| form.update(|f| if let Some(g) = f.grades.get_mut(index) { g.counts_as_quality_grade = event_target_checked(&event) })/><span>"นับเป็นเกรดคุณภาพ"</span></label>
                         <Show when=move || !closed><button class="text-button bad-text" type="button" on:click=move |_| form.update(|f| { if index < f.grades.len() { f.grades.remove(index); } })>"ลบเกรดนี้"</button></Show>
                     </div>
                 }).collect_view()}
@@ -1620,11 +1623,13 @@ fn SectionStateChoice(form: RwSignal<PlanForm>, fixed: bool, closed: bool) -> im
 
 #[component]
 fn VariableCostFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
+    let variable_rows = Memo::new(move |_| form.with(|f| f.variable_costs.len()));
     let sellable = move || form.get().sellable_yield_kg();
     view! { <section class="card field-stack">
         <div class="section-title"><div><h2>"ค่าใช้จ่ายที่เพิ่มเมื่อทำหรือขายมากขึ้น"</h2><small class="formal-term">"ต้นทุนผันแปร"</small><p>"เช่น ปุ๋ย ยา น้ำ ไฟ น้ำมัน คนดูแล คนเก็บ ขนส่ง กล่อง ถ้าจำได้แต่ไม่รู้ว่าเป็นแบบไหน จดไว้ที่ค่าใช้จ่ายที่จำได้ก่อนได้"</p></div></div>
         <Show when=move || form.get().variable_costs.is_empty()><SectionStateChoice form fixed=false closed/></Show>
-        {move || form.get().variable_costs.into_iter().enumerate().map(|(index, line)| {
+        {move || (0..variable_rows.get()).map(|index| {
+            let kind = form.with_untracked(|f| f.variable_costs.get(index).map_or(VariableCostKind::Other, |l| l.kind));
             let total_only = Signal::derive(move || if form.get().variable_costs.get(index).is_some_and(|l| l.total_only) { "total" } else { "per_unit" });
             let default_note = move || {
                 let form = form.get();
@@ -1640,7 +1645,7 @@ fn VariableCostFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
             view! {
             <div class="repeat-row">
                 <PlanField label="ค่าอะไร" example="เช่น ปุ๋ยรอบแรก ค่าจ้างคนเก็บ" value=Signal::derive(move || form.get().variable_costs.get(index).map(|l| l.name.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.name = v })) closed/>
-                <label><span>"เป็นค่าใช้จ่ายกลุ่มไหน"</span><small class="formal-term">"ประเภทต้นทุนผันแปร"</small>{if closed { view! { <p class="readonly-value">{variable_kind_label(line.kind)}</p> }.into_any() } else { view! { <select on:change=move |event| { let kind = parse_variable_kind(&event_target_value(&event)); form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.kind = kind }); }>{variable_kind_options(line.kind)}</select> }.into_any() }}</label>
+                <label><span>"เป็นค่าใช้จ่ายกลุ่มไหน"</span><small class="formal-term">"ประเภทต้นทุนผันแปร"</small>{if closed { view! { <p class="readonly-value">{variable_kind_label(kind)}</p> }.into_any() } else { view! { <select on:change=move |event| { let kind = parse_variable_kind(&event_target_value(&event)); form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.kind = kind }); }>{variable_kind_options(kind)}</select> }.into_any() }}</label>
                 <BranchChoice legend="รู้ตัวเลขแบบไหน" name="" options=[("per_unit", "รู้จำนวนกับราคาต่อหน่วย", "เช่น ปุ๋ย 5,000 กก. กก.ละ 20"), ("total", "รู้แค่ยอดรวม", "เช่น จ่ายไปทั้งหมด 12,000 บาท")] selected=total_only on_select=Callback::new(move |v: String| form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.total_only = v == "total" })) closed/>
                 <Show when=move || total_only.get() == "per_unit">
                     <PlanField label="จำนวน" numeric=true value=Signal::derive(move || form.get().variable_costs.get(index).map(|l| l.quantity.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.quantity = v })) closed/>
@@ -1660,13 +1665,13 @@ fn VariableCostFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
 
 #[component]
 fn FixedCostFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
+    let fixed_rows = Memo::new(move |_| form.with(|f| f.fixed_costs.len()));
     view! { <section class="card field-stack">
         <div class="section-title"><div><h2>"แม้ปีนี้ไม่มีทุเรียนขาย ยังต้องจ่ายอะไรอยู่"</h2><small class="formal-term">"ต้นทุนคงที่"</small><p>"เช่น ค่าเช่าที่ เงินเดือนคนงานประจำ ดอกเบี้ย ค่าเสื่อมของที่ใช้หลายปี"</p></div></div>
         <details class="explanation"><summary>"ⓘ จ่ายเงินจริง กับ เฉลี่ยจากของหลายปี ต่างกันอย่างไร"</summary><h3>"คืออะไร"</h3><p>"ค่าเสื่อมระบบน้ำและค่าเสื่อมรถ เป็นต้นทุนที่ลงบัญชีแต่ปีนี้ไม่ได้ควักเงินจ่าย ส่วนค่าเช่า ดอกเบี้ย และค่าแรงประจำ จ่ายจริงทุกปี"</p><h3>"ใช้ยังไง"</h3><p>"ตอบให้ตรงตอนกรอกแต่ละรายการ"</p><h3>"ทำไมต้องมี"</h3><p>"เป็นสิ่งเดียวที่ทำให้กระแสเงินสดกับกำไรสุทธิต่างกันได้"</p><h3>"ไม่ใส่ได้ไหม"</h3><p>"ตอบผิดได้ แต่เงินสดที่เหลือจะผิดตาม"</p></details>
         <Show when=move || form.get().fixed_costs.is_empty()><SectionStateChoice form fixed=true closed/></Show>
-        {move || form.get().fixed_costs.into_iter().enumerate().map(|(index, line)| {
+        {move || (0..fixed_rows.get()).map(|index| {
             let cash = Signal::derive(move || if form.get().fixed_costs.get(index).is_some_and(|l| l.cash_kind == CashKind::NonCash) { "non_cash" } else { "cash" });
-            let _ = line;
             view! {
             <div class="repeat-row">
                 <PlanField label="ค่าอะไร" example="เช่น ค่าเช่าที่ เงินเดือนคนงาน" value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.name.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.name = v })) closed/>
@@ -1682,6 +1687,7 @@ fn FixedCostFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
 
 #[component]
 fn ExpenseFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
+    let expense_rows = Memo::new(move |_| form.with(|f| f.unclassified.len()));
     let classifying = RwSignal::new(None::<usize>);
     let grows = RwSignal::new(None::<bool>);
     let cash = RwSignal::new(None::<bool>);
@@ -1694,7 +1700,7 @@ fn ExpenseFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
     };
     view! { <section class="card field-stack">
         <div class="section-title"><div><h2>"จำค่าใช้จ่ายได้แต่ยังไม่รู้ว่าเป็นแบบไหน"</h2><small class="formal-term">"รายการรอจัดประเภท"</small><p>"จดชื่อกับยอดไว้ก่อน ตัวเลขจะยังไม่ถูกนับ จนกว่าจะตอบว่าเป็นค่าใช้จ่ายแบบไหน"</p></div></div>
-        {move || form.get().unclassified.into_iter().enumerate().map(|(index, _)| view! {
+        {move || (0..expense_rows.get()).map(|index| view! {
             <div class="repeat-row">
                 <PlanField label="ค่าอะไร" example="เช่น จ่ายคนขับรถเดือนสาม" value=Signal::derive(move || form.get().unclassified.get(index).map(|e| e.name.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(e) = f.unclassified.get_mut(index) { e.name = v })) closed/>
                 <PlanField label="เท่าไร" unit="บาท" numeric=true hint="ถ้ายังไม่รู้ยอด เว้นว่างไว้ก่อนได้" value=Signal::derive(move || form.get().unclassified.get(index).map(|e| e.amount.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(e) = f.unclassified.get_mut(index) { e.amount = v })) closed/>
