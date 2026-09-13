@@ -487,6 +487,32 @@ than on save.
   ราคาเฉลี่ยถ่วงน้ำหนัก      82.50 ฿/กก. ⓘ
 ```
 
+### ค่าใช้จ่าย — capture first, classify after
+
+An owner may remember an expense without knowing its accounting category.
+`ค่าใช้จ่ายที่จำได้` takes a name, an amount, and a note, and keeps the item
+without counting it. The hub, the live total, and the result say how many such
+items are waiting and link back to them. `บอกว่าเป็นแบบไหน` asks two familiar
+questions in place — does it grow when you produce or sell more; is it paid in
+cash this year — with the formal term (ต้นทุนผันแปร, ต้นทุนคงที่, เงินสด,
+ค่าเสื่อม) as the secondary line of each answer, and moves the item into the
+right section with its amount intact.
+
+```
+จ่ายคนขับรถเดือนสาม            50,000 บาท
+  ถ้าปีนี้ปลูกหรือขายมากขึ้น ค่านี้จะเพิ่มตามไหม
+  (•) เพิ่มตาม                    ( ) จ่ายเท่าเดิมแม้ไม่มีทุเรียนขาย
+      ปุ๋ย ยา คนเก็บ ขนส่ง · ต้นทุนผันแปร   ค่าเช่า เงินเดือน · ต้นทุนคงที่
+  [ ย้ายไปส่วนที่ถูก ]   ยังไม่ตอบตอนนี้
+```
+
+An empty cost section is never silently zero. It asks `ยังไม่รู้ / ข้ามก่อน`
+or `ยืนยันว่าไม่มี`; only the second is a known zero, and adding a row replaces
+the question. A variable line may be answered as quantity and unit price or as
+one total; when harvest, transport, or packing is left without a quantity, the
+sellable kilograms the application will use are written beside the field rather
+than implied.
+
 ### ปัจจัยและต้นทุน — line items
 
 A cart. Rows of item, quantity, unit price, and line total, with the running

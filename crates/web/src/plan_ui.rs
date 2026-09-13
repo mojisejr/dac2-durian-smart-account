@@ -1,5 +1,6 @@
 use calc::{
-    CashKind, ComparisonMetric, HealthQuestion, PriceSource, VariableCostKind, YieldSource,
+    CashKind, ComparisonMetric, CostSectionState, HealthQuestion, PriceSource, VariableCostKind,
+    YieldSource,
 };
 use leptos::{form::ActionForm, prelude::*};
 use leptos_router::{
@@ -10,7 +11,10 @@ use leptos_router::{
 use crate::{
     analysis_ui::{PlanAnalysisView, PlanDashboardView},
     auth::{Logout, current_user_email},
-    plan_form::{FixedCostForm, GradeEntry, GradeForm, PlanForm, ReadinessTone, VariableCostForm},
+    plan_form::{
+        ExpenseClassification, FixedCostForm, GradeEntry, GradeForm, PlanForm, ReadinessTone,
+        UnclassifiedExpenseForm, VariableCostForm,
+    },
     plans::{
         CreateSeason, FinalizeActual, PlanRecord, SaveActualDraft, SavePlan, SaveQuickStep,
         SeasonHistoryItem, SwitchForecastMode, UpdateSeasonMetadata, list_plans,
@@ -18,23 +22,29 @@ use crate::{
     },
 };
 
-const MAIN_SECTIONS: [(&str, &str, &str); 5] = [
+const MAIN_SECTIONS: [(&str, &str, &str); 6] = [
     ("market", "ขายให้ใครและขายทางไหน", "ข้อมูลตลาด"),
     (
         "production",
         "คาดว่าจะขายได้เท่าไร ราคาเท่าไร",
         "ผลผลิตขายได้และราคาขาย",
     ),
-    ("variable-costs", "ค่าใช้จ่ายที่เพิ่มตามการผลิต", "ต้นทุนผันแปร"),
-    ("fixed-costs", "ค่าใช้จ่ายที่ยังมีทุกปี", "ต้นทุนคงที่"),
+    (
+        "expenses",
+        "จำค่าใช้จ่ายได้แต่ยังไม่รู้ว่าเป็นแบบไหน",
+        "จดไว้ก่อน แล้วค่อยบอกประเภท",
+    ),
+    ("variable-costs", "ค่าใช้จ่ายที่เพิ่มเมื่อทำหรือขายมากขึ้น", "ต้นทุนผันแปร"),
+    ("fixed-costs", "แม้ปีนี้ไม่มีทุเรียนขาย ยังต้องจ่ายอะไรอยู่", "ต้นทุนคงที่"),
     ("health", "ทบทวนความพร้อมของสวน", "สุขภาพสวน"),
 ];
 
-const EDITABLE_SECTIONS: [(&str, &str, &str); 6] = [
+const EDITABLE_SECTIONS: [(&str, &str, &str); 7] = [
     ("market", "ตลาด", "ผู้ซื้อ ยอดที่คุยไว้ และช่องทางขาย"),
     ("production", "ผลผลิตและราคา", "กิโลที่คาดว่าจะขายได้ และราคาขาย"),
-    ("variable-costs", "ต้นทุนผันแปร", "รายการที่เปลี่ยนตามการผลิต"),
-    ("fixed-costs", "ต้นทุนคงที่", "เงินสด ค่าเสื่อม และเงินลงทุน"),
+    ("expenses", "ค่าใช้จ่ายที่จำได้", "จดไว้ก่อน แล้วค่อยบอกว่าเป็นแบบไหน"),
+    ("variable-costs", "ต้นทุนผันแปร", "ค่าใช้จ่ายที่เพิ่มเมื่อทำหรือขายมากขึ้น"),
+    ("fixed-costs", "ต้นทุนคงที่", "ค่าใช้จ่ายที่ยังมีแม้ไม่มีทุเรียนขาย"),
     ("health", "สุขภาพสวน", "12 คำถาม 6 มิติ"),
     (
         "targets",
@@ -982,10 +992,16 @@ fn QuickModeHub(id: i64, estimate: calc::QuickEstimate, closed: bool) -> impl In
 #[component]
 fn DetailedModeHub(id: i64, form: PlanForm, closed: bool) -> impl IntoView {
     let switch = ServerAction::<SwitchForecastMode>::new();
-    let next = ["production", "variable-costs", "fixed-costs"]
+    let next = ["production", "expenses", "variable-costs", "fixed-costs"]
         .into_iter()
-        .find(|section| form.section_readiness(section).tone != ReadinessTone::Ready);
+        .find(|section| form.section_readiness(section).tone == ReadinessTone::Missing);
     let (guide_title, guide_body, guide_href, guide_action) = match next {
+        Some("expenses") => (
+            "บอกว่าค่าใช้จ่ายที่จดไว้เป็นแบบไหน",
+            "ตอบคำถามสั้น ๆ ทีละรายการ ระบบจะย้ายไปส่วนที่ถูกให้ ตัวเลขยังไม่ถูกนับจนกว่าจะตอบ",
+            format!("/plans/{id}/expenses"),
+            "จัดประเภทค่าใช้จ่าย",
+        ),
         Some("production") => (
             "เริ่มจากยอดที่จะขายและราคาขาย",
             "ข้อมูลส่วนนี้ทำให้ระบบคำนวณรายได้โดยประมาณได้",
@@ -993,14 +1009,14 @@ fn DetailedModeHub(id: i64, form: PlanForm, closed: bool) -> impl IntoView {
             "กรอกผลผลิตและราคา",
         ),
         Some("variable-costs") => (
-            "ต่อด้วยค่าใช้จ่ายที่เพิ่มตามการผลิต",
-            "เช่น ปุ๋ย ยา แรงงานเก็บเกี่ยว ขนส่ง และบรรจุภัณฑ์",
+            "ต่อด้วยค่าใช้จ่ายที่เพิ่มเมื่อทำหรือขายมากขึ้น",
+            "เช่น ปุ๋ย ยา คนเก็บ ขนส่ง และกล่อง ถ้าจำได้แต่ไม่รู้ประเภท จดไว้ที่ค่าใช้จ่ายที่จำได้ก่อนได้ หรือยืนยันว่าไม่มีถ้าไม่มีจริง",
             format!("/plans/{id}/variable-costs"),
             "กรอกค่าใช้จ่ายตามการผลิต",
         ),
         Some("fixed-costs") => (
-            "เพิ่มค่าใช้จ่ายที่ยังมีทุกปี",
-            "เช่น ค่าเช่า เงินเดือนประจำ ดอกเบี้ย หรือค่าเสื่อม",
+            "แล้วค่าใช้จ่ายที่ยังมีแม้ไม่มีทุเรียนขาย",
+            "เช่น ค่าเช่า เงินเดือนประจำ ดอกเบี้ย ถ้าไม่มีจริง ยืนยันว่าไม่มีได้เลย",
             format!("/plans/{id}/fixed-costs"),
             "กรอกค่าใช้จ่ายประจำ",
         ),
@@ -1068,7 +1084,7 @@ fn DetailedModeHub(id: i64, form: PlanForm, closed: bool) -> impl IntoView {
                 <span aria-hidden="true">"›"</span>
             </A>
             <A attr:class="section-card" href=format!("/plans/{id}/assets")>
-                <span><strong>"สินทรัพย์และเงินลงทุน"</strong><small>"บันทึกของที่ใช้หลายปี แล้วเลือกว่าจะรวมในฤดูนี้หรือไม่"</small></span>
+                <span><strong>"ของที่ใช้หลายปี และเงินก้อนที่ลงไป"</strong><small>"สินทรัพย์ ค่าเสื่อม เงินลงทุน · เลือกว่าจะรวมในฤดูนี้หรือไม่"</small></span>
                 <span aria-hidden="true">"›"</span>
             </A>
         </details>
@@ -1409,6 +1425,7 @@ fn SectionFields(section: String, form: RwSignal<PlanForm>, closed: bool) -> imp
     match section.as_str() {
         "market" => view! { <MarketFields form closed/> }.into_any(),
         "production" => view! { <ProductionFields form closed/> }.into_any(),
+        "expenses" => view! { <ExpenseFields form closed/> }.into_any(),
         "variable-costs" => view! { <VariableCostFields form closed/> }.into_any(),
         "fixed-costs" => view! { <FixedCostFields form closed/> }.into_any(),
         "targets" => view! { <TargetFields form closed/> }.into_any(),
@@ -1569,38 +1586,151 @@ fn ProductionFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
 }
 
 #[component]
+fn SectionStateChoice(form: RwSignal<PlanForm>, fixed: bool, closed: bool) -> impl IntoView {
+    let selected = Signal::derive(move || {
+        let form = form.get();
+        let state = if fixed {
+            form.fixed_cost_state
+        } else {
+            form.variable_cost_state
+        };
+        match state {
+            CostSectionState::ConfirmedNone => "confirmed_none",
+            _ => "unknown",
+        }
+    });
+    let legend = if fixed {
+        "แม้ไม่มีทุเรียนขาย ปีนี้ยังมีอะไรต้องจ่ายไหม"
+    } else {
+        "ปีนี้มีค่าใช้จ่ายที่เพิ่มตามการผลิตไหม"
+    };
+    let none_description = if fixed {
+        "ปีนี้ไม่มีอะไรที่ต้องจ่ายแม้ไม่มีทุเรียนขาย ระบบจะนับเป็นศูนย์"
+    } else {
+        "ปีนี้ไม่มีค่าใช้จ่ายที่เพิ่มตามการผลิต ระบบจะนับเป็นศูนย์"
+    };
+    view! {
+        <BranchChoice legend=legend name=if fixed { "fixed-cost-state" } else { "variable-cost-state" } options=[("unknown", "ยังไม่รู้ / ข้ามก่อน", "ผลที่ต้องใช้ตัวเลขนี้จะยังไม่ขึ้น จนกว่าจะกรอกหรือยืนยัน"), ("confirmed_none", "ยืนยันว่าไม่มี", none_description)] selected=selected on_select=Callback::new(move |v: String| form.update(|f| {
+            let state = if v == "confirmed_none" { CostSectionState::ConfirmedNone } else { CostSectionState::Unknown };
+            if fixed { f.fixed_cost_state = state } else { f.variable_cost_state = state }
+        })) closed/>
+        <p class="caption">"ถ้ามีค่าใช้จ่ายจริง กดเพิ่มรายการด้านล่างได้เลย คำตอบข้อนี้จะเปลี่ยนเป็นมีรายการโดยอัตโนมัติ"</p>
+    }
+}
+
+#[component]
 fn VariableCostFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
+    let sellable = move || form.get().sellable_yield_kg();
     view! { <section class="card field-stack">
-        <p class="section-intro">"รายการเก็บเกี่ยว ขนส่ง และบรรจุภัณฑ์จะใช้ปริมาณผลผลิตขายได้ ถ้าเว้นจำนวนไว้"</p>
-        {move || form.get().variable_costs.into_iter().enumerate().map(|(index, line)| view! {
+        <div class="section-title"><div><h2>"ค่าใช้จ่ายที่เพิ่มเมื่อทำหรือขายมากขึ้น"</h2><small class="formal-term">"ต้นทุนผันแปร"</small><p>"เช่น ปุ๋ย ยา น้ำ ไฟ น้ำมัน คนดูแล คนเก็บ ขนส่ง กล่อง ถ้าจำได้แต่ไม่รู้ว่าเป็นแบบไหน จดไว้ที่ค่าใช้จ่ายที่จำได้ก่อนได้"</p></div></div>
+        <Show when=move || form.get().variable_costs.is_empty()><SectionStateChoice form fixed=false closed/></Show>
+        {move || form.get().variable_costs.into_iter().enumerate().map(|(index, line)| {
+            let total_only = Signal::derive(move || if form.get().variable_costs.get(index).is_some_and(|l| l.total_only) { "total" } else { "per_unit" });
+            let default_note = move || {
+                let form = form.get();
+                let line = form.variable_costs.get(index)?;
+                if line.total_only || !line.kind.follows_sellable_yield() || !line.quantity.trim().is_empty() {
+                    return None;
+                }
+                Some(match sellable() {
+                    Some(kg) => format!("เว้นจำนวนไว้ ระบบใช้กิโลที่คาดว่าจะขายได้ {} กก. เป็นจำนวนของรายการนี้", money(kg)),
+                    None => "เว้นจำนวนไว้ ระบบจะใช้กิโลที่คาดว่าจะขายได้เป็นจำนวน แต่ตอนนี้ยังไม่รู้กิโลนั้น รายการนี้จึงยังคำนวณไม่ได้".into(),
+                })
+            };
+            view! {
             <div class="repeat-row">
-                <PlanField label="รายการ" value=Signal::derive(move || form.get().variable_costs.get(index).map(|l| l.name.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.name = v })) closed/>
-                <label><span>"ประเภท"</span>{if closed { view! { <p class="readonly-value">{variable_kind_label(line.kind)}</p> }.into_any() } else { view! { <select on:change=move |event| { let kind = parse_variable_kind(&event_target_value(&event)); form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.kind = kind }); }>{variable_kind_options(line.kind)}</select> }.into_any() }}</label>
-                <PlanField label="จำนวน" numeric=true value=Signal::derive(move || form.get().variable_costs.get(index).map(|l| l.quantity.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.quantity = v })) closed/>
-                <PlanField label="หน่วย" value=Signal::derive(move || form.get().variable_costs.get(index).map(|l| l.unit.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.unit = v })) closed/>
-                <PlanField label="ราคาต่อหน่วย" unit="บาท" numeric=true value=Signal::derive(move || form.get().variable_costs.get(index).map(|l| l.unit_price.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.unit_price = v })) closed/>
+                <PlanField label="ค่าอะไร" example="เช่น ปุ๋ยรอบแรก ค่าจ้างคนเก็บ" value=Signal::derive(move || form.get().variable_costs.get(index).map(|l| l.name.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.name = v })) closed/>
+                <label><span>"เป็นค่าใช้จ่ายกลุ่มไหน"</span><small class="formal-term">"ประเภทต้นทุนผันแปร"</small>{if closed { view! { <p class="readonly-value">{variable_kind_label(line.kind)}</p> }.into_any() } else { view! { <select on:change=move |event| { let kind = parse_variable_kind(&event_target_value(&event)); form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.kind = kind }); }>{variable_kind_options(line.kind)}</select> }.into_any() }}</label>
+                <BranchChoice legend="รู้ตัวเลขแบบไหน" name="" options=[("per_unit", "รู้จำนวนกับราคาต่อหน่วย", "เช่น ปุ๋ย 5,000 กก. กก.ละ 20"), ("total", "รู้แค่ยอดรวม", "เช่น จ่ายไปทั้งหมด 12,000 บาท")] selected=total_only on_select=Callback::new(move |v: String| form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.total_only = v == "total" })) closed/>
+                <Show when=move || total_only.get() == "per_unit">
+                    <PlanField label="จำนวน" numeric=true value=Signal::derive(move || form.get().variable_costs.get(index).map(|l| l.quantity.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.quantity = v })) closed/>
+                    {move || default_note().map(|note| view! { <p class="branch-note quantity-default" aria-live="polite">{note}</p> })}
+                    <PlanField label="หน่วย" example="เช่น กก. ลิตร วัน เที่ยว" value=Signal::derive(move || form.get().variable_costs.get(index).map(|l| l.unit.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.unit = v })) closed/>
+                    <PlanField label="ราคาต่อหน่วย" unit="บาท" numeric=true value=Signal::derive(move || form.get().variable_costs.get(index).map(|l| l.unit_price.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.unit_price = v })) closed/>
+                </Show>
+                <Show when=move || total_only.get() == "total">
+                    <PlanField label="ยอดรวมทั้งฤดู" unit="บาท" numeric=true hint="รายการที่รู้แค่ยอดรวม จะไม่มีตัวเลขผลผลิตต่อหน่วยในหน้าวิเคราะห์" value=Signal::derive(move || form.get().variable_costs.get(index).map(|l| l.total_amount.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.variable_costs.get_mut(index) { l.total_amount = v })) closed/>
+                </Show>
                 <Show when=move || !closed><button class="text-button bad-text" type="button" on:click=move |_| form.update(|f| { if index < f.variable_costs.len() { f.variable_costs.remove(index); } })>"ลบรายการ"</button></Show>
             </div>
-        }).collect_view()}
-        <Show when=move || !closed><button class="secondary" type="button" on:click=move |_| form.update(|f| f.variable_costs.push(VariableCostForm::default()))>"+ เพิ่มต้นทุน"</button></Show>
+        }}).collect_view()}
+        <Show when=move || !closed><button class="secondary" type="button" on:click=move |_| form.update(|f| f.variable_costs.push(VariableCostForm::default()))>"+ เพิ่มค่าใช้จ่าย"</button></Show>
     </section> }
 }
 
 #[component]
 fn FixedCostFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
     view! { <section class="card field-stack">
-        <p class="section-intro">"กรอกเงินลงทุนเฉพาะรายการที่ใช้เงินก้อนซื้อหรือสร้างสิ่งที่ใช้ได้หลายปี เช่น ระบบน้ำ รถ หรือเครื่องมือ ค่าใช้จ่ายประจำที่ไม่มีเงินก้อนเริ่มต้น เว้นช่องนี้ได้"</p>
-        <details class="explanation"><summary>"ⓘ เงินสด กับ ไม่ใช่เงินสด ต่างกันอย่างไร"</summary><h3>"คืออะไร"</h3><p>"ค่าเสื่อมระบบน้ำและค่าเสื่อมรถ เป็นต้นทุนที่ลงบัญชีแต่ปีนี้ไม่ได้ควักเงินจ่าย ส่วนค่าเช่า ดอกเบี้ย และค่าแรงประจำ จ่ายจริงทุกปี"</p><h3>"ใช้ยังไง"</h3><p>"เลือกประเภทให้ถูกตอนกรอกต้นทุนคงที่"</p><h3>"ทำไมต้องมี"</h3><p>"เป็นสิ่งเดียวที่ทำให้กระแสเงินสดกับกำไรสุทธิต่างกันได้"</p><h3>"ไม่ใส่ได้ไหม"</h3><p>"ใส่ผิดประเภทได้ แต่กระแสเงินสดจะผิดตาม"</p></details>
-        {move || form.get().fixed_costs.into_iter().enumerate().map(|(index, line)| view! {
+        <div class="section-title"><div><h2>"แม้ปีนี้ไม่มีทุเรียนขาย ยังต้องจ่ายอะไรอยู่"</h2><small class="formal-term">"ต้นทุนคงที่"</small><p>"เช่น ค่าเช่าที่ เงินเดือนคนงานประจำ ดอกเบี้ย ค่าเสื่อมของที่ใช้หลายปี"</p></div></div>
+        <details class="explanation"><summary>"ⓘ จ่ายเงินจริง กับ เฉลี่ยจากของหลายปี ต่างกันอย่างไร"</summary><h3>"คืออะไร"</h3><p>"ค่าเสื่อมระบบน้ำและค่าเสื่อมรถ เป็นต้นทุนที่ลงบัญชีแต่ปีนี้ไม่ได้ควักเงินจ่าย ส่วนค่าเช่า ดอกเบี้ย และค่าแรงประจำ จ่ายจริงทุกปี"</p><h3>"ใช้ยังไง"</h3><p>"ตอบให้ตรงตอนกรอกแต่ละรายการ"</p><h3>"ทำไมต้องมี"</h3><p>"เป็นสิ่งเดียวที่ทำให้กระแสเงินสดกับกำไรสุทธิต่างกันได้"</p><h3>"ไม่ใส่ได้ไหม"</h3><p>"ตอบผิดได้ แต่เงินสดที่เหลือจะผิดตาม"</p></details>
+        <Show when=move || form.get().fixed_costs.is_empty()><SectionStateChoice form fixed=true closed/></Show>
+        {move || form.get().fixed_costs.into_iter().enumerate().map(|(index, line)| {
+            let cash = Signal::derive(move || if form.get().fixed_costs.get(index).is_some_and(|l| l.cash_kind == CashKind::NonCash) { "non_cash" } else { "cash" });
+            let _ = line;
+            view! {
             <div class="repeat-row">
-                <PlanField label="รายการ" value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.name.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.name = v })) closed/>
-                <label><span>"ประเภท"</span>{if closed { view! { <p class="readonly-value">{cash_kind_label(line.cash_kind)}</p> }.into_any() } else { view! { <select on:change=move |event| { let kind = if event_target_value(&event) == "non-cash" { CashKind::NonCash } else { CashKind::Cash }; form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.cash_kind = kind }); }><option value="cash" selected=line.cash_kind == CashKind::Cash>"เงินสด"</option><option value="non-cash" selected=line.cash_kind == CashKind::NonCash>"ไม่ใช่เงินสด"</option></select> }.into_any() }}</label>
-                <PlanField label="จำนวนต่อปี" unit="บาท" numeric=true value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.amount_per_year.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.amount_per_year = v })) closed/>
-                <PlanField label="เงินที่ลงทุนกับรายการนี้ (ถ้ามี)" unit="บาท" numeric=true value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.investment_base.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.investment_base = v })) closed/>
+                <PlanField label="ค่าอะไร" example="เช่น ค่าเช่าที่ เงินเดือนคนงาน" value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.name.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.name = v })) closed/>
+                <BranchChoice legend="ปีนี้ต้องจ่ายเงินจริงไหม" name="" options=[("cash", "จ่ายเงินจริงปีนี้", "ค่าเช่า เงินเดือน ดอกเบี้ย · ต้นทุนเงินสด"), ("non_cash", "เป็นค่าใช้ของหลายปีที่เฉลี่ยลงฤดูนี้", "ค่าเสื่อมระบบน้ำ รถ โรงเรือน · ต้นทุนไม่ใช่เงินสด")] selected=cash on_select=Callback::new(move |v: String| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.cash_kind = if v == "non_cash" { CashKind::NonCash } else { CashKind::Cash } })) closed/>
+                <PlanField label="ปีละเท่าไร" formal_term="จำนวนต่อปี" unit="บาท" numeric=true value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.amount_per_year.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.amount_per_year = v })) closed/>
+                <PlanField label="เงินก้อนที่ลงไปกับรายการนี้ (ถ้ามี)" formal_term="เงินลงทุน" unit="บาท" numeric=true hint="ค่าใช้จ่ายประจำที่ไม่มีเงินก้อนเริ่มต้น เว้นช่องนี้ได้ ของที่ใช้หลายปี บันทึกที่หน้าของที่ใช้หลายปีจะคิดค่าเสื่อมให้เอง" value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.investment_base.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.investment_base = v })) closed/>
                 <Show when=move || !closed><button class="text-button bad-text" type="button" on:click=move |_| form.update(|f| { if index < f.fixed_costs.len() { f.fixed_costs.remove(index); } })>"ลบรายการ"</button></Show>
             </div>
+        }}).collect_view()}
+        <Show when=move || !closed><button class="secondary" type="button" on:click=move |_| form.update(|f| f.fixed_costs.push(FixedCostForm::default()))>"+ เพิ่มค่าใช้จ่ายประจำ"</button></Show>
+    </section> }
+}
+
+#[component]
+fn ExpenseFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
+    let classifying = RwSignal::new(None::<usize>);
+    let grows = RwSignal::new(None::<bool>);
+    let cash = RwSignal::new(None::<bool>);
+    let kind = RwSignal::new(VariableCostKind::Other);
+    let reset = move || {
+        classifying.set(None);
+        grows.set(None);
+        cash.set(None);
+        kind.set(VariableCostKind::Other);
+    };
+    view! { <section class="card field-stack">
+        <div class="section-title"><div><h2>"จำค่าใช้จ่ายได้แต่ยังไม่รู้ว่าเป็นแบบไหน"</h2><small class="formal-term">"รายการรอจัดประเภท"</small><p>"จดชื่อกับยอดไว้ก่อน ตัวเลขจะยังไม่ถูกนับ จนกว่าจะตอบว่าเป็นค่าใช้จ่ายแบบไหน"</p></div></div>
+        {move || form.get().unclassified.into_iter().enumerate().map(|(index, _)| view! {
+            <div class="repeat-row">
+                <PlanField label="ค่าอะไร" example="เช่น จ่ายคนขับรถเดือนสาม" value=Signal::derive(move || form.get().unclassified.get(index).map(|e| e.name.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(e) = f.unclassified.get_mut(index) { e.name = v })) closed/>
+                <PlanField label="เท่าไร" unit="บาท" numeric=true hint="ถ้ายังไม่รู้ยอด เว้นว่างไว้ก่อนได้" value=Signal::derive(move || form.get().unclassified.get(index).map(|e| e.amount.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(e) = f.unclassified.get_mut(index) { e.amount = v })) closed/>
+                <PlanField label="โน้ต" example="เช่น ยังไม่แน่ใจว่ารวมค่าน้ำมันหรือยัง" value=Signal::derive(move || form.get().unclassified.get(index).map(|e| e.note.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(e) = f.unclassified.get_mut(index) { e.note = v })) closed/>
+                <Show when=move || !closed && classifying.get() != Some(index)>
+                    <button class="secondary" type="button" on:click=move |_| { reset(); classifying.set(Some(index)); }>"บอกว่าเป็นแบบไหน"</button>
+                    <button class="text-button bad-text" type="button" on:click=move |_| form.update(|f| { if index < f.unclassified.len() { f.unclassified.remove(index); } })>"ลบรายการ"</button>
+                </Show>
+                <Show when=move || !closed && classifying.get() == Some(index)>
+                    <div class="classify-flow">
+                        <BranchChoice legend="ถ้าปีนี้ปลูกหรือขายมากขึ้น ค่านี้จะเพิ่มตามไหม" name="classify-grows" options=[("yes", "เพิ่มตาม", "ปุ๋ย ยา คนเก็บ ขนส่ง กล่อง · ต้นทุนผันแปร"), ("no", "จ่ายเท่าเดิมแม้ไม่มีทุเรียนขาย", "ค่าเช่า เงินเดือนประจำ ดอกเบี้ย · ต้นทุนคงที่")] selected=Signal::derive(move || match grows.get() { Some(true) => "yes", Some(false) => "no", None => "" }) on_select=Callback::new(move |v: String| grows.set(Some(v == "yes"))) closed=false/>
+                        <Show when=move || grows.get() == Some(true)>
+                            <label><span>"ใกล้เคียงกับกลุ่มไหนที่สุด"</span><small class="formal-term">"ประเภทต้นทุนผันแปร"</small><select on:change=move |event| kind.set(parse_variable_kind(&event_target_value(&event)))>{variable_kind_options(VariableCostKind::Other)}</select></label>
+                        </Show>
+                        <Show when=move || grows.get() == Some(false)>
+                            <BranchChoice legend="ปีนี้ต้องจ่ายเงินจริงไหม" name="classify-cash" options=[("yes", "จ่ายเงินจริงปีนี้", "ต้นทุนเงินสด"), ("no", "เป็นค่าใช้ของหลายปีที่เฉลี่ยลงฤดูนี้", "ค่าเสื่อม · ต้นทุนไม่ใช่เงินสด")] selected=Signal::derive(move || match cash.get() { Some(true) => "yes", Some(false) => "no", None => "" }) on_select=Callback::new(move |v: String| cash.set(Some(v == "yes"))) closed=false/>
+                            <p class="caption">"ถ้าเป็นเงินก้อนที่ซื้อของใช้หลายปี เช่น ระบบน้ำหรือรถ ให้บันทึกที่หน้าของที่ใช้หลายปีแทน ระบบจะคิดค่าเสื่อมให้เอง"</p>
+                        </Show>
+                        <button class="primary" type="button" disabled=move || match grows.get() { Some(true) => false, Some(false) => cash.get().is_none(), None => true } on:click=move |_| {
+                            let classification = match (grows.get(), cash.get()) {
+                                (Some(true), _) => ExpenseClassification::Variable(kind.get()),
+                                (Some(false), Some(true)) => ExpenseClassification::Fixed(CashKind::Cash),
+                                (Some(false), Some(false)) => ExpenseClassification::Fixed(CashKind::NonCash),
+                                _ => return,
+                            };
+                            form.update(|f| { f.classify_expense(index, classification); });
+                            reset();
+                        }>"ย้ายไปส่วนที่ถูก"</button>
+                        <button class="text-button" type="button" on:click=move |_| reset()>"ยังไม่ตอบตอนนี้"</button>
+                    </div>
+                </Show>
+            </div>
         }).collect_view()}
-        <Show when=move || !closed><button class="secondary" type="button" on:click=move |_| form.update(|f| f.fixed_costs.push(FixedCostForm::default()))>"+ เพิ่มต้นทุนคงที่"</button></Show>
+        <Show when=move || closed && form.get().unclassified.is_empty()><p class="readonly-value">"ไม่มีรายการที่รอบอกประเภท"</p></Show>
+        <Show when=move || !closed><button class="secondary" type="button" on:click=move |_| form.update(|f| f.unclassified.push(UnclassifiedExpenseForm::default()))>"+ จดค่าใช้จ่ายที่จำได้"</button></Show>
+        <p class="caption">"รายการที่ย้ายแล้วจะไปอยู่ในส่วนต้นทุนผันแปรหรือต้นทุนคงที่ตามคำตอบ กดปุ่มบันทึกด้านล่างเพื่อเก็บทั้งที่จดไว้และที่ย้ายแล้ว"</p>
     </section> }
 }
 
@@ -1682,8 +1812,13 @@ fn LiveTotal(form: RwSignal<PlanForm>) -> impl IntoView {
             .map(|profit| format!("กำไรสุทธิโดยประมาณ {} บาท", money(profit)))
             .unwrap_or_else(|| "ยังคำนวณกำไรสุทธิไม่ได้".into())
     };
+    let waiting = move || {
+        let count = form.get().unclassified.len();
+        (count > 0).then(|| format!("ยังมี {count} รายการที่ยังไม่ได้บอกว่าเป็นแบบไหน จึงยังไม่ถูกนับ"))
+    };
     view! { <aside class="live-total" aria-live="polite">
         <strong>{summary}</strong>
+        {move || waiting().map(|text| view! { <small>{text}</small> })}
     </aside> }
 }
 
@@ -1823,13 +1958,6 @@ fn format_numeric_input(value: &str) -> String {
         || format!("{sign}{integer}"),
         |fraction| format!("{sign}{integer}.{fraction}"),
     )
-}
-
-fn cash_kind_label(kind: CashKind) -> &'static str {
-    match kind {
-        CashKind::Cash => "เงินสด",
-        CashKind::NonCash => "ไม่ใช่เงินสด",
-    }
 }
 
 fn variable_kind_label(kind: VariableCostKind) -> &'static str {

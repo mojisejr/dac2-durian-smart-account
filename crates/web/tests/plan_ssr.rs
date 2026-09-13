@@ -14,9 +14,10 @@ use web::{
     plans::{ActualOutcomeRecord, PlanRecord, SeasonHistoryItem},
 };
 
-const SECTIONS: [(&str, &str); 6] = [
+const SECTIONS: [(&str, &str); 7] = [
     ("market", "ตลาด"),
     ("production", "ผลผลิตและราคา"),
+    ("expenses", "ค่าใช้จ่ายที่จำได้"),
     ("variable-costs", "ต้นทุนผันแปร"),
     ("fixed-costs", "ต้นทุนคงที่"),
     ("targets", "เป้าหมาย"),
@@ -493,7 +494,7 @@ fn closed_hub_keeps_truthful_readiness_without_edit_or_mode_actions() {
 }
 
 #[test]
-fn all_six_input_routes_render_an_empty_editable_state() {
+fn all_seven_input_routes_render_an_empty_editable_state() {
     for (section, title) in SECTIONS {
         let html = render(section, false, PlanForm::from_plan(&calc::Plan::default()));
         assert!(html.contains(title), "{section}");
@@ -510,13 +511,13 @@ fn all_six_input_routes_render_an_empty_editable_state() {
 }
 
 #[test]
-fn all_six_input_routes_render_closed_values_without_edit_controls() {
+fn all_seven_input_routes_render_closed_values_without_edit_controls() {
     for (section, title) in SECTIONS {
         let html = render(section, true, PlanForm::from_plan(&calc::workbook_sample()));
         assert!(html.contains(title), "{section}");
         assert!(html.contains("ฤดูกาลนี้ปิดแล้ว · แก้ไขไม่ได้"), "{section}");
         assert!(!html.contains("บันทึกส่วนนี้"), "{section}");
-        assert!(html.contains("readonly-value"), "{section}");
+        assert!(html.contains("readonly-value"), "{section}: {html}");
     }
 }
 
@@ -528,9 +529,10 @@ fn fixed_costs_explain_that_investment_is_optional_per_item() {
         PlanForm::from_plan(&calc::workbook_sample()),
     );
 
-    assert!(html.contains("เงินที่ลงทุนกับรายการนี้ (ถ้ามี)"));
+    assert!(html.contains("เงินก้อนที่ลงไปกับรายการนี้ (ถ้ามี)"));
     assert!(html.contains("ค่าใช้จ่ายประจำที่ไม่มีเงินก้อนเริ่มต้น เว้นช่องนี้ได้"));
     assert!(!html.contains("ฐานเงินลงทุน"));
+    assert!(html.contains("<small class=\"formal-term\">เงินลงทุน</small>"));
 }
 
 #[test]
@@ -796,4 +798,124 @@ fn kilogram_grade_entry_is_unavailable_with_a_reason_until_sellable_is_known() {
         "kilogram entry shows the percentage beside it"
     );
     assert!(html.contains("รวม 19,950.00 จาก 19,950.00 กก."));
+}
+
+#[test]
+fn empty_cost_sections_offer_unknown_or_confirmed_none_and_rows_hide_the_choice() {
+    for (section, name) in [
+        ("variable-costs", "variable-cost-state"),
+        ("fixed-costs", "fixed-cost-state"),
+    ] {
+        let empty = render(section, false, PlanForm::from_plan(&calc::Plan::default()));
+        assert!(empty.contains(&format!("name=\"{name}\"")), "{section}");
+        assert!(empty.contains("ยังไม่รู้ / ข้ามก่อน"), "{section}");
+        assert!(empty.contains("ยืนยันว่าไม่มี"), "{section}");
+        assert!(empty.contains("ระบบจะนับเป็นศูนย์"), "{section}");
+
+        let filled = render(
+            section,
+            false,
+            PlanForm::from_plan(&calc::workbook_sample()),
+        );
+        assert!(
+            !filled.contains(&format!("name=\"{name}\"")),
+            "{section}: rows decide the state"
+        );
+    }
+}
+
+#[test]
+fn the_sellable_yield_default_is_disclosed_beside_the_lines_it_fills() {
+    let mut plan = calc::workbook_sample();
+    let harvest = plan
+        .variable_costs
+        .iter()
+        .position(|line| line.kind == calc::VariableCostKind::HarvestLabor)
+        .unwrap();
+    let blank_linked = plan
+        .variable_costs
+        .iter()
+        .filter(|line| line.uses_sellable_yield_default())
+        .count();
+    assert!(
+        blank_linked >= 1,
+        "the sample leaves at least one linked quantity blank"
+    );
+    let html = render("variable-costs", false, PlanForm::from_plan(&plan));
+    assert_eq!(
+        html.matches("quantity-default").count(),
+        blank_linked,
+        "every blank linked quantity, and only those, shows the applied figure"
+    );
+    assert!(html.contains("ระบบใช้กิโลที่คาดว่าจะขายได้ 19,950.00 กก. เป็นจำนวนของรายการนี้"));
+
+    assert!(plan.variable_costs[harvest].uses_sellable_yield_default());
+    plan.variable_costs[harvest].quantity = Some(10_000.into());
+    let html = render("variable-costs", false, PlanForm::from_plan(&plan));
+    assert_eq!(
+        html.matches("quantity-default").count(),
+        blank_linked - 1,
+        "an explicit override shows no default note"
+    );
+
+    plan.variable_costs[harvest].quantity = None;
+    plan.variable_costs[harvest].total_amount = Some(12_000.into());
+    let html = render("variable-costs", false, PlanForm::from_plan(&plan));
+    assert_eq!(
+        html.matches("quantity-default").count(),
+        blank_linked - 1,
+        "a total-only line takes no default"
+    );
+    assert!(html.contains("ยอดรวมทั้งฤดู"));
+}
+
+#[test]
+fn classification_asks_familiar_questions_and_the_expense_lands_intact() {
+    let mut form = PlanForm::from_plan(&calc::Plan::default());
+    form.unclassified
+        .push(web::plan_form::UnclassifiedExpenseForm {
+            name: "จ่ายคนขับรถเดือนสาม".into(),
+            amount: "50000".into(),
+            note: String::new(),
+        });
+    let html = render("expenses", false, form.clone());
+    assert!(html.contains("จำค่าใช้จ่ายได้แต่ยังไม่รู้ว่าเป็นแบบไหน"));
+    assert!(html.contains("บอกว่าเป็นแบบไหน"));
+    assert!(html.contains("ยังมี 1 รายการที่ยังไม่ได้บอกว่าเป็นแบบไหน จึงยังไม่ถูกนับ"));
+    for term in ["ต้นทุนผันแปร", "ต้นทุนคงที่"] {
+        for heading in headings(&html) {
+            assert!(!heading.contains(term), "{term} leads {heading}");
+        }
+    }
+
+    let moved = form.classify_expense(
+        0,
+        web::plan_form::ExpenseClassification::Variable(calc::VariableCostKind::Transport),
+    );
+    assert!(moved);
+    assert!(form.unclassified.is_empty());
+    let line = form.variable_costs.last().unwrap();
+    assert_eq!(line.name, "จ่ายคนขับรถเดือนสาม");
+    assert!(line.total_only);
+    assert_eq!(line.total_amount, "50000");
+    assert_eq!(line.kind, calc::VariableCostKind::Transport);
+    let plan = form.to_plan().unwrap();
+    assert_eq!(
+        plan.variable_costs.last().unwrap().total_amount,
+        Some(50_000.into())
+    );
+
+    let mut form = PlanForm::from_plan(&calc::Plan::default());
+    form.unclassified
+        .push(web::plan_form::UnclassifiedExpenseForm {
+            name: "ค่าเช่าที่".into(),
+            amount: "36000".into(),
+            note: String::new(),
+        });
+    form.classify_expense(
+        0,
+        web::plan_form::ExpenseClassification::Fixed(calc::CashKind::Cash),
+    );
+    assert_eq!(form.fixed_costs[0].amount_per_year, "36000");
+    assert_eq!(form.fixed_costs[0].cash_kind, calc::CashKind::Cash);
 }

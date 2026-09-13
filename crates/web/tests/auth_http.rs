@@ -258,12 +258,21 @@ async fn login_rotates_session_logout_flushes_it_and_reset_ends_existing_session
         .await
         .expect("authenticated request completes");
     assert_eq!(accepted.status(), StatusCode::OK);
+    assert_eq!(
+        accepted.headers()[header::CACHE_CONTROL],
+        "no-store",
+        "owner pages are never replayed from the browser cache"
+    );
     let accepted_history = app
         .clone()
         .oneshot(request(Method::GET, "/history", Some(&cookie_after_login)))
         .await
         .expect("authenticated history request completes");
     assert_eq!(accepted_history.status(), StatusCode::OK);
+    assert_eq!(
+        accepted_history.headers()[header::CACHE_CONTROL],
+        "no-store"
+    );
 
     let logged_out = app
         .clone()

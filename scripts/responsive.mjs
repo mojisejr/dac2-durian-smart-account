@@ -256,6 +256,31 @@ function assess(where, report, intendedWidth) {
   }
 }
 
+
+// Guided fields bind their value and checked state as properties, so the
+// server-rendered markup carries no value until hydration runs. Wait for the
+// hydrated value instead of reading whatever the pre-hydration DOM holds.
+async function waitForHydratedValue(page, selector, accept, what) {
+  await page
+    .waitForFunction(
+      ([selector, acceptSource]) => {
+        const accept = new Function('value', `return (${acceptSource})(value);`);
+        return [...document.querySelectorAll(selector)].some((element) =>
+          accept(element.type === 'radio' || element.type === 'checkbox' ? element.checked : element.value),
+        );
+      },
+      [selector, accept.toString()],
+      { timeout: 10000 },
+    )
+    .catch(async () => {
+      const seen = await page
+        .locator(selector)
+        .evaluateAll((elements) => elements.map((element) => (element.type === 'radio' || element.type === 'checkbox' ? element.checked : element.value)))
+        .catch(() => '(missing)');
+      throw new Error(`${what} (saw ${JSON.stringify(seen)} at ${page.url()})`);
+    });
+}
+
 async function signIn(browser) {
   const email = 'responsive-proof@dac2.local';
   const password = 'CorrectHorse123!';
@@ -435,16 +460,9 @@ async function signIn(browser) {
   }
   await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.locator('#production-sellable-yield').waitFor({ state: 'visible', timeout: 10000 });
-  if (!(await page.isChecked('input[name="yield-source"][value="direct"]'))) {
-    throw new Error('refresh lost the saved direct yield branch');
-  }
-  if ((await page.locator('#production-sellable-yield').inputValue()) !== '18000') {
-    throw new Error('refresh lost the saved direct sellable kilograms');
-  }
-  if ((await page.locator('#production-average-price').inputValue()) !== '79') {
-    throw new Error('refresh lost the saved average price');
-  }
+  await waitForHydratedValue(page, 'input[name="yield-source"][value="direct"]', (v) => v === true, 'refresh lost the saved direct yield branch');
+  await waitForHydratedValue(page, '#production-sellable-yield', (v) => v === '18000', 'refresh lost the saved direct sellable kilograms');
+  await waitForHydratedValue(page, '#production-average-price', (v) => v === '79', 'refresh lost the saved average price');
   await page.check('input[name="yield-source"][value="derived"]');
   if ((await page.locator('#production-trees').inputValue()) !== '200') {
     throw new Error('the unselected derived facts were not persisted with the section');
@@ -467,19 +485,16 @@ async function signIn(browser) {
   await page.goto(production);
   await page.locator('#production-sellable-yield').waitFor({ state: 'visible', timeout: 10000 });
   await page.goBack({ waitUntil: 'domcontentloaded' });
-  await page.locator('#market-buyer-committed-kg').waitFor({ state: 'visible', timeout: 10000 });
   // A restored history entry keeps the blur-formatted text; a re-rendered
-  // one shows the stored figure. Either is the same saved answer.
-  const buyerAfterBack = await page.locator('#market-buyer-committed-kg').inputValue();
-  if (!['25000', '25,000'].includes(buyerAfterBack)) {
-    throw new Error(`browser back lost the saved buyer quantity (saw ${JSON.stringify(buyerAfterBack)} at ${page.url()})`);
-  }
+  // one shows the stored figure. Either is the same saved answer. Owner pages
+  // are served no-store, so back never replays the page from before the save.
+  await waitForHydratedValue(page, '#market-buyer-committed-kg', (v) => v === '25000' || v === '25,000', 'browser back lost the saved buyer quantity');
   await page.goto(`${BASE}/plans/${detailedPlanId}`);
   await page.getByText('พร้อมเทียบยอดผู้ซื้อกับผลผลิต').waitFor({ timeout: 10000 });
 
   // Grade entry in kilograms converts visibly against the saved total.
   await page.goto(production);
-  await page.locator('#production-sellable-yield').waitFor({ state: 'visible', timeout: 10000 });
+  await waitForHydratedValue(page, '#production-sellable-yield', (v) => v === '18000', 'the saved sellable kilograms did not hydrate before grade entry');
   await page.check('input[name="price-source"][value="by_grade"]');
   await page.click('button:has-text("+ เพิ่มเกรด")');
   await page.check('input[name="grade-entry"][value="kilograms"]');
@@ -491,6 +506,59 @@ async function signIn(browser) {
   }
   await page.check('input[name="price-source"][value="average"]');
   await page.getByText('เกรดที่เคยกรอกไว้ยังเก็บอยู่').waitFor({ timeout: 5000 });
+
+  // Batch 3: a remembered expense is captured before it is classified, the
+  // hub names it as waiting, leaving and returning keeps it, classifying moves
+  // it, and confirming a section empty changes the result from unavailable to
+  // a figure.
+  const expenses = `${BASE}/plans/${detailedPlanId}/expenses`;
+  await page.goto(expenses);
+  await page.click('button:has-text("+ จดค่าใช้จ่ายที่จำได้")');
+  await page.getByLabel('ค่าอะไร').first().fill('จ่ายคนขับรถเดือนสาม');
+  await page.getByLabel('เท่าไร').first().fill('50000');
+  await page.getByText('ยังมี 1 รายการที่ยังไม่ได้บอกว่าเป็นแบบไหน จึงยังไม่ถูกนับ').waitFor({ timeout: 5000 });
+  const captureSave = page.waitForResponse((r) => r.request().method() === 'POST', { timeout: 10000 });
+  await page.click('button:has-text("บันทึกส่วนนี้")');
+  if (!(await captureSave).ok()) throw new Error('saving a captured expense returned a failing HTTP status');
+  await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
+  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await page.getByText('มี 1 รายการยังไม่ได้บอกว่าเป็นแบบไหน').waitFor({ timeout: 10000 });
+  await page.getByRole('heading', { name: 'บอกว่าค่าใช้จ่ายที่จดไว้เป็นแบบไหน', exact: true }).waitFor({ timeout: 10000 });
+  await page.goto(expenses);
+  await waitForHydratedValue(page, '.repeat-row input[type="text"]', (v) => v === 'จ่ายคนขับรถเดือนสาม', 'the captured expense did not survive leaving and returning');
+  await page.click('button:has-text("บอกว่าเป็นแบบไหน")');
+  await page.check('input[name="classify-grows"][value="yes"]');
+  await page.locator('.classify-flow select').selectOption('transport');
+  await page.click('button:has-text("ย้ายไปส่วนที่ถูก")');
+  if (await page.locator('button:has-text("บอกว่าเป็นแบบไหน")').count()) {
+    throw new Error('classifying did not remove the item from the waiting list');
+  }
+  const classifySave = page.waitForResponse((r) => r.request().method() === 'POST', { timeout: 10000 });
+  await page.click('button:has-text("บันทึกส่วนนี้")');
+  if (!(await classifySave).ok()) throw new Error('saving a classified expense returned a failing HTTP status');
+  await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
+  await page.goto(`${BASE}/plans/${detailedPlanId}/variable-costs`);
+  await page.getByLabel('ยอดรวมทั้งฤดู').waitFor({ state: 'visible', timeout: 10000 });
+  await waitForHydratedValue(page, '.repeat-row input[inputmode="decimal"]', (v) => v === '50000' || v === '50,000', 'the classified expense lost its amount on the way to variable costs');
+  if (await page.locator('input[name="variable-cost-state"]').count()) {
+    throw new Error('the unknown/confirmed-none question is still asked while rows exist');
+  }
+
+  // With variable costs entered and fixed costs unknown the profit is still
+  // unavailable; confirming the fixed section empty makes it a figure.
+  await page.goto(`${BASE}/plans/${detailedPlanId}/fixed-costs`);
+  await page.locator('input[name="fixed-cost-state"][value="confirmed_none"]').waitFor({ state: 'visible', timeout: 10000 });
+  await page.getByText('ยังคำนวณกำไรสุทธิไม่ได้').waitFor({ timeout: 5000 });
+  await page.check('input[name="fixed-cost-state"][value="confirmed_none"]');
+  await page.getByText('กำไรสุทธิโดยประมาณ').waitFor({ timeout: 5000 });
+  const confirmSave = page.waitForResponse((r) => r.request().method() === 'POST', { timeout: 10000 });
+  await page.click('button:has-text("บันทึกส่วนนี้")');
+  if (!(await confirmSave).ok()) throw new Error('confirming an empty fixed section returned a failing HTTP status');
+  await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForHydratedValue(page, 'input[name="fixed-cost-state"][value="confirmed_none"]', (v) => v === true, 'refresh lost the confirmed-none answer');
+  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await page.getByText('ยืนยันแล้วว่าไม่มีค่าใช้จ่ายส่วนนี้').waitFor({ timeout: 10000 });
 
   // A separate season reaches final comparison so the responsive matrix can
   // measure both the editable draft and immutable result states.
@@ -581,22 +649,22 @@ async function signIn(browser) {
   // owner explicitly includes it in. Starting capital stays visibly separate.
   await page.goto(`${BASE}/plans/${detailedPlanId}`);
   await page.click('summary:has-text("การวางแผนขั้นสูง (ไม่บังคับ)")');
-  await page.click('a:has-text("สินทรัพย์และเงินลงทุน")');
+  await page.click('a:has-text("ของที่ใช้หลายปี")');
   await page.waitForURL(new RegExp(`/plans/${detailedPlanId}/assets$`));
-  await page.click('summary:has-text("+ เพิ่มสินทรัพย์")');
+  await page.click('summary:has-text("+ เพิ่มของที่ใช้หลายปี")');
   const create = page.locator('details.asset-create');
   await create.locator('input[name="name"]').fill('ระบบน้ำกลางสวน');
   await create.locator('input[name="original_cost"]').fill('100000');
   await create.locator('input[name="start_year"]').fill('2568');
   await create.locator('input[name="useful_life_years"]').fill('5');
-  await submitAndReload(page, create.locator('button:has-text("บันทึกสินทรัพย์")'), 'asset creation');
+  await submitAndReload(page, create.locator('button:has-text("บันทึกของชิ้นนี้")'), 'asset creation');
   await page.getByText('ยังไม่รวม', { exact: true }).waitFor({ state: 'visible' });
 
   await page.getByText('ระบบจะไม่เดาหรือลบรายการเดิมให้', { exact: false }).waitFor({ state: 'visible' });
   await submitAndReload(page, page.locator('button:has-text("รวมในฤดูนี้")'), 'asset inclusion');
   await page.getByText('รวมในฤดูนี้', { exact: true }).waitFor({ state: 'visible' });
   await page.fill('input[name="starting_capital"]', '50000');
-  await submitAndReload(page, page.locator('button:has-text("บันทึกเงินทุนเริ่มต้น")'), 'starting capital save');
+  await submitAndReload(page, page.locator('button:has-text("บันทึกเงินก้อนตั้งต้น")'), 'starting capital save');
   if (await page.locator('input[name="starting_capital"]').inputValue() !== '50000') {
     throw new Error('starting capital did not persist independently');
   }
@@ -720,6 +788,7 @@ try {
     ['analysis', `${BASE}/plans/${detailedPlanId}/analysis`],
     ['production', `${BASE}/plans/${detailedPlanId}/production`],
     ['market', `${BASE}/plans/${detailedPlanId}/market`],
+    ['expenses', `${BASE}/plans/${detailedPlanId}/expenses`],
     ['variable-costs', `${BASE}/plans/${detailedPlanId}/variable-costs`],
     ['fixed-costs', `${BASE}/plans/${detailedPlanId}/fixed-costs`],
     ['health', `${BASE}/plans/${detailedPlanId}/health`],

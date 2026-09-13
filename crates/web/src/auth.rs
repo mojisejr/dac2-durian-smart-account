@@ -177,11 +177,21 @@ pub async fn require_login(
 ) -> axum::response::Response {
     use axum::response::{IntoResponse, Redirect};
 
-    if !protected_account_path(request.uri().path()) || auth_session.user.is_some() {
-        next.run(request).await
-    } else {
-        Redirect::to("/login").into_response()
+    if !protected_account_path(request.uri().path()) {
+        return next.run(request).await;
     }
+    if auth_session.user.is_none() {
+        return Redirect::to("/login").into_response();
+    }
+    // Owner pages are never served from the HTTP cache. A back navigation
+    // after a save must re-render the saved answer, not replay the page as
+    // it was before the save, and a shared device keeps no copy.
+    let mut response = next.run(request).await;
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    response
 }
 
 #[cfg(any(feature = "ssr", test))]
