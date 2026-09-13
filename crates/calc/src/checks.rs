@@ -2,7 +2,7 @@ use rust_decimal::Decimal;
 
 use crate::{
     BusinessAnalysis, CheckKind, CheckResult, CheckStatus, CompletenessAnalysis, CostAnalysis,
-    HealthAnalysis, HealthQuestion, Plan, Readiness, RevenueAnalysis,
+    HealthAnalysis, HealthQuestion, Plan, PriceSource, Readiness, RevenueAnalysis,
 };
 
 pub fn calculate(
@@ -12,19 +12,24 @@ pub fn calculate(
     business: &BusinessAnalysis,
     health: &HealthAnalysis,
 ) -> CompletenessAnalysis {
-    let checks = vec![
-        equality_check(
+    let mut checks = Vec::new();
+    // With one average price and no grade list there is nothing to total; the
+    // check would only report a missing figure the owner chose not to enter.
+    if plan.production.price_source == PriceSource::ByGrade || !plan.production.grades.is_empty() {
+        checks.push(equality_check(
             CheckKind::GradeSharesTotalOne,
             revenue.grade_share_total,
             Some(Decimal::ONE),
             Decimal::new(1, 4),
-        ),
+        ));
+    }
+    checks.extend([
         positive_check(CheckKind::SellableYieldPositive, revenue.sellable_yield_kg),
         contribution_check(business.contribution_per_kg),
         positive_check(CheckKind::InvestmentPositive, cost.investment_base),
         linked_cost_check(cost),
         health_complete_check(plan, health),
-    ];
+    ]);
     let overall = if checks.iter().all(|check| check.status == CheckStatus::Ok) {
         Readiness::Ready
     } else {

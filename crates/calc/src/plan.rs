@@ -17,7 +17,9 @@ pub struct Plan {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct MarketPlan {
     pub target_customer: Option<String>,
-    pub demand_kg: Option<Decimal>,
+    /// The quantity a buyer said they would take this season. It feeds only
+    /// the market gap and fulfillment comparison, never the main result.
+    pub buyer_committed_kg: Option<Decimal>,
     pub minimum_price_per_kg: Option<Decimal>,
     pub sales_period: Option<String>,
     pub sales_channels: Option<u32>,
@@ -25,14 +27,83 @@ pub struct MarketPlan {
     pub quality_requirements: Option<String>,
 }
 
+/// Which production branch feeds sellable kilograms. The unselected branch's
+/// facts stay stored so the owner can switch back without re-entering them.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum YieldSource {
+    /// The owner enters sellable kilograms directly.
+    Direct,
+    /// Sellable kilograms derive from trees, fruit, weight, and loss.
+    #[default]
+    Derived,
+}
+
+/// Which price branch feeds the revenue price. Grades are kept either way.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum PriceSource {
+    /// One average price for every kilogram sold.
+    Average,
+    /// A share and price per grade, weighted into one price.
+    #[default]
+    ByGrade,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProductionPlan {
+    pub yield_source: YieldSource,
+    /// Sellable kilograms entered directly; used only when `yield_source` is
+    /// `Direct`.
+    pub sellable_yield_kg: Option<Decimal>,
     pub area_rai: Option<Decimal>,
     pub producing_trees: Option<Decimal>,
     pub fruits_per_tree: Option<Decimal>,
     pub average_fruit_weight_kg: Option<Decimal>,
     pub loss_share: Option<Decimal>,
+    pub price_source: PriceSource,
+    /// One average price; used only when `price_source` is `Average`.
+    pub average_price_per_kg: Option<Decimal>,
     pub grades: Vec<Grade>,
+}
+
+impl ProductionPlan {
+    /// Gross kilograms from the orchard facts, before loss. Available whenever
+    /// the derived facts exist, whichever branch is selected, so the derived
+    /// figure can be shown beside a direct entry.
+    pub fn derived_gross_yield_kg(&self) -> Option<Decimal> {
+        Some(self.producing_trees? * self.fruits_per_tree? * self.average_fruit_weight_kg?)
+    }
+
+    /// Sellable kilograms from the orchard facts after loss.
+    pub fn derived_sellable_yield_kg(&self) -> Option<Decimal> {
+        Some(self.derived_gross_yield_kg()? * (Decimal::ONE - self.loss_share?))
+    }
+
+    /// Sellable kilograms from the selected branch only.
+    pub fn selected_sellable_yield_kg(&self) -> Option<Decimal> {
+        match self.yield_source {
+            YieldSource::Direct => self.sellable_yield_kg,
+            YieldSource::Derived => self.derived_sellable_yield_kg(),
+        }
+    }
+
+    /// The by-grade weighted price, available whenever every grade carries a
+    /// share and a price, whichever branch is selected.
+    pub fn weighted_grade_price_per_kg(&self) -> Option<Decimal> {
+        if self.grades.is_empty() {
+            return None;
+        }
+        self.grades.iter().try_fold(Decimal::ZERO, |total, grade| {
+            Some(total + grade.share? * grade.price_per_kg?)
+        })
+    }
+
+    /// The price per kilogram from the selected branch only.
+    pub fn selected_price_per_kg(&self) -> Option<Decimal> {
+        match self.price_source {
+            PriceSource::Average => self.average_price_per_kg,
+            PriceSource::ByGrade => self.weighted_grade_price_per_kg(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

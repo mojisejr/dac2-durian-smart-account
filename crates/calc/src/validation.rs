@@ -1,7 +1,7 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::{HealthQuestion, Plan};
+use crate::{HealthQuestion, Plan, PriceSource};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum InputIssueKind {
@@ -22,7 +22,11 @@ impl Plan {
     pub fn input_issues(&self) -> Vec<InputIssue> {
         let mut issues = Vec::new();
 
-        check_non_negative(&mut issues, "market.demand_kg", self.market.demand_kg);
+        check_non_negative(
+            &mut issues,
+            "market.buyer_committed_kg",
+            self.market.buyer_committed_kg,
+        );
         check_non_negative(
             &mut issues,
             "market.minimum_price_per_kg",
@@ -32,6 +36,11 @@ impl Plan {
             &mut issues,
             "market.largest_buyer_share",
             self.market.largest_buyer_share,
+        );
+        check_non_negative(
+            &mut issues,
+            "production.sellable_yield_kg",
+            self.production.sellable_yield_kg,
         );
         check_non_negative(&mut issues, "production.area_rai", self.production.area_rai);
         check_non_negative(
@@ -54,6 +63,11 @@ impl Plan {
             "production.loss_share",
             self.production.loss_share,
         );
+        check_non_negative(
+            &mut issues,
+            "production.average_price_per_kg",
+            self.production.average_price_per_kg,
+        );
 
         let mut grade_total = Decimal::ZERO;
         let mut all_grade_shares_present = !self.production.grades.is_empty();
@@ -73,7 +87,12 @@ impl Plan {
                 None => all_grade_shares_present = false,
             }
         }
-        if all_grade_shares_present && (grade_total - Decimal::ONE).abs() >= Decimal::new(1, 4) {
+        // Grades only have to total one while they are the selected price
+        // branch; a kept-but-unselected grade list must not block a save.
+        if self.production.price_source == PriceSource::ByGrade
+            && all_grade_shares_present
+            && (grade_total - Decimal::ONE).abs() >= Decimal::new(1, 4)
+        {
             issues.push(InputIssue {
                 field: "production.grades".into(),
                 kind: InputIssueKind::GradeSharesDoNotTotalOne,
@@ -210,6 +229,29 @@ mod tests {
             issues
                 .iter()
                 .any(|issue| issue.kind == InputIssueKind::DuplicateHealthAnswer)
+        );
+    }
+
+    #[test]
+    fn an_unselected_grade_list_does_not_have_to_total_one() {
+        let mut plan = workbook_sample();
+        plan.production.grades[0].share = Some(Decimal::new(49, 2));
+        plan.production.price_source = PriceSource::Average;
+        plan.production.average_price_per_kg = Some(Decimal::from(80));
+
+        assert!(
+            !plan
+                .input_issues()
+                .iter()
+                .any(|issue| issue.kind == InputIssueKind::GradeSharesDoNotTotalOne)
+        );
+
+        plan.production.grades[0].share = Some(Decimal::new(15, 1));
+        assert!(
+            plan.input_issues()
+                .iter()
+                .any(|issue| issue.kind == InputIssueKind::OutsideShareRange),
+            "an impossible share is still an error whichever branch is selected"
         );
     }
 }

@@ -31,8 +31,9 @@ pub async fn load(
     };
 
     let market = sqlx::query(
-        "SELECT target_customer, demand_kg, minimum_price_per_kg, sales_period,
-                sales_channels, largest_buyer_share, quality_requirements
+        "SELECT target_customer, buyer_committed_kg, minimum_price_per_kg,
+                sales_period, sales_channels, largest_buyer_share,
+                quality_requirements
          FROM market_plans WHERE plan_id = $1 AND owner_id = $2",
     )
     .bind(plan_id)
@@ -50,7 +51,7 @@ pub async fn load(
         .transpose()?;
     let market = MarketPlan {
         target_customer: market.try_get("target_customer")?,
-        demand_kg: market.try_get::<Option<Decimal>, _>("demand_kg")?,
+        buyer_committed_kg: market.try_get::<Option<Decimal>, _>("buyer_committed_kg")?,
         minimum_price_per_kg: market.try_get("minimum_price_per_kg")?,
         sales_period: market.try_get("sales_period")?,
         sales_channels,
@@ -59,8 +60,9 @@ pub async fn load(
     };
 
     let production = sqlx::query(
-        "SELECT area_rai, producing_trees, fruits_per_tree,
-                average_fruit_weight_kg, loss_share
+        "SELECT yield_source, sellable_yield_kg, area_rai, producing_trees,
+                fruits_per_tree, average_fruit_weight_kg, loss_share,
+                price_source, average_price_per_kg
          FROM yield_estimates WHERE plan_id = $1 AND owner_id = $2",
     )
     .bind(plan_id)
@@ -68,11 +70,15 @@ pub async fn load(
     .fetch_one(&mut *connection)
     .await?;
     let mut production = ProductionPlan {
+        yield_source: codec::parse_yield_source(production.try_get("yield_source")?)?,
+        sellable_yield_kg: production.try_get("sellable_yield_kg")?,
         area_rai: production.try_get("area_rai")?,
         producing_trees: production.try_get("producing_trees")?,
         fruits_per_tree: production.try_get("fruits_per_tree")?,
         average_fruit_weight_kg: production.try_get("average_fruit_weight_kg")?,
         loss_share: production.try_get("loss_share")?,
+        price_source: codec::parse_price_source(production.try_get("price_source")?)?,
+        average_price_per_kg: production.try_get("average_price_per_kg")?,
         grades: Vec::new(),
     };
 
