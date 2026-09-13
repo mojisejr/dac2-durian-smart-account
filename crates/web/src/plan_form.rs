@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
 use calc::{
-    CashKind, FixedCostLine, Grade, HealthAnswer, HealthQuestion, KpiTargets, MarketPlan, Plan,
-    ProductionPlan, VariableCostKind, VariableCostLine,
+    CashKind, FixedCostLine, Grade, HealthAnswer, HealthQuestion, InputIssueKind, KpiTargets,
+    MarketPlan, Plan, ProductionPlan, VariableCostKind, VariableCostLine,
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -104,6 +104,19 @@ pub struct TargetsForm {
 pub struct FormError {
     pub field: String,
     pub message: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReadinessTone {
+    Ready,
+    Missing,
+    Optional,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SectionReadiness {
+    pub label: &'static str,
+    pub tone: ReadinessTone,
 }
 
 impl PlanForm {
@@ -367,9 +380,20 @@ impl PlanForm {
             health_answers,
             targets,
         };
-        errors.extend(plan.input_issues().into_iter().map(|issue| FormError {
-            field: issue.field,
-            message: "ค่าที่กรอกไม่ผ่านกติกาของแผน".into(),
+        errors.extend(plan.input_issues().into_iter().map(|issue| {
+            FormError {
+                field: issue.field,
+                message: match issue.kind {
+                    InputIssueKind::Negative => "กรุณากรอกตัวเลขตั้งแต่ 0 ขึ้นไป",
+                    InputIssueKind::OutsideShareRange => "กรุณากรอกสัดส่วนระหว่าง 0 ถึง 100%",
+                    InputIssueKind::GradeSharesDoNotTotalOne => "สัดส่วนทุกเกรดรวมกันต้องเท่ากับ 100%",
+                    InputIssueKind::HealthScoreOutsideRange => "กรุณาเลือกคะแนนระหว่าง 1 ถึง 5",
+                    InputIssueKind::DuplicateHealthAnswer => {
+                        "คำถามข้อนี้มีคำตอบซ้ำ กรุณาเลือกเพียงคำตอบเดียว"
+                    }
+                }
+                .into(),
+            }
         }));
         if errors.is_empty() {
             Ok(plan)
@@ -379,18 +403,113 @@ impl PlanForm {
     }
 
     pub fn section_complete(&self, section: &str) -> bool {
+        self.section_readiness(section).tone == ReadinessTone::Ready
+    }
+
+    pub fn section_readiness(&self, section: &str) -> SectionReadiness {
+        let Ok(plan) = self.to_plan() else {
+            return SectionReadiness {
+                label: "มีข้อมูลที่ต้องตรวจในส่วนนี้",
+                tone: ReadinessTone::Missing,
+            };
+        };
+        let analysis = calc::analyze(&plan);
         match section {
-            "market" => !self.market.target_customer.trim().is_empty(),
-            "production" => !self.production.area_rai.trim().is_empty() && !self.grades.is_empty(),
-            "variable-costs" => !self.variable_costs.is_empty(),
-            "fixed-costs" => !self.fixed_costs.is_empty(),
-            "targets" => !self.targets.yield_per_rai.trim().is_empty(),
-            "health" => {
-                self.health_scores.len() == 12
-                    && self.health_scores.iter().all(|score| !score.is_empty())
+            "market" if plan.market.demand_kg.is_none() => SectionReadiness {
+                label: "เพิ่มได้ ถ้ามียอดที่ผู้ซื้ออยากได้",
+                tone: ReadinessTone::Optional,
+            },
+            "market" if analysis.revenue.sellable_yield_kg.is_none() => SectionReadiness {
+                label: "ยังขาดผลผลิตขายได้เพื่อเทียบยอดผู้ซื้อ",
+                tone: ReadinessTone::Missing,
+            },
+            "market" if analysis.revenue.market_fulfillment.is_some() => SectionReadiness {
+                label: "พร้อมเทียบยอดผู้ซื้อกับผลผลิต",
+                tone: ReadinessTone::Ready,
+            },
+            "market" => SectionReadiness {
+                label: "ตรวจยอดที่ผู้ซื้ออยากได้",
+                tone: ReadinessTone::Missing,
+            },
+            "production" if analysis.revenue.sellable_yield_kg.is_none() => SectionReadiness {
+                label: "ยังขาดผลผลิตที่ขายได้",
+                tone: ReadinessTone::Missing,
+            },
+            "production" if analysis.revenue.weighted_price_per_kg.is_none() => SectionReadiness {
+                label: "ยังขาดราคาขายเฉลี่ย",
+                tone: ReadinessTone::Missing,
+            },
+            "production" => SectionReadiness {
+                label: "พอคำนวณรายได้แล้ว",
+                tone: ReadinessTone::Ready,
+            },
+            "variable-costs" if analysis.cost.variable_cost.is_some() => SectionReadiness {
+                label: "พอคำนวณค่าใช้จ่ายตามการผลิตแล้ว",
+                tone: ReadinessTone::Ready,
+            },
+            "variable-costs" => SectionReadiness {
+                label: "ยังขาดค่าใช้จ่ายตามการผลิต",
+                tone: ReadinessTone::Missing,
+            },
+            "fixed-costs" if analysis.cost.fixed_cost.is_some() => SectionReadiness {
+                label: "พอคำนวณค่าใช้จ่ายประจำแล้ว",
+                tone: ReadinessTone::Ready,
+            },
+            "fixed-costs" => SectionReadiness {
+                label: "ยังขาดค่าใช้จ่ายประจำ",
+                tone: ReadinessTone::Missing,
+            },
+            "targets" if self.targets.yield_per_rai.trim().is_empty() => SectionReadiness {
+                label: "เพิ่มได้เมื่ออยากตั้งเป้าหมายเอง",
+                tone: ReadinessTone::Optional,
+            },
+            "targets" => SectionReadiness {
+                label: "มีเป้าหมายสำหรับเปรียบเทียบแล้ว",
+                tone: ReadinessTone::Ready,
+            },
+            "health"
+                if self.health_scores.len() == 12
+                    && self.health_scores.iter().all(|score| !score.is_empty()) =>
+            {
+                SectionReadiness {
+                    label: "พร้อมดูแบบประเมินสวน",
+                    tone: ReadinessTone::Ready,
+                }
             }
-            _ => false,
+            "health" => SectionReadiness {
+                label: "เพิ่มได้เพื่อทบทวนความพร้อมของสวน",
+                tone: ReadinessTone::Optional,
+            },
+            _ => SectionReadiness {
+                label: "ยังไม่มีสถานะ",
+                tone: ReadinessTone::Missing,
+            },
         }
+    }
+
+    pub fn section_errors(&self, section: &str) -> Vec<FormError> {
+        self.to_plan()
+            .err()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|error| field_belongs_to_section(&error.field, section))
+            .collect()
+    }
+
+    pub fn replace_section_from(&mut self, section: &str, submitted: &Self) -> bool {
+        match section {
+            "market" => self.market = submitted.market.clone(),
+            "production" => {
+                self.production = submitted.production.clone();
+                self.grades = submitted.grades.clone();
+            }
+            "variable-costs" => self.variable_costs = submitted.variable_costs.clone(),
+            "fixed-costs" => self.fixed_costs = submitted.fixed_costs.clone(),
+            "targets" => self.targets = submitted.targets.clone(),
+            "health" => self.health_scores = submitted.health_scores.clone(),
+            _ => return false,
+        }
+        true
     }
 
     pub fn grade_total_percent(&self) -> Option<Decimal> {
@@ -399,6 +518,18 @@ impl PlanForm {
                 .ok()
                 .map(|share| total + share)
         })
+    }
+}
+
+fn field_belongs_to_section(field: &str, section: &str) -> bool {
+    match section {
+        "market" => field.starts_with("market."),
+        "production" => field.starts_with("production."),
+        "variable-costs" => field.starts_with("variable_costs["),
+        "fixed-costs" => field.starts_with("fixed_costs["),
+        "targets" => field.starts_with("targets."),
+        "health" => field.starts_with("health_answers"),
+        _ => false,
     }
 }
 
@@ -535,5 +666,85 @@ mod tests {
             assert!(sample.section_complete(section), "{section}");
             assert!(!PlanForm::default().section_complete(section), "{section}");
         }
+    }
+
+    #[test]
+    fn readiness_names_the_result_instead_of_claiming_generic_completeness() {
+        let sample = PlanForm::from_plan(&calc::workbook_sample());
+        assert_eq!(
+            sample.section_readiness("production"),
+            SectionReadiness {
+                label: "พอคำนวณรายได้แล้ว",
+                tone: ReadinessTone::Ready,
+            }
+        );
+        assert_eq!(
+            PlanForm::default().section_readiness("market").tone,
+            ReadinessTone::Optional
+        );
+        assert_eq!(
+            PlanForm::default().section_readiness("production").label,
+            "ยังขาดผลผลิตที่ขายได้"
+        );
+
+        let mut partial = sample.clone();
+        for grade in &mut partial.grades {
+            grade.price_per_kg.clear();
+        }
+        assert_eq!(
+            partial.section_readiness("production"),
+            SectionReadiness {
+                label: "ยังขาดราคาขายเฉลี่ย",
+                tone: ReadinessTone::Missing,
+            }
+        );
+
+        let mut without_market_demand = sample;
+        without_market_demand.market.demand_kg.clear();
+        assert_eq!(
+            without_market_demand.section_readiness("market").tone,
+            ReadinessTone::Optional
+        );
+    }
+
+    #[test]
+    fn section_validation_ignores_invalid_values_outside_the_visible_section() {
+        let mut form = PlanForm::from_plan(&calc::workbook_sample());
+        form.production.area_rai = "ไม่ใช่ตัวเลข".into();
+
+        assert!(form.to_plan().is_err());
+        assert!(form.section_errors("market").is_empty());
+        assert_eq!(
+            form.section_errors("production")[0].message,
+            "กรุณากรอกเป็นตัวเลข"
+        );
+    }
+
+    #[test]
+    fn replacing_one_section_preserves_every_other_section() {
+        let mut stored = PlanForm::from_plan(&calc::workbook_sample());
+        let original_production = stored.production.clone();
+        let original_grades = stored.grades.clone();
+        let mut submitted = stored.clone();
+        submitted.market.target_customer = "ตลาดหน้าสวน".into();
+        submitted.production.area_rai = "ไม่ใช่ตัวเลข".into();
+
+        assert!(stored.replace_section_from("market", &submitted));
+        assert_eq!(stored.market.target_customer, "ตลาดหน้าสวน");
+        assert_eq!(stored.production, original_production);
+        assert_eq!(stored.grades, original_grades);
+        assert!(!stored.replace_section_from("unknown", &submitted));
+    }
+
+    #[test]
+    fn semantic_errors_explain_how_to_correct_the_value() {
+        let mut form = PlanForm::from_plan(&calc::workbook_sample());
+        form.production.area_rai = "-1".into();
+        let errors = form.section_errors("production");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message == "กรุณากรอกตัวเลขตั้งแต่ 0 ขึ้นไป")
+        );
     }
 }

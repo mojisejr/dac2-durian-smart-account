@@ -304,6 +304,9 @@ async function signIn(browser) {
   await page.fill('input[name="value"]', '20000');
   await page.click('button:has-text("ถัดไป")');
   await page.waitForURL(new RegExp(`/plans/${planId}/quick/price$`));
+  if (await page.locator('input[name="value"]').inputValue() !== '') {
+    throw new Error('quick production leaked into the price field after client navigation');
+  }
 
   // Leaving after one answer and returning through the hub must resume at the
   // first unanswered question rather than restarting or inventing a result.
@@ -313,6 +316,9 @@ async function signIn(browser) {
   await page.fill('input[name="value"]', '80');
   await page.click('button:has-text("ถัดไป")');
   await page.waitForURL(new RegExp(`/plans/${planId}/quick/cost$`));
+  if (await page.locator('input[name="value"]').inputValue() !== '') {
+    throw new Error('quick price leaked into the cost field after client navigation');
+  }
   await page.goBack({ waitUntil: 'domcontentloaded' });
   await page.waitForURL(new RegExp(`/plans/${planId}/quick/price$`));
   if (await page.locator('input[name="value"]').inputValue() !== '80') {
@@ -321,6 +327,7 @@ async function signIn(browser) {
   await page.click('button:has-text("ถัดไป")');
   await page.waitForURL(new RegExp(`/plans/${planId}/quick/cost$`));
   await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(400);
   await page.fill('input[name="value"]', '900000');
   await page.click('button:has-text("ดูผลประมาณการ")');
   await page.waitForURL(new RegExp(`/plans/${planId}/quick/result$`));
@@ -351,7 +358,10 @@ async function signIn(browser) {
   await page.fill('input[name="season_year"]', '2570');
   await page.fill('input[name="name"]', 'สวนทดสอบละเอียด');
   await page.click('button:has-text("สร้างฤดูกาล")');
-  await page.waitForURL(/\/plans\/\d+\/quick\/production$/);
+  await page.waitForURL(/\/plans\/\d+\/quick\/production$/).catch(async () => {
+    const message = (await page.locator('.form-message').allTextContents()).join(' ').trim();
+    throw new Error(`detailed season stayed at ${page.url()}: ${message || 'no visible server message'}`);
+  });
   const detailedPlanId = page.url().match(/\/plans\/(\d+)\/quick\/production$/)?.[1];
   if (!detailedPlanId) throw new Error('the detailed proof season was not created');
   await page.goto(`${BASE}/plans/${detailedPlanId}`);
@@ -367,6 +377,14 @@ async function signIn(browser) {
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page
     .getByRole('heading', { name: 'แผนละเอียด', exact: true })
+    .waitFor({ state: 'visible', timeout: 10000 });
+  await page.goto(`${BASE}/plans/${detailedPlanId}/quick/production`);
+  await page
+    .getByRole('heading', { name: 'แผนละเอียดกำลังใช้งาน', exact: true })
+    .waitFor({ state: 'visible', timeout: 10000 });
+  await page.goto(`${BASE}/plans/${planId}/production`);
+  await page
+    .getByRole('heading', { name: 'ประมาณการเร็วกำลังใช้งาน', exact: true })
     .waitFor({ state: 'visible', timeout: 10000 });
 
   // A separate season reaches final comparison so the responsive matrix can
@@ -468,6 +486,7 @@ async function signIn(browser) {
   await create.locator('input[name="useful_life_years"]').fill('5');
   await submitAndReload(page, create.locator('button:has-text("บันทึกสินทรัพย์")'), 'asset creation');
   await page.getByText('ยังไม่รวม', { exact: true }).waitFor({ state: 'visible' });
+
   await page.getByText('ระบบจะไม่เดาหรือลบรายการเดิมให้', { exact: false }).waitFor({ state: 'visible' });
   await submitAndReload(page, page.locator('button:has-text("รวมในฤดูนี้")'), 'asset inclusion');
   await page.getByText('รวมในฤดูนี้', { exact: true }).waitFor({ state: 'visible' });
@@ -491,6 +510,15 @@ async function signIn(browser) {
   await page.goto(`${BASE}/plans/${assetOpenPlanId}/assets`);
   await page.getByText('ระบบน้ำกลางสวน', { exact: true }).waitFor({ state: 'visible' });
   await page.getByText('ยังไม่รวม', { exact: true }).waitFor({ state: 'visible' });
+
+  // Keep an editable actual draft for the close and review layout matrix.
+  await page.goto(`${BASE}/plans/${assetOpenPlanId}/close`);
+  await page.fill('input[name="sellable_yield_kg"]', '17000');
+  await page.fill('input[name="revenue"]', '1450000');
+  await page.fill('input[name="total_cost"]', '910000');
+  await page.fill('textarea[name="note"]', 'ฉบับรอตรวจทาน');
+  await page.click('button:has-text("บันทึกและตรวจทาน")');
+  await page.waitForURL(new RegExp(`/plans/${assetOpenPlanId}/close/review$`));
 
   // Closing freezes the selected facts and contribution. The closed asset page
   // must remain readable and expose no edit or selection controls.
@@ -564,6 +592,12 @@ const browser = await chromium.launch({ channel: 'chrome' });
 try {
   const { cookies, planId, detailedPlanId, comparisonPlanId, assetOpenPlanId } = await signIn(browser);
   const routes = [
+    ['home', `${BASE}/`],
+    ['register', `${BASE}/register`],
+    ['login', `${BASE}/login`],
+    ['verify-recovery', `${BASE}/verify-email?invalid=1`],
+    ['forgot-password', `${BASE}/forgot-password`],
+    ['reset-recovery', `${BASE}/reset-password?token=invalid`],
     ['demo', `${BASE}/demo`],
     ['new-season', `${BASE}/plans/new`],
     ['plans', `${BASE}/plans`],
@@ -572,14 +606,17 @@ try {
     ['quick-price', `${BASE}/plans/${planId}/quick/price`],
     ['quick-cost', `${BASE}/plans/${planId}/quick/cost`],
     ['quick-result', `${BASE}/plans/${planId}/quick/result`],
-    ['actual-entry', `${BASE}/plans/${planId}/close`],
-    ['actual-review', `${BASE}/plans/${planId}/close/review`],
+    ['actual-entry', `${BASE}/plans/${assetOpenPlanId}/close`],
+    ['actual-review', `${BASE}/plans/${assetOpenPlanId}/close/review`],
     ['actual-comparison', `${BASE}/plans/${comparisonPlanId}/comparison`],
     ['history', `${BASE}/history?from=${comparisonPlanId}`],
     ['detailed-hub', `${BASE}/plans/${detailedPlanId}`],
     ['dashboard', `${BASE}/plans/${detailedPlanId}/dashboard`],
     ['analysis', `${BASE}/plans/${detailedPlanId}/analysis`],
     ['production', `${BASE}/plans/${detailedPlanId}/production`],
+    ['market', `${BASE}/plans/${detailedPlanId}/market`],
+    ['variable-costs', `${BASE}/plans/${detailedPlanId}/variable-costs`],
+    ['fixed-costs', `${BASE}/plans/${detailedPlanId}/fixed-costs`],
     ['health', `${BASE}/plans/${detailedPlanId}/health`],
     ['targets-advanced', `${BASE}/plans/${detailedPlanId}/targets`],
     ['assets-closed', `${BASE}/plans/${detailedPlanId}/assets`],
@@ -594,40 +631,44 @@ try {
       deviceScaleFactor: 2,
     });
     await context.addCookies(cookies);
-    const page = await context.newPage();
 
     for (const [routeName, url] of routes) {
-      // A full document navigation keeps route measurements independent without
-      // accumulating twenty live page runtimes inside one phone viewport.
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await page.waitForTimeout(250);
-      assess(`${size.name}px ${routeName}`, await inspect(page, size.width), size.width);
+      // A fresh page makes every route measurement independent and prevents a
+      // long matrix from retaining old hydrated runtimes in one renderer.
+      const page = await context.newPage();
+      try {
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.waitForTimeout(250);
+        assess(`${size.name}px ${routeName}`, await inspect(page, size.width), size.width);
 
-      // Every explanation, one at a time: an open card is the state that failed.
-      // Only visible ones — a panel carrying `hidden` is not on screen to tap.
-      await openEachExplanation(page, size, routeName);
+        // Every explanation, one at a time: an open card is the state that failed.
+        // Only visible ones — a panel carrying `hidden` is not on screen to tap.
+        await openEachExplanation(page, size, routeName);
 
-      if (routeName === 'analysis') {
-        for (const tab of ['ตรวจสอบ', 'ภาษี', 'สถานการณ์']) {
-          const button = page.locator(`button[role="tab"]:has-text("${tab}")`);
-          if (await button.count()) {
-            await ensureClosed(page);
-            await button.click({ timeout: 10000 });
-            await page.waitForTimeout(200);
-            assess(`${size.name}px analysis:${tab}`, await inspect(page, size.width), size.width);
-            await openEachExplanation(page, size, `analysis:${tab}`);
+        if (routeName === 'analysis') {
+          for (const tab of ['ตรวจสอบ', 'ภาษี', 'สถานการณ์']) {
+            const button = page.locator(`button[role="tab"]:has-text("${tab}")`);
+            if (await button.count()) {
+              await ensureClosed(page);
+              await button.click({ timeout: 10000 });
+              await page.waitForTimeout(200);
+              assess(`${size.name}px analysis:${tab}`, await inspect(page, size.width), size.width);
+              await openEachExplanation(page, size, `analysis:${tab}`);
+            }
+          }
+          await ensureClosed(page);
+          const table = page.locator('details.scenario-table:visible > summary');
+          if (await table.count()) {
+            await table.click({ timeout: 10000 });
+            await page.waitForTimeout(250);
+            assess(`${size.name}px analysis:table`, await inspect(page, size.width), size.width);
           }
         }
-        await ensureClosed(page);
-        const table = page.locator('details.scenario-table:visible > summary');
-        if (await table.count()) {
-          await table.click({ timeout: 10000 });
-          await page.waitForTimeout(250);
-          assess(`${size.name}px analysis:table`, await inspect(page, size.width), size.width);
-        }
+      } finally {
+        await page.close();
       }
     }
-    await page.close();
+    console.log(`Responsive proof measured ${routes.length} routes at ${size.name}px`);
     await context.close();
   }
 } finally {

@@ -485,8 +485,9 @@ fn parse_asset(
         residual_value,
         retired_year: optional_year(retired_year, "ปีเลิกใช้")?,
     };
-    calc::validate(&facts)
-        .map_err(|error| ServerFnError::new(format!("ข้อมูลสินทรัพย์ไม่ถูกต้อง: {error:?}")))?;
+    calc::validate(&facts).map_err(|_| {
+        ServerFnError::new("ข้อมูลสินทรัพย์ไม่ถูกต้อง กรุณาตรวจราคาซื้อ ปีเริ่มใช้ อายุใช้งาน และมูลค่าคงเหลือ")
+    })?;
     Ok(facts)
 }
 
@@ -669,5 +670,25 @@ mod tests {
         assert_eq!(land.useful_life_years, None);
         assert!(required_money("0", "มูลค่า").is_err());
         assert!(required_money("1000000000001", "มูลค่า").is_err());
+    }
+
+    #[test]
+    fn asset_validation_never_exposes_internal_debug_names() {
+        let error = parse_asset(
+            "ปั๊ม",
+            "equipment",
+            "100000",
+            "2568",
+            "",
+            "5",
+            "100001",
+            "",
+            Some(2569),
+        )
+        .expect_err("residual above purchase price must fail")
+        .to_string();
+        assert!(error.contains("กรุณาตรวจราคาซื้อ"));
+        assert!(!error.contains("Residual"));
+        assert!(!error.contains("AssetIssue"));
     }
 }

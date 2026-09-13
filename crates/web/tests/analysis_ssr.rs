@@ -155,8 +155,13 @@ fn an_empty_plan_names_what_is_missing_instead_of_showing_a_figure() {
     let html = dashboard(PlanForm::from_plan(&Plan::default()));
 
     assert!(html.contains("ยังคำนวณไม่ได้"));
-    assert!(html.contains("/plans/42/market"));
-    assert!(html.contains("/plans/42/health"));
+    assert!(html.contains("/plans/42/production"));
+    assert!(html.contains("/plans/42/variable-costs"));
+    assert!(html.contains("/plans/42/fixed-costs"));
+    assert!(!html.contains("/plans/42/market"));
+    assert!(!html.contains("/plans/42/health"));
+    assert!(html.contains("ยังขาดผลผลิตที่ขายได้"));
+    assert!(!html.contains("ยังไม่ครบ"));
     assert!(!html.contains("hero-value"));
 }
 
@@ -267,7 +272,7 @@ fn all_six_completeness_rules_render_with_a_route_that_would_fix_them() {
 }
 
 #[test]
-fn both_tax_methods_render_with_the_cheaper_one_marked_and_the_disclaimer_visible() {
+fn both_tax_methods_render_after_a_prominent_non_recommendation_disclaimer() {
     let html = analysis(sample_form());
     let tax = sample_analysis().tax;
 
@@ -279,12 +284,13 @@ fn both_tax_methods_render_with_the_cheaper_one_marked_and_the_disclaimer_visibl
     let flat = tax.flat_sixty_percent.estimated_tax.expect("flat method");
     assert!(html.contains(&money(actual)));
     assert!(html.contains(&money(flat)));
-    // The phrase also appears inside the tax explanation, so the marker to
-    // assert on is the class the cheaper card actually carries.
-    assert_eq!(
-        html.contains("tax-method cheaper"),
-        actual != flat,
-        "the cheaper method is marked only when one is actually cheaper"
+    assert!(!html.contains("เสียน้อยกว่า"));
+    assert!(!html.contains("tax-method cheaper"));
+    let disclaimer = html.find("ยังไม่ได้ยืนยันแหล่งกฎหมาย").expect("disclaimer");
+    let first_figure = html.find(&money(actual)).expect("first tax figure");
+    assert!(
+        disclaimer < first_figure,
+        "the boundary appears before figures"
     );
 }
 

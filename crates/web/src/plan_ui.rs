@@ -8,7 +8,7 @@ use leptos_router::{
 use crate::{
     analysis_ui::{PlanAnalysisView, PlanDashboardView},
     auth::{Logout, current_user_email},
-    plan_form::{FixedCostForm, GradeForm, PlanForm, VariableCostForm},
+    plan_form::{FixedCostForm, GradeForm, PlanForm, ReadinessTone, VariableCostForm},
     plans::{
         CreateSeason, FinalizeActual, PlanRecord, SaveActualDraft, SavePlan, SaveQuickStep,
         SeasonHistoryItem, SwitchForecastMode, UpdateSeasonMetadata, list_plans,
@@ -17,11 +17,11 @@ use crate::{
 };
 
 const MAIN_SECTIONS: [(&str, &str, &str); 5] = [
-    ("market", "ตลาด", "ลูกค้า ความต้องการ และช่องทางขาย"),
-    ("production", "ผลผลิตและเกรด", "พื้นที่ ผลผลิต สูญเสีย และสัดส่วนเกรด"),
-    ("variable-costs", "ต้นทุนผันแปร", "รายการที่เปลี่ยนตามการผลิต"),
-    ("fixed-costs", "ต้นทุนคงที่", "เงินสด ค่าเสื่อม และเงินลงทุน"),
-    ("health", "สุขภาพสวน", "12 คำถาม 6 มิติ"),
+    ("market", "ขายให้ใครและขายทางไหน", "ข้อมูลตลาด"),
+    ("production", "คาดว่าจะขายได้เท่าไร", "ผลผลิตและเกรด"),
+    ("variable-costs", "ค่าใช้จ่ายที่เพิ่มตามการผลิต", "ต้นทุนผันแปร"),
+    ("fixed-costs", "ค่าใช้จ่ายที่ยังมีทุกปี", "ต้นทุนคงที่"),
+    ("health", "ทบทวนความพร้อมของสวน", "สุขภาพสวน"),
 ];
 
 const EDITABLE_SECTIONS: [(&str, &str, &str); 6] = [
@@ -487,15 +487,18 @@ fn NewSeasonForm(source: Option<PlanRecord>) -> impl IntoView {
                     {source_id.map(|id| view! { <input type="hidden" name="source_id" value=id/> })}
                     <label>
                         <span>"ปีฤดูกาล (พ.ศ.)"</span>
-                        <input type="text" name="season_year" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" value=year placeholder="เช่น 2569" required/>
+                        <input id="season-year" type="text" name="season_year" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" value=year placeholder="เช่น 2569" aria-describedby="season-year-help" required/>
+                        <small id="season-year-help" class="field-hint">"ปี พ.ศ. ที่จะเก็บเกี่ยว เช่น 2569 ใช้แยกฤดูกาลในประวัติ"</small>
                     </label>
                     <label>
                         <span>"ชื่อฤดูกาล"</span>
-                        <input type="text" name="name" maxlength="120" value=name placeholder="เช่น สวนรวม หมอนทอง" required/>
+                        <input id="season-name" type="text" name="name" maxlength="120" value=name placeholder="เช่น สวนรวม หมอนทอง" aria-describedby="season-name-help" required/>
+                        <small id="season-name-help" class="field-hint">"ชื่อสั้น ๆ ที่คุณจำได้เมื่อกลับมาดู เช่น สวนรวม หมอนทอง"</small>
                     </label>
                     <label>
                         <span>"บันทึก (ไม่บังคับ)"</span>
-                        <textarea name="note" maxlength="2000" rows="4" placeholder="เรื่องที่อยากจำเมื่อกลับมาดูฤดูกาลนี้"></textarea>
+                        <textarea id="season-note" name="note" maxlength="2000" rows="4" placeholder="เช่น ปีแรกที่เปลี่ยนปุ๋ย" aria-describedby="season-note-help"></textarea>
+                        <small id="season-note-help" class="field-hint">"เก็บเหตุการณ์สำคัญไว้เทียบกับผลจริงภายหลัง เว้นว่างได้"</small>
                     </label>
                     <button class="primary" type="submit">"สร้างฤดูกาล"</button>
                 </ActionForm>
@@ -521,7 +524,12 @@ pub fn DemoPage() -> impl IntoView {
             <section class="card demo-controls">
                 <h2>"ลองเปลี่ยนผลผลิตและราคา"</h2>
                 <PlanField
+                    field_id="demo-fruits"
                     label="ผลต่อต้น"
+                    formal_term="ผลผลิตต่อต้น"
+                    hint="ลองเปลี่ยนจำนวนผลเฉลี่ยจากต้นที่ให้ผลแล้ว"
+                    example="ตัวอย่าง 40 ผลต่อต้น"
+                    outcome="ค่านี้เปลี่ยนผลผลิต รายได้ และกำไรตัวอย่างด้านล่าง"
                     unit="ผล"
                     numeric=true
                     value=Signal::derive(move || form.get().production.fruits_per_tree)
@@ -529,7 +537,12 @@ pub fn DemoPage() -> impl IntoView {
                     closed=false
                 />
                 <PlanField
+                    field_id="demo-price"
                     label="ราคาเกรดแรก"
+                    formal_term="ราคาขายต่อกิโลกรัม"
+                    hint="ลองใช้ราคาที่คาดว่าจะขายเกรดแรกได้"
+                    example="ตัวอย่าง 95 บาทต่อกิโลกรัม"
+                    outcome="ค่านี้เปลี่ยนราคาเฉลี่ย รายได้ และกำไรตัวอย่างด้านล่าง"
                     unit="บาท/กก."
                     numeric=true
                     value=Signal::derive(move || form.get().grades.first().map(|grade| grade.price_per_kg.clone()).unwrap_or_default())
@@ -700,10 +713,10 @@ pub fn ActualCloseView(record: PlanRecord) -> impl IntoView {
                 <p>"กรอกยอดรวมเมื่อจบฤดู ระบบจะให้ตรวจทานอีกครั้งก่อนปิดถาวร"</p>
                 <ActionForm action=save>
                     <input type="hidden" name="id" value=id/>
-                    <label><span>"ผลผลิตที่ขายได้จริง"</span><span class="input-with-unit"><input type="text" name="sellable_yield_kg" inputmode="decimal" value=decimal_input(draft.sellable_yield_kg) required autofocus/><span class="unit">"กก."</span></span></label>
-                    <label><span>"รายได้จริง"</span><span class="input-with-unit"><input type="text" name="revenue" inputmode="decimal" value=decimal_input(draft.revenue) required/><span class="unit">"บาท"</span></span></label>
-                    <label><span>"ต้นทุนรวมจริงโดยประมาณ"</span><span class="input-with-unit"><input type="text" name="total_cost" inputmode="decimal" value=decimal_input(draft.total_cost) required/><span class="unit">"บาท"</span></span></label>
-                    <label><span>"บันทึกว่าเกิดอะไรขึ้น (ไม่บังคับ)"</span><textarea name="note" maxlength="2000" rows="4">{draft.note}</textarea></label>
+                    <label><span>"ขายได้จริงทั้งหมดเท่าไร"</span><small class="formal-term">"ผลผลิตที่ขายได้จริง"</small><span class="input-with-unit"><input id="actual-yield" type="text" name="sellable_yield_kg" inputmode="decimal" value=decimal_input(draft.sellable_yield_kg) aria-describedby="actual-yield-help" required autofocus/><span class="unit">"กก."</span></span><small id="actual-yield-help" class="field-hint">"ดูจากยอดส่งขายหรือสรุปน้ำหนักหลังหักผลเสีย ใช้คำนวณราคาขายจริงต่อกิโลกรัม"</small></label>
+                    <label><span>"รับเงินจากการขายรวมเท่าไร"</span><small class="formal-term">"รายได้จริง"</small><span class="input-with-unit"><input id="actual-revenue" type="text" name="revenue" inputmode="decimal" value=decimal_input(draft.revenue) aria-describedby="actual-revenue-help" required/><span class="unit">"บาท"</span></span><small id="actual-revenue-help" class="field-hint">"ยอดรับรวมก่อนหักค่าใช้จ่าย ใช้คำนวณกำไรหรือขาดทุนจริง"</small></label>
+                    <label><span>"จ่ายค่าใช้จ่ายทั้งฤดูรวมเท่าไร"</span><small class="formal-term">"ต้นทุนรวมจริง"</small><span class="input-with-unit"><input id="actual-cost" type="text" name="total_cost" inputmode="decimal" value=decimal_input(draft.total_cost) aria-describedby="actual-cost-help" required/><span class="unit">"บาท"</span></span><small id="actual-cost-help" class="field-hint">"รวมค่าใช้จ่ายที่จ่ายจริงและต้นทุนที่ต้องการนับ ใช้หักจากรายได้จริง"</small></label>
+                    <label><span>"บันทึกว่าเกิดอะไรขึ้น (ไม่บังคับ)"</span><textarea id="actual-note" name="note" maxlength="2000" rows="4" aria-describedby="actual-note-help">{draft.note}</textarea><small id="actual-note-help" class="field-hint">"เช่น ผลผลิตลดเพราะฝน หรือราคาดีกว่าที่คาด เพื่อช่วยอ่านผลเทียบภายหลัง"</small></label>
                     <button class="primary" type="submit">"บันทึกและตรวจทาน"</button>
                 </ActionForm>
                 <ServerErrorMessage action=save/>
@@ -963,6 +976,35 @@ fn QuickModeHub(id: i64, estimate: calc::QuickEstimate, closed: bool) -> impl In
 #[component]
 fn DetailedModeHub(id: i64, form: PlanForm, closed: bool) -> impl IntoView {
     let switch = ServerAction::<SwitchForecastMode>::new();
+    let next = ["production", "variable-costs", "fixed-costs"]
+        .into_iter()
+        .find(|section| form.section_readiness(section).tone != ReadinessTone::Ready);
+    let (guide_title, guide_body, guide_href, guide_action) = match next {
+        Some("production") => (
+            "เริ่มจากยอดที่จะขายและราคาขาย",
+            "ข้อมูลส่วนนี้ทำให้ระบบคำนวณรายได้โดยประมาณได้",
+            format!("/plans/{id}/production"),
+            "กรอกผลผลิตและราคา",
+        ),
+        Some("variable-costs") => (
+            "ต่อด้วยค่าใช้จ่ายที่เพิ่มตามการผลิต",
+            "เช่น ปุ๋ย ยา แรงงานเก็บเกี่ยว ขนส่ง และบรรจุภัณฑ์",
+            format!("/plans/{id}/variable-costs"),
+            "กรอกค่าใช้จ่ายตามการผลิต",
+        ),
+        Some("fixed-costs") => (
+            "เพิ่มค่าใช้จ่ายที่ยังมีทุกปี",
+            "เช่น ค่าเช่า เงินเดือนประจำ ดอกเบี้ย หรือค่าเสื่อม",
+            format!("/plans/{id}/fixed-costs"),
+            "กรอกค่าใช้จ่ายประจำ",
+        ),
+        _ => (
+            "ตัวเลขหลักพร้อมแล้ว",
+            "ดูรายได้ ต้นทุน และกำไรโดยประมาณ แล้วกลับมาแก้ส่วนใดก็ได้",
+            format!("/plans/{id}/dashboard"),
+            "ดูผลสรุป",
+        ),
+    };
     view! {
         <section class="card detailed-mode-card">
             <p class="eyebrow">"โหมดที่ใช้อยู่"</p>
@@ -977,6 +1019,17 @@ fn DetailedModeHub(id: i64, form: PlanForm, closed: bool) -> impl IntoView {
             </Show>
             <ServerErrorMessage action=switch/>
         </section>
+        <section class="card guided-next">
+            <p class="eyebrow">"ขั้นที่แนะนำ"</p>
+            <h2>{guide_title}</h2>
+            <p>{guide_body}</p>
+            <A attr:class="button primary" href=guide_href>{guide_action}</A>
+            <p class="caption">"คุณยังเปิดดูหรือแก้ส่วนอื่นด้านล่างได้ตลอด ระบบไม่ล็อกลำดับ"</p>
+        </section>
+        <div class="overview-heading">
+            <h2>"ดูและแก้ข้อมูลทั้งหมด"</h2>
+            <p>"เลือกเฉพาะส่วนที่ต้องการได้ คำสถานะบอกว่าตอนนี้คำนวณอะไรได้แล้ว"</p>
+        </div>
         <section class="section-list">
             <A attr:class="section-card" href=format!("/plans/{id}/dashboard")>
                 <span><strong>"หน้าแรก"</strong><small>"ตัวเลขสรุปของฤดูกาลนี้"</small></span>
@@ -987,11 +1040,16 @@ fn DetailedModeHub(id: i64, form: PlanForm, closed: bool) -> impl IntoView {
                 <span class="status muted">"เปิด"</span>
             </A>
             {MAIN_SECTIONS.into_iter().map(|(slug, title, description)| {
-                let complete = form.section_complete(slug);
+                let readiness = form.section_readiness(slug);
+                let status_class = match readiness.tone {
+                    ReadinessTone::Ready => "status good",
+                    ReadinessTone::Missing => "status warning",
+                    ReadinessTone::Optional => "status muted",
+                };
                 view! {
                     <A attr:class="section-card" href=format!("/plans/{id}/{slug}")>
                         <span><strong>{title}</strong><small>{description}</small></span>
-                        <span class=if complete { "status good" } else { "status muted" }>{if complete { "ครบ" } else { "ยังไม่ครบ" }}</span>
+                        <span class=status_class>{readiness.label}</span>
                     </A>
                 }
             }).collect_view()}
@@ -1034,7 +1092,7 @@ pub fn QuickPlanRoute() -> impl IntoView {
                 let (_, step) = key();
                 match result {
                     Ok(Some(record)) if record.forecast_mode == calc::ForecastMode::Detailed =>
-                        view! { <QuickModeRequired record/> }.into_any(),
+                        view! { <DetailedModeActiveNotice record/> }.into_any(),
                     Ok(Some(record)) if step == "result" || record.closed =>
                         view! { <QuickResultView record/> }.into_any(),
                     Ok(Some(record)) if matches!(step.as_str(), "production" | "price" | "cost") =>
@@ -1105,10 +1163,10 @@ pub fn QuickQuestionView(record: PlanRecord, step: String) -> impl IntoView {
                     <label>
                         <span>{field_label}</span>
                         <span class="input-with-unit">
-                            <input type="text" name="value" inputmode="decimal" value=value required autofocus/>
+                            <input id="quick-value" type="text" name="value" inputmode="decimal" prop:value=value required autofocus aria-describedby="quick-value-help"/>
                             <span class="unit">{unit}</span>
                         </span>
-                        <small class="field-hint">{hint}</small>
+                        <small id="quick-value-help" class="field-hint">{hint}</small>
                     </label>
                     <button class="primary" type="submit">{if position == 3 { "ดูผลประมาณการ" } else { "ถัดไป" }}</button>
                 </ActionForm>
@@ -1202,7 +1260,7 @@ pub fn QuickResultView(record: PlanRecord) -> impl IntoView {
 }
 
 #[component]
-fn QuickModeRequired(record: PlanRecord) -> impl IntoView {
+pub fn QuickModeActiveNotice(record: PlanRecord) -> impl IntoView {
     let switch = ServerAction::<SwitchForecastMode>::new();
     let id = record.id;
     view! {
@@ -1219,6 +1277,32 @@ fn QuickModeRequired(record: PlanRecord) -> impl IntoView {
                         <input type="hidden" name="id" value=id/>
                         <input type="hidden" name="mode" value="detailed"/>
                         <button class="text-button" type="submit">"เปลี่ยนเป็นแผนละเอียด"</button>
+                    </ActionForm>
+                </Show>
+                <ServerErrorMessage action=switch/>
+            </section>
+        </section>
+    }
+}
+
+#[component]
+pub fn DetailedModeActiveNotice(record: PlanRecord) -> impl IntoView {
+    let switch = ServerAction::<SwitchForecastMode>::new();
+    let id = record.id;
+    view! {
+        <section class="page-stack">
+            <header class="page-heading compact-heading">
+                <div><p class="eyebrow">{season_year_label(record.season_year)}</p><h1>"แผนละเอียดกำลังใช้งาน"</h1></div>
+                <A attr:class="icon-button" href=format!("/plans/{id}") attr:aria-label="กลับหน้าฤดูกาล">"×"</A>
+            </header>
+            <section class="card">
+                <p>"ผลของฤดูกาลนี้คำนวณจากข้อมูลแผนละเอียด ค่าประมาณการเร็วเดิมยังเก็บไว้ แต่ระบบจะไม่สลับกลับไปใช้เอง"</p>
+                <A attr:class="button primary" href=format!("/plans/{id}")>"กลับไปดูและแก้แผนละเอียด"</A>
+                <Show when=move || !record.closed>
+                    <ActionForm action=switch>
+                        <input type="hidden" name="id" value=id/>
+                        <input type="hidden" name="mode" value="quick"/>
+                        <button class="text-button" type="submit">"เปลี่ยนเป็นประมาณการเร็ว"</button>
                     </ActionForm>
                 </Show>
                 <ServerErrorMessage action=switch/>
@@ -1268,7 +1352,7 @@ pub fn PlanSectionRoute() -> impl IntoView {
 #[component]
 pub fn PlanSectionView(record: PlanRecord, section: String) -> impl IntoView {
     if record.forecast_mode == calc::ForecastMode::Quick {
-        return view! { <QuickModeRequired record/> }.into_any();
+        return view! { <QuickModeActiveNotice record/> }.into_any();
     }
     let form = RwSignal::new(record.form);
     let save = ServerAction::<SavePlan>::new();
@@ -1284,6 +1368,9 @@ pub fn PlanSectionView(record: PlanRecord, section: String) -> impl IntoView {
         .find(|(slug, _, _)| *slug == section)
         .map(|(_, title, _)| *title)
         .unwrap_or("ข้อมูลแผน");
+    let section_for_fields = section.clone();
+    let section_for_validation = section.clone();
+    let section_for_button = StoredValue::new(section.clone());
 
     view! {
         <section class="page-stack plan-page">
@@ -1296,11 +1383,12 @@ pub fn PlanSectionView(record: PlanRecord, section: String) -> impl IntoView {
             </Show>
             <ActionForm action=save>
                 <input type="hidden" name="id" value=id/>
+                <input type="hidden" name="section" value=section/>
                 <input type="hidden" name="form_json" value=move || serde_json::to_string(&form.get()).unwrap_or_default()/>
-                <SectionFields section=section.clone() form closed/>
-                <ValidationSummary form/>
+                <SectionFields section=section_for_fields form closed/>
+                <ValidationSummary form section=section_for_validation/>
                 <Show when=move || !closed>
-                    <button class="primary save-button" type="submit" disabled=move || form.get().to_plan().is_err()>"บันทึกส่วนนี้"</button>
+                    <button class="primary save-button" type="submit" disabled=move || section_for_button.with_value(|section| !form.get().section_errors(section).is_empty())>"บันทึกส่วนนี้"</button>
                 </Show>
             </ActionForm>
             <ServerMessage action=save/>
@@ -1431,18 +1519,41 @@ fn HealthFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
 }
 
 #[component]
-fn PlanField(
+pub fn PlanField(
     label: &'static str,
     value: Signal<String>,
     on_value: Callback<String>,
     closed: bool,
     #[prop(optional)] unit: Option<&'static str>,
+    #[prop(optional)] field_id: Option<&'static str>,
+    #[prop(optional)] formal_term: Option<&'static str>,
+    #[prop(optional)] hint: Option<&'static str>,
+    #[prop(optional)] example: Option<&'static str>,
+    #[prop(optional)] outcome: Option<&'static str>,
     #[prop(default = false)] numeric: bool,
 ) -> impl IntoView {
-    view! { <label><span>{label}</span>{if closed {
+    let help_id = field_id.map(|id| format!("{id}-help"));
+    let error_id = field_id.map(|id| format!("{id}-error"));
+    let has_guidance = hint.is_some() || example.is_some() || outcome.is_some();
+    let described_help_id = help_id.clone();
+    let described_error_id = error_id.clone();
+    let described_by = move || {
+        let mut ids = Vec::new();
+        if has_guidance && let Some(id) = described_help_id.as_deref() {
+            ids.push(id);
+        }
+        if numeric
+            && numeric_input_invalid(&value.get())
+            && let Some(id) = described_error_id.as_deref()
+        {
+            ids.push(id);
+        }
+        (!ids.is_empty()).then(|| ids.join(" "))
+    };
+    view! { <label class="guided-field"><span>{label}</span>{formal_term.map(|term| view! { <small class="formal-term">{term}</small> })}{if closed {
         view! { <p class="readonly-value">{move || { let value = value.get(); if value.is_empty() { "—".into() } else if let Some(unit) = unit { format!("{value} {unit}") } else { value } }}</p> }.into_any()
     } else {
-        view! { <><span class="input-with-unit"><input type="text" inputmode=if numeric { "decimal" } else { "text" } prop:value=move || value.get() on:input=move |event| on_value.run(event_target_value(&event)) on:blur=move |event| { if numeric { on_value.run(format_numeric_input(&event_target_value(&event))); } }/>{unit.map(|unit| view! { <span class="unit">{unit}</span> })}</span><Show when=move || numeric && numeric_input_invalid(&value.get())><small class="field-error">"กรุณากรอกเป็นตัวเลข"</small></Show></> }.into_any()
+        view! { <><span class="input-with-unit"><input id=field_id type="text" inputmode=if numeric { "decimal" } else { "text" } aria-describedby=described_by aria-invalid=move || (numeric && numeric_input_invalid(&value.get())).then_some("true") prop:value=move || value.get() on:input=move |event| on_value.run(event_target_value(&event)) on:blur=move |event| { if numeric { on_value.run(format_numeric_input(&event_target_value(&event))); } }/>{unit.map(|unit| view! { <span class="unit">{unit}</span> })}</span><Show when=move || has_guidance><span id=help_id.clone() class="guided-help">{hint.map(|text| view! { <small class="field-hint">{text}</small> })}{example.map(|text| view! { <small class="field-example">{text}</small> })}{outcome.map(|text| view! { <small class="field-effect">{text}</small> })}</span></Show><Show when=move || numeric && numeric_input_invalid(&value.get())><small id=error_id.clone() class="field-error">"กรุณากรอกเป็นตัวเลข"</small></Show></> }.into_any()
     }}</label> }
 }
 
@@ -1488,8 +1599,8 @@ pub(crate) fn BottomNav(plan_id: i64, active: NavSection) -> impl IntoView {
 }
 
 #[component]
-fn ValidationSummary(form: RwSignal<PlanForm>) -> impl IntoView {
-    view! { <div class="validation-summary" aria-live="polite">{move || form.get().to_plan().err().and_then(|errors| errors.first().cloned()).map(|error| view! { <p><strong>"ตรวจข้อมูล: "</strong>{error.message}</p> })}</div> }
+fn ValidationSummary(form: RwSignal<PlanForm>, section: String) -> impl IntoView {
+    view! { <div class="validation-summary" aria-live="polite">{move || form.get().section_errors(&section).into_iter().next().map(|error| view! { <p><strong>"ตรวจข้อมูลส่วนนี้: "</strong>{error.message}</p> })}</div> }
 }
 
 #[component]

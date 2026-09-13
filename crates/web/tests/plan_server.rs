@@ -78,7 +78,7 @@ async fn plan_flow(auth_session: store::AuthSession) -> StatusCode {
     {
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
-    let loaded = match web::plans::load_for_owner(pool, user.id, created.id).await {
+    let mut loaded = match web::plans::load_for_owner(pool, user.id, created.id).await {
         Ok(Some(record)) => record,
         _ => return StatusCode::INTERNAL_SERVER_ERROR,
     };
@@ -87,6 +87,25 @@ async fn plan_flow(auth_session: store::AuthSession) -> StatusCode {
     }
     let quick = calc::analyze_quick(&loaded.quick_estimate);
     if quick.net_profit != Some(Decimal::from(700_000)) {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    let mut market_submission = loaded.form.clone();
+    market_submission.market.target_customer = "ตลาดหน้าสวน".into();
+    market_submission.production.area_rai = "ข้อมูลเก่าที่ผิด".into();
+    if web::plans::save_section_for_owner(pool, user.id, created.id, "market", &market_submission)
+        .await
+        .is_err()
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    expected.market.target_customer = Some("ตลาดหน้าสวน".into());
+    loaded = match web::plans::load_for_owner(pool, user.id, created.id).await {
+        Ok(Some(record)) => record,
+        _ => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    if loaded.form.production.area_rai == "ข้อมูลเก่าที่ผิด"
+        || loaded.form.to_plan().ok().as_ref() != Some(&expected)
+    {
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
     let detailed = match web::plans::set_forecast_mode_for_owner(

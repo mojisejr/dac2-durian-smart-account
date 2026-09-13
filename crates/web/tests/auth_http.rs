@@ -103,6 +103,7 @@ async fn login_rotates_session_logout_flushes_it_and_reset_ends_existing_session
         .route("/login-test", post(login))
         .route("/logout-test", post(logout))
         .route("/plans", get(|| async { StatusCode::OK }))
+        .route("/history", get(|| async { StatusCode::OK }))
         .route_layer(middleware::from_fn(web::auth::require_login))
         .layer(auth_layer)
         .with_state(TestState {
@@ -211,6 +212,14 @@ async fn login_rotates_session_logout_flushes_it_and_reset_ends_existing_session
         .await
         .expect("request completes");
     assert_eq!(rejected.status(), StatusCode::SEE_OTHER);
+    assert_eq!(rejected.headers()[header::LOCATION], "/login");
+    let rejected_history = app
+        .clone()
+        .oneshot(request(Method::GET, "/history", None))
+        .await
+        .expect("history request completes");
+    assert_eq!(rejected_history.status(), StatusCode::SEE_OTHER);
+    assert_eq!(rejected_history.headers()[header::LOCATION], "/login");
 
     let seeded = app
         .clone()
@@ -249,6 +258,12 @@ async fn login_rotates_session_logout_flushes_it_and_reset_ends_existing_session
         .await
         .expect("authenticated request completes");
     assert_eq!(accepted.status(), StatusCode::OK);
+    let accepted_history = app
+        .clone()
+        .oneshot(request(Method::GET, "/history", Some(&cookie_after_login)))
+        .await
+        .expect("authenticated history request completes");
+    assert_eq!(accepted_history.status(), StatusCode::OK);
 
     let logged_out = app
         .clone()

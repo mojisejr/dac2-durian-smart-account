@@ -202,8 +202,9 @@ cargo test -p web --test analysis_ssr --features ssr
 The suite proves the dashboard against the workbook's own cached business
 figures, the empty-plan state that names what is missing instead of showing a
 number, available KPI rows with their explanations, the graded and ungraded target
-cases, all six completeness rules with the routes that would fix them, both tax
-methods with the cheaper one marked and the disclaimer present, and all
+cases, all six calculation-readiness rules with the routes that would fix them,
+both tax estimates without a method recommendation and with the source/date
+boundary shown before any figure, and all
 twenty-five scenario cells including the centre the sliders start from.
 
 ## Layout proof
@@ -215,11 +216,12 @@ asserted all twenty-five of its cells were present. The markup was correct; the
 scroll container never scrolled, and layout is not in a string.
 
 `scripts/check-responsive.sh` drives real Chrome at 320, 360, 393, and 412
-pixels, exercises the non-persistent demonstration, all three quick questions,
-the quick result, actual close and comparison, season history with a skipped
-year, the advanced-target route, both open and closed asset states, and the
-existing detailed season surfaces, opens every explanation and every tab in
-turn, and asserts these properties:
+pixels. It exercises public, account/recovery, season creation, all three quick
+questions, both forecast-mode mismatch directions, the guided detailed hub,
+every main detailed-input section, actual entry/review/comparison, season
+history with a skipped year, the advanced-target route, and both open and
+closed asset states. It opens every explanation and every tab in turn, and
+asserts these properties:
 
 - No page is wider than the device, and content may not push the layout viewport
   out to absorb an overflow.

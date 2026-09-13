@@ -177,11 +177,16 @@ pub async fn require_login(
 ) -> axum::response::Response {
     use axum::response::{IntoResponse, Redirect};
 
-    if !request.uri().path().starts_with("/plans") || auth_session.user.is_some() {
+    if !protected_account_path(request.uri().path()) || auth_session.user.is_some() {
         next.run(request).await
     } else {
         Redirect::to("/login").into_response()
     }
+}
+
+#[cfg(any(feature = "ssr", test))]
+fn protected_account_path(path: &str) -> bool {
+    path.starts_with("/plans") || path == "/history"
 }
 
 #[cfg(test)]
@@ -210,5 +215,14 @@ mod tests {
         let unverified_account = LOGIN_FAILED;
         assert_eq!(unknown_account, wrong_password);
         assert_eq!(wrong_password, unverified_account);
+    }
+
+    #[test]
+    fn plans_and_history_share_the_same_authentication_boundary() {
+        assert!(protected_account_path("/plans"));
+        assert!(protected_account_path("/plans/42"));
+        assert!(protected_account_path("/history"));
+        assert!(!protected_account_path("/login"));
+        assert!(!protected_account_path("/"));
     }
 }

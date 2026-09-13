@@ -95,11 +95,15 @@ pub async fn load_plan(id: i64) -> Result<Option<PlanRecord>, ServerFnError> {
 }
 
 #[server]
-pub async fn save_plan(id: i64, form_json: String) -> Result<String, ServerFnError> {
+pub async fn save_plan(
+    id: i64,
+    section: String,
+    form_json: String,
+) -> Result<String, ServerFnError> {
     let (pool, owner_id) = authenticated_owner().await?;
     let form: PlanForm =
         serde_json::from_str(&form_json).map_err(|_| ServerFnError::new("ข้อมูลแบบฟอร์มไม่ถูกต้อง"))?;
-    save_for_owner(&pool, owner_id, id, &form).await?;
+    save_section_for_owner(&pool, owner_id, id, &section, &form).await?;
     Ok("บันทึกแล้ว".into())
 }
 
@@ -252,6 +256,30 @@ pub async fn save_for_owner(
         .await
         .map(record)
         .map_err(public_store_error)
+}
+
+#[cfg(feature = "ssr")]
+pub async fn save_section_for_owner(
+    pool: &sqlx::PgPool,
+    owner_id: store::users::UserId,
+    id: i64,
+    section: &str,
+    submitted: &PlanForm,
+) -> Result<PlanRecord, ServerFnError> {
+    let mut stored = load_for_owner(pool, owner_id, id)
+        .await?
+        .ok_or_else(|| ServerFnError::new("ไม่พบฤดูกาลนี้"))?
+        .form;
+    if !stored.replace_section_from(section, submitted) {
+        return Err(ServerFnError::new("ไม่พบส่วนข้อมูลนี้"));
+    }
+    if let Some(error) = stored.section_errors(section).into_iter().next() {
+        return Err(ServerFnError::new(format!(
+            "{}: {}",
+            error.field, error.message
+        )));
+    }
+    save_for_owner(pool, owner_id, id, &stored).await
 }
 
 #[cfg(feature = "ssr")]

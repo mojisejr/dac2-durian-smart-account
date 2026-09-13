@@ -14,7 +14,7 @@ use rust_decimal::Decimal;
 
 use crate::{
     explanations::{self, Explanation},
-    plan_form::PlanForm,
+    plan_form::{PlanForm, ReadinessTone},
     plan_ui::{BottomNav, NavSection, money},
     plans::PlanRecord,
 };
@@ -205,17 +205,20 @@ fn Figure(
 fn MissingInputs(id: i64, form: PlanForm) -> impl IntoView {
     let missing: Vec<_> = SECTION_TITLES
         .into_iter()
-        .filter(|(slug, _)| !form.section_complete(slug))
+        .filter_map(|(slug, title)| {
+            let readiness = form.section_readiness(slug);
+            (readiness.tone == ReadinessTone::Missing).then_some((slug, title, readiness.label))
+        })
         .collect();
     view! {
         <section class="card incomplete-state">
             <h2>"ยังคำนวณไม่ได้"</h2>
             <p>"หน้านี้จะไม่แสดงตัวเลขที่เดาเอา ยังขาดข้อมูลอยู่ตรงนี้"</p>
             <div class="section-list">
-                {missing.into_iter().map(|(slug, title)| view! {
+                {missing.into_iter().map(|(slug, title, status)| view! {
                     <A attr:class="section-card" href=format!("/plans/{id}/{slug}")>
                         <span><strong>{title}</strong><small>"ไปกรอกส่วนนี้"</small></span>
-                        <span class="status muted">"ยังไม่ครบ"</span>
+                        <span class="status warning">{status}</span>
                     </A>
                 }).collect_view()}
             </div>
@@ -532,11 +535,6 @@ fn CheckRow(id: i64, check: CheckResult) -> impl IntoView {
 fn TaxPanel(tax: calc::TaxAnalysis) -> impl IntoView {
     let actual = tax.actual_expense.clone();
     let flat = tax.flat_sixty_percent.clone();
-    let cheaper = match (actual.estimated_tax, flat.estimated_tax) {
-        (Some(actual), Some(flat)) if actual < flat => Some("actual"),
-        (Some(actual), Some(flat)) if flat < actual => Some("flat"),
-        _ => None,
-    };
 
     view! {
         <section class="card">
@@ -544,33 +542,26 @@ fn TaxPanel(tax: calc::TaxAnalysis) -> impl IntoView {
                 <h2>"ภาษีเงินได้ ประมาณการ"</h2>
                 <Explain explanation=explanations::TAX label="ภาษีสองวิธี".into()/>
             </div>
+            <p class="caption tax-disclaimer">{explanations::TAX_DISCLAIMER}</p>
             <div class="tax-methods">
                 <TaxMethod
                     title="หักค่าใช้จ่ายตามจริง"
                     method=actual
-                    cheaper=cheaper == Some("actual")
                 />
                 <TaxMethod
                     title="หักค่าใช้จ่ายแบบเหมา"
                     method=flat
-                    cheaper=cheaper == Some("flat")
                 />
             </div>
-            <p class="caption tax-disclaimer">{explanations::TAX_DISCLAIMER}</p>
         </section>
     }
 }
 
 #[component]
-fn TaxMethod(title: &'static str, method: TaxMethodAnalysis, cheaper: bool) -> impl IntoView {
+fn TaxMethod(title: &'static str, method: TaxMethodAnalysis) -> impl IntoView {
     view! {
-        <div class=if cheaper { "card tax-method cheaper" } else { "card tax-method" }>
-            <div class="section-title">
-                <h3>{title}</h3>
-                <Show when=move || cheaper>
-                    <span class="status good">"เสียน้อยกว่า"</span>
-                </Show>
-            </div>
+        <div class="card tax-method">
+            <div class="section-title"><h3>{title}</h3></div>
             <Figure label="รายได้" value=baht(method.income)/>
             <Figure label="หักค่าใช้จ่าย" value=baht(method.expense)/>
             <Figure label="ค่าลดหย่อนส่วนตัว" value=baht(Some(method.personal_allowance))/>
