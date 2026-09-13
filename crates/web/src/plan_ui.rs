@@ -1519,7 +1519,7 @@ fn HealthFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
 }
 
 #[component]
-fn PlanField(
+pub fn PlanField(
     label: &'static str,
     value: Signal<String>,
     on_value: Callback<String>,
@@ -1533,11 +1533,27 @@ fn PlanField(
     #[prop(default = false)] numeric: bool,
 ) -> impl IntoView {
     let help_id = field_id.map(|id| format!("{id}-help"));
+    let error_id = field_id.map(|id| format!("{id}-error"));
     let has_guidance = hint.is_some() || example.is_some() || outcome.is_some();
+    let described_help_id = help_id.clone();
+    let described_error_id = error_id.clone();
+    let described_by = move || {
+        let mut ids = Vec::new();
+        if has_guidance && let Some(id) = described_help_id.as_deref() {
+            ids.push(id);
+        }
+        if numeric
+            && numeric_input_invalid(&value.get())
+            && let Some(id) = described_error_id.as_deref()
+        {
+            ids.push(id);
+        }
+        (!ids.is_empty()).then(|| ids.join(" "))
+    };
     view! { <label class="guided-field"><span>{label}</span>{formal_term.map(|term| view! { <small class="formal-term">{term}</small> })}{if closed {
         view! { <p class="readonly-value">{move || { let value = value.get(); if value.is_empty() { "—".into() } else if let Some(unit) = unit { format!("{value} {unit}") } else { value } }}</p> }.into_any()
     } else {
-        view! { <><span class="input-with-unit"><input id=field_id type="text" inputmode=if numeric { "decimal" } else { "text" } aria-describedby=help_id.clone() aria-invalid=move || (numeric && numeric_input_invalid(&value.get())).then_some("true") prop:value=move || value.get() on:input=move |event| on_value.run(event_target_value(&event)) on:blur=move |event| { if numeric { on_value.run(format_numeric_input(&event_target_value(&event))); } }/>{unit.map(|unit| view! { <span class="unit">{unit}</span> })}</span><Show when=move || has_guidance><span id=help_id.clone() class="guided-help">{hint.map(|text| view! { <small class="field-hint">{text}</small> })}{example.map(|text| view! { <small class="field-example">{text}</small> })}{outcome.map(|text| view! { <small class="field-effect">{text}</small> })}</span></Show><Show when=move || numeric && numeric_input_invalid(&value.get())><small class="field-error">"กรุณากรอกเป็นตัวเลข"</small></Show></> }.into_any()
+        view! { <><span class="input-with-unit"><input id=field_id type="text" inputmode=if numeric { "decimal" } else { "text" } aria-describedby=described_by aria-invalid=move || (numeric && numeric_input_invalid(&value.get())).then_some("true") prop:value=move || value.get() on:input=move |event| on_value.run(event_target_value(&event)) on:blur=move |event| { if numeric { on_value.run(format_numeric_input(&event_target_value(&event))); } }/>{unit.map(|unit| view! { <span class="unit">{unit}</span> })}</span><Show when=move || has_guidance><span id=help_id.clone() class="guided-help">{hint.map(|text| view! { <small class="field-hint">{text}</small> })}{example.map(|text| view! { <small class="field-example">{text}</small> })}{outcome.map(|text| view! { <small class="field-effect">{text}</small> })}</span></Show><Show when=move || numeric && numeric_input_invalid(&value.get())><small id=error_id.clone() class="field-error">"กรุณากรอกเป็นตัวเลข"</small></Show></> }.into_any()
     }}</label> }
 }
 

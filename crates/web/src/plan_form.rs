@@ -686,6 +686,25 @@ mod tests {
             PlanForm::default().section_readiness("production").label,
             "ยังขาดผลผลิตที่ขายได้"
         );
+
+        let mut partial = sample.clone();
+        for grade in &mut partial.grades {
+            grade.price_per_kg.clear();
+        }
+        assert_eq!(
+            partial.section_readiness("production"),
+            SectionReadiness {
+                label: "ยังขาดราคาขายเฉลี่ย",
+                tone: ReadinessTone::Missing,
+            }
+        );
+
+        let mut without_market_demand = sample;
+        without_market_demand.market.demand_kg.clear();
+        assert_eq!(
+            without_market_demand.section_readiness("market").tone,
+            ReadinessTone::Optional
+        );
     }
 
     #[test]

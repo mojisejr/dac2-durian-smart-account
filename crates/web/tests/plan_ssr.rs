@@ -8,8 +8,8 @@ use web::{
     plan_form::PlanForm,
     plan_ui::{
         ActualCloseView, ActualComparisonView, ActualReviewView, DemoPage,
-        DetailedModeActiveNotice, PlanHub, PlanSectionView, QuickQuestionView, QuickResultView,
-        SeasonHistoryView,
+        DetailedModeActiveNotice, PlanField, PlanHub, PlanSectionView, QuickQuestionView,
+        QuickResultView, SeasonHistoryView,
     },
     plans::{ActualOutcomeRecord, PlanRecord, SeasonHistoryItem},
 };
@@ -74,6 +74,35 @@ fn render_demo() -> String {
     })
 }
 
+fn render_invalid_guided_field() -> String {
+    Owner::new().with(move || {
+        let view = view! {
+            <PlanField
+                field_id="proof-field"
+                label="จ่ายรวมเท่าไร"
+                formal_term="ต้นทุนรวม"
+                hint="กรอกยอดที่จ่ายทั้งฤดู"
+                example="ตัวอย่าง 900000"
+                outcome="ใช้คำนวณกำไร"
+                unit="บาท"
+                numeric=true
+                value=Signal::derive(|| "ไม่ใช่ตัวเลข".to_owned())
+                on_value=Callback::new(|_| {})
+                closed=false
+            />
+        };
+        let mut html = String::new();
+        view.to_html_with_buf(
+            &mut html,
+            &mut Position::FirstChild,
+            true,
+            false,
+            Vec::new(),
+        );
+        html
+    })
+}
+
 fn quick_record(estimate: calc::QuickEstimate, closed: bool) -> PlanRecord {
     PlanRecord {
         id: 42,
@@ -116,6 +145,37 @@ fn render_quick_result(estimate: calc::QuickEstimate) -> String {
         provide_context(RequestUrl::new("/plans/42/quick/result"));
         let view = view! {
             <Router><QuickResultView record=quick_record(estimate, false)/></Router>
+        };
+        let mut html = String::new();
+        view.to_html_with_buf(
+            &mut html,
+            &mut Position::FirstChild,
+            true,
+            false,
+            Vec::new(),
+        );
+        html
+    })
+}
+
+fn render_hub(form: PlanForm, closed: bool) -> String {
+    Owner::new().with(move || {
+        provide_context(RequestUrl::new("/plans/42"));
+        let view = view! {
+            <Router>
+                <PlanHub record=PlanRecord {
+                    id: 42,
+                    season_year: Some(2569),
+                    note: String::new(),
+                    closed,
+                    forecast_mode: calc::ForecastMode::Detailed,
+                    quick_estimate: calc::QuickEstimate::default(),
+                    starting_capital: None,
+                    asset_allocations: Vec::new(),
+                    actual_outcome: None,
+                    form: form.clone(),
+                }/>
+            </Router>
         };
         let mut html = String::new();
         view.to_html_with_buf(
@@ -281,6 +341,20 @@ fn demonstration_is_an_editable_browser_surface_not_a_persisting_form() {
 }
 
 #[test]
+fn guided_field_associates_persistent_help_and_error_with_the_input() {
+    let html = render_invalid_guided_field();
+    assert!(html.contains("จ่ายรวมเท่าไร"));
+    assert!(html.contains("ต้นทุนรวม"));
+    assert!(html.contains("กรอกยอดที่จ่ายทั้งฤดู"));
+    assert!(html.contains("ตัวอย่าง 900000"));
+    assert!(html.contains("ใช้คำนวณกำไร"));
+    assert!(html.contains("aria-invalid=\"true\""));
+    assert!(html.contains("aria-describedby=\"proof-field-help proof-field-error\""));
+    assert!(html.contains("id=\"proof-field-help\""));
+    assert!(html.contains("id=\"proof-field-error\""));
+}
+
+#[test]
 fn actual_entry_prefills_a_saved_draft_but_does_not_close_directly() {
     let html = render_actual("entry", actual_record(false));
     assert!(html.contains("บันทึกผลจริง"));
@@ -393,34 +467,7 @@ fn history_opened_from_a_season_has_an_explicit_route_back() {
 
 #[test]
 fn detailed_hub_moves_targets_under_an_explicit_advanced_area() {
-    let html = Owner::new().with(move || {
-        provide_context(RequestUrl::new("/plans/42"));
-        let view = view! {
-            <Router>
-                <PlanHub record=PlanRecord {
-                    id: 42,
-                    season_year: Some(2569),
-                    note: String::new(),
-                    closed: false,
-                    forecast_mode: calc::ForecastMode::Detailed,
-                    quick_estimate: calc::QuickEstimate::default(),
-                    starting_capital: None,
-                    asset_allocations: Vec::new(),
-                    actual_outcome: None,
-                    form: PlanForm::from_plan(&calc::workbook_sample()),
-                }/>
-            </Router>
-        };
-        let mut html = String::new();
-        view.to_html_with_buf(
-            &mut html,
-            &mut Position::FirstChild,
-            true,
-            false,
-            Vec::new(),
-        );
-        html
-    });
+    let html = render_hub(PlanForm::from_plan(&calc::workbook_sample()), false);
 
     assert!(html.contains("การวางแผนขั้นสูง (ไม่บังคับ)"));
     assert!(html.contains("เป้าหมาย KPI"));
@@ -433,6 +480,15 @@ fn detailed_hub_moves_targets_under_an_explicit_advanced_area() {
     assert!(html.contains("พอคำนวณค่าใช้จ่ายตามการผลิตแล้ว"));
     assert!(html.contains("พอคำนวณค่าใช้จ่ายประจำแล้ว"));
     assert!(!html.contains(">ครบ<"));
+    assert!(!html.contains("ยังไม่ครบ"));
+}
+
+#[test]
+fn closed_hub_keeps_truthful_readiness_without_edit_or_mode_actions() {
+    let html = render_hub(PlanForm::from_plan(&calc::workbook_sample()), true);
+    assert!(html.contains("ฤดูกาลนี้ปิดแล้ว · แก้ไขไม่ได้"));
+    assert!(html.contains("พอคำนวณรายได้แล้ว"));
+    assert!(!html.contains("เปลี่ยนเป็นประมาณการเร็ว"));
     assert!(!html.contains("ยังไม่ครบ"));
 }
 
