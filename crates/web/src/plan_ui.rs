@@ -609,6 +609,7 @@ pub fn PlanHub(record: PlanRecord) -> impl IntoView {
     let closed = record.closed;
     let forecast_mode = record.forecast_mode;
     let quick_estimate = record.quick_estimate;
+    let asset_allocations = record.asset_allocations;
 
     view! {
         <section class="page-stack plan-page">
@@ -647,7 +648,7 @@ pub fn PlanHub(record: PlanRecord) -> impl IntoView {
                     <QuickModeHub id estimate=quick_estimate.clone() closed/>
                 }.into_any(),
                 calc::ForecastMode::Detailed => view! {
-                    <DetailedModeHub id form=form.clone() closed/>
+                    <DetailedModeHub id form=form.clone() closed asset_depreciation=included_asset_depreciation(&asset_allocations)/>
                 }.into_any(),
             }}
             // No live total here. The bar exists so a figure moves while the
@@ -990,7 +991,12 @@ fn QuickModeHub(id: i64, estimate: calc::QuickEstimate, closed: bool) -> impl In
 }
 
 #[component]
-fn DetailedModeHub(id: i64, form: PlanForm, closed: bool) -> impl IntoView {
+fn DetailedModeHub(
+    id: i64,
+    form: PlanForm,
+    closed: bool,
+    asset_depreciation: Option<rust_decimal::Decimal>,
+) -> impl IntoView {
     let switch = ServerAction::<SwitchForecastMode>::new();
     let next = ["production", "expenses", "variable-costs", "fixed-costs"]
         .into_iter()
@@ -1062,7 +1068,7 @@ fn DetailedModeHub(id: i64, form: PlanForm, closed: bool) -> impl IntoView {
                 <span class="status muted">"เปิด"</span>
             </A>
             {MAIN_SECTIONS.into_iter().map(|(slug, title, description)| {
-                let readiness = form.section_readiness(slug);
+                let readiness = form.section_readiness_with_assets(slug, asset_depreciation);
                 let status_class = match readiness.tone {
                     ReadinessTone::Ready => "status good",
                     ReadinessTone::Missing => "status warning",
@@ -1380,6 +1386,9 @@ pub fn PlanSectionView(record: PlanRecord, section: String) -> impl IntoView {
     let save = ServerAction::<SavePlan>::new();
     let id = record.id;
     let closed = record.closed;
+    let assets = StoredValue::new(record.asset_allocations);
+    let starting_capital = record.starting_capital;
+    let asset_depreciation = assets.with_value(|assets| included_asset_depreciation(assets));
     let season_label = format!(
         "{} · {}",
         season_year_label(record.season_year),
@@ -1407,27 +1416,35 @@ pub fn PlanSectionView(record: PlanRecord, section: String) -> impl IntoView {
                 <input type="hidden" name="id" value=id/>
                 <input type="hidden" name="section" value=section/>
                 <input type="hidden" name="form_json" value=move || serde_json::to_string(&form.get()).unwrap_or_default()/>
-                <SectionFields section=section_for_fields form closed/>
+                <SectionFields section=section_for_fields form closed plan_id=id asset_depreciation/>
                 <ValidationSummary form section=section_for_validation/>
                 <Show when=move || !closed>
                     <button class="primary save-button" type="submit" disabled=move || section_for_button.with_value(|section| !form.get().section_errors(section).is_empty())>"บันทึกส่วนนี้"</button>
                 </Show>
             </ActionForm>
             <ServerMessage action=save/>
-            <LiveTotal form/>
+            <LiveTotal form assets starting_capital/>
             <BottomNav plan_id=id active=NavSection::Input/>
         </section>
     }.into_any()
 }
 
 #[component]
-fn SectionFields(section: String, form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
+fn SectionFields(
+    section: String,
+    form: RwSignal<PlanForm>,
+    closed: bool,
+    plan_id: i64,
+    asset_depreciation: Option<rust_decimal::Decimal>,
+) -> impl IntoView {
     match section.as_str() {
         "market" => view! { <MarketFields form closed/> }.into_any(),
         "production" => view! { <ProductionFields form closed/> }.into_any(),
         "expenses" => view! { <ExpenseFields form closed/> }.into_any(),
         "variable-costs" => view! { <VariableCostFields form closed/> }.into_any(),
-        "fixed-costs" => view! { <FixedCostFields form closed/> }.into_any(),
+        "fixed-costs" => {
+            view! { <FixedCostFields form closed plan_id asset_depreciation/> }.into_any()
+        }
         "targets" => view! { <TargetFields form closed/> }.into_any(),
         "health" => view! { <HealthFields form closed/> }.into_any(),
         _ => view! { <p>"ไม่พบข้อมูลส่วนนี้"</p> }.into_any(),
@@ -1589,7 +1606,13 @@ fn ProductionFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
 }
 
 #[component]
-fn SectionStateChoice(form: RwSignal<PlanForm>, fixed: bool, closed: bool) -> impl IntoView {
+fn SectionStateChoice(
+    form: RwSignal<PlanForm>,
+    fixed: bool,
+    closed: bool,
+    #[prop(optional)] asset_depreciation: rust_decimal::Decimal,
+) -> impl IntoView {
+    let asset_depreciation = (!asset_depreciation.is_zero()).then_some(asset_depreciation);
     let selected = Signal::derive(move || {
         let form = form.get();
         let state = if fixed {
@@ -1602,15 +1625,15 @@ fn SectionStateChoice(form: RwSignal<PlanForm>, fixed: bool, closed: bool) -> im
             _ => "unknown",
         }
     });
-    let legend = if fixed {
-        "แม้ไม่มีทุเรียนขาย ปีนี้ยังมีอะไรต้องจ่ายไหม"
-    } else {
-        "ปีนี้มีค่าใช้จ่ายที่เพิ่มตามการผลิตไหม"
+    let legend = match (fixed, asset_depreciation) {
+        (true, Some(_)) => "นอกจากค่าเสื่อมของที่เลือกไว้ ปีนี้ยังมีอะไรต้องจ่ายแม้ไม่มีทุเรียนขายไหม",
+        (true, None) => "แม้ไม่มีทุเรียนขาย ปีนี้ยังมีอะไรต้องจ่ายไหม",
+        (false, _) => "ปีนี้มีค่าใช้จ่ายที่เพิ่มตามการผลิตไหม",
     };
-    let none_description = if fixed {
-        "ปีนี้ไม่มีอะไรที่ต้องจ่ายแม้ไม่มีทุเรียนขาย ระบบจะนับเป็นศูนย์"
-    } else {
-        "ปีนี้ไม่มีค่าใช้จ่ายที่เพิ่มตามการผลิต ระบบจะนับเป็นศูนย์"
+    let none_description = match (fixed, asset_depreciation) {
+        (true, Some(_)) => "ไม่มีค่าใช้จ่ายประจำอื่น ระบบจะนับเฉพาะค่าเสื่อมของที่เลือกไว้",
+        (true, None) => "ปีนี้ไม่มีอะไรที่ต้องจ่ายแม้ไม่มีทุเรียนขาย ระบบจะนับเป็นศูนย์",
+        (false, _) => "ปีนี้ไม่มีค่าใช้จ่ายที่เพิ่มตามการผลิต ระบบจะนับเป็นศูนย์",
     };
     view! {
         <BranchChoice legend=legend name=if fixed { "fixed-cost-state" } else { "variable-cost-state" } options=[("unknown", "ยังไม่รู้ / ข้ามก่อน", "ผลที่ต้องใช้ตัวเลขนี้จะยังไม่ขึ้น จนกว่าจะกรอกหรือยืนยัน"), ("confirmed_none", "ยืนยันว่าไม่มี", none_description)] selected=selected on_select=Callback::new(move |v: String| form.update(|f| {
@@ -1664,12 +1687,23 @@ fn VariableCostFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
 }
 
 #[component]
-fn FixedCostFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
+fn FixedCostFields(
+    form: RwSignal<PlanForm>,
+    closed: bool,
+    plan_id: i64,
+    asset_depreciation: Option<rust_decimal::Decimal>,
+) -> impl IntoView {
     let fixed_rows = Memo::new(move |_| form.with(|f| f.fixed_costs.len()));
     view! { <section class="card field-stack">
         <div class="section-title"><div><h2>"แม้ปีนี้ไม่มีทุเรียนขาย ยังต้องจ่ายอะไรอยู่"</h2><small class="formal-term">"ต้นทุนคงที่"</small><p>"เช่น ค่าเช่าที่ เงินเดือนคนงานประจำ ดอกเบี้ย ค่าเสื่อมของที่ใช้หลายปี"</p></div></div>
         <details class="explanation"><summary>"ⓘ จ่ายเงินจริง กับ เฉลี่ยจากของหลายปี ต่างกันอย่างไร"</summary><h3>"คืออะไร"</h3><p>"ค่าเสื่อมระบบน้ำและค่าเสื่อมรถ เป็นต้นทุนที่ลงบัญชีแต่ปีนี้ไม่ได้ควักเงินจ่าย ส่วนค่าเช่า ดอกเบี้ย และค่าแรงประจำ จ่ายจริงทุกปี"</p><h3>"ใช้ยังไง"</h3><p>"ตอบให้ตรงตอนกรอกแต่ละรายการ"</p><h3>"ทำไมต้องมี"</h3><p>"เป็นสิ่งเดียวที่ทำให้กระแสเงินสดกับกำไรสุทธิต่างกันได้"</p><h3>"ไม่ใส่ได้ไหม"</h3><p>"ตอบผิดได้ แต่เงินสดที่เหลือจะผิดตาม"</p></details>
-        <Show when=move || form.get().fixed_costs.is_empty()><SectionStateChoice form fixed=true closed/></Show>
+        {asset_depreciation.map(|depreciation| view! {
+            <p class="branch-note asset-depreciation-note" aria-live="polite">
+                {format!("ของที่ใช้หลายปีที่เลือกไว้ในฤดูนี้ เฉลี่ยลงมาเป็นค่าใช้จ่ายประจำแล้ว {} บาท/ปี (ค่าเสื่อม) ระบบรวมให้เอง ไม่ต้องกรอกซ้ำที่นี่ ส่วนนี้ถามเฉพาะค่าใช้จ่ายประจำอื่นที่ยังไม่ได้บันทึก", money(depreciation))}
+            </p>
+            <A attr:class="text-button" href=format!("/plans/{plan_id}/assets")>"ดูของที่เลือกไว้"</A>
+        })}
+        <Show when=move || form.get().fixed_costs.is_empty()><SectionStateChoice form fixed=true closed asset_depreciation=asset_depreciation.unwrap_or_default()/></Show>
         {move || (0..fixed_rows.get()).map(|index| {
             let cash = Signal::derive(move || if form.get().fixed_costs.get(index).is_some_and(|l| l.cash_kind == CashKind::NonCash) { "non_cash" } else { "cash" });
             view! {
@@ -1812,9 +1846,14 @@ pub fn PlanField(
 }
 
 #[component]
-fn LiveTotal(form: RwSignal<PlanForm>) -> impl IntoView {
+fn LiveTotal(
+    form: RwSignal<PlanForm>,
+    assets: StoredValue<Vec<calc::AssetAllocation>>,
+    starting_capital: Option<rust_decimal::Decimal>,
+) -> impl IntoView {
     let summary = move || {
-        live_profit(&form.get())
+        assets
+            .with_value(|assets| live_profit_with_assets(&form.get(), assets, starting_capital))
             .map(|profit| format!("กำไรสุทธิโดยประมาณ {} บาท", money(profit)))
             .unwrap_or_else(|| "ยังคำนวณกำไรสุทธิไม่ได้".into())
     };
@@ -1921,11 +1960,26 @@ fn season_state(closed: bool, is_latest: bool) -> (&'static str, &'static str) {
     }
 }
 
-fn live_profit(form: &PlanForm) -> Option<rust_decimal::Decimal> {
+/// The live figure on input pages counts the assets the owner has already
+/// included in this season, so it matches the dashboard rather than a plan
+/// with no assets.
+fn live_profit_with_assets(
+    form: &PlanForm,
+    assets: &[calc::AssetAllocation],
+    starting_capital: Option<rust_decimal::Decimal>,
+) -> Option<rust_decimal::Decimal> {
     form.to_plan()
         .ok()
-        .map(|plan| calc::analyze(&plan))
+        .map(|plan| calc::analyze_with_assets(&plan, assets, starting_capital))
         .and_then(|analysis| analysis.business.net_profit)
+}
+
+/// Yearly depreciation from the assets included in this season, `None` when
+/// none are included, so pages can say the figure is already counted.
+pub(crate) fn included_asset_depreciation(
+    assets: &[calc::AssetAllocation],
+) -> Option<rust_decimal::Decimal> {
+    (!assets.is_empty()).then(|| assets.iter().map(|asset| asset.annual_depreciation).sum())
 }
 
 fn numeric_input_invalid(value: &str) -> bool {
@@ -2047,10 +2101,13 @@ mod tests {
     #[test]
     fn live_total_uses_the_local_calculation_and_changes_with_input() {
         let sample = PlanForm::from_plan(&calc::workbook_sample());
-        let original = live_profit(&sample).expect("sample has profit");
+        let original = live_profit_with_assets(&sample, &[], None).expect("sample has profit");
         let mut changed = sample.clone();
         changed.grades[0].price_per_kg = "120".into();
-        assert!(live_profit(&changed).expect("changed sample has profit") > original);
+        assert!(
+            live_profit_with_assets(&changed, &[], None).expect("changed sample has profit")
+                > original
+        );
     }
 
     #[test]

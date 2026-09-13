@@ -564,6 +564,37 @@ impl PlanForm {
         self.section_readiness(section).tone == ReadinessTone::Ready
     }
 
+    /// Readiness that knows about assets already included in the season, so
+    /// an unknown fixed section says the depreciation is counted and names
+    /// what is still missing instead of reading as if nothing exists.
+    pub fn section_readiness_with_assets(
+        &self,
+        section: &str,
+        asset_depreciation: Option<Decimal>,
+    ) -> SectionReadiness {
+        let readiness = self.section_readiness(section);
+        match (section, asset_depreciation, readiness.tone) {
+            ("fixed-costs", Some(_), ReadinessTone::Missing)
+                if self.fixed_costs.is_empty()
+                    && self.fixed_cost_state != CostSectionState::ConfirmedNone =>
+            {
+                SectionReadiness {
+                    label: "ค่าเสื่อมของที่เลือกไว้รวมแล้ว ยังต้องกรอกหรือยืนยันว่าไม่มีค่าใช้จ่ายประจำอื่น",
+                    tone: ReadinessTone::Missing,
+                }
+            }
+            ("fixed-costs", Some(_), ReadinessTone::Ready)
+                if self.fixed_cost_state == CostSectionState::ConfirmedNone =>
+            {
+                SectionReadiness {
+                    label: "ยืนยันแล้วว่ามีเฉพาะค่าเสื่อมของที่เลือกไว้",
+                    tone: ReadinessTone::Ready,
+                }
+            }
+            _ => readiness,
+        }
+    }
+
     pub fn section_readiness(&self, section: &str) -> SectionReadiness {
         let Ok(plan) = self.to_plan() else {
             return SectionReadiness {

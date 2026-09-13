@@ -25,6 +25,32 @@ const SECTIONS: [(&str, &str); 7] = [
 ];
 
 fn render(section: &str, closed: bool, form: PlanForm) -> String {
+    render_with_assets(section, closed, form, Vec::new())
+}
+
+fn included_asset() -> calc::AssetAllocation {
+    calc::allocate(
+        &calc::AssetFacts {
+            name: "ระบบน้ำ".into(),
+            kind: calc::AssetKind::Equipment,
+            original_cost: 100_000.into(),
+            start_year: 2568,
+            useful_life_years: Some(5),
+            residual_value: None,
+            retired_year: None,
+        },
+        2569,
+    )
+    .unwrap()
+    .unwrap()
+}
+
+fn render_with_assets(
+    section: &str,
+    closed: bool,
+    form: PlanForm,
+    asset_allocations: Vec<calc::AssetAllocation>,
+) -> String {
     let section = section.to_owned();
     Owner::new().with(move || {
         provide_context(RequestUrl::new("/plans/42/test"));
@@ -39,7 +65,7 @@ fn render(section: &str, closed: bool, form: PlanForm) -> String {
                         forecast_mode: calc::ForecastMode::Detailed,
                         quick_estimate: calc::QuickEstimate::default(),
                         starting_capital: None,
-                        asset_allocations: Vec::new(),
+                        asset_allocations: asset_allocations.clone(),
                         actual_outcome: None,
                         form: form.clone(),
                     }
@@ -918,4 +944,72 @@ fn classification_asks_familiar_questions_and_the_expense_lands_intact() {
     );
     assert_eq!(form.fixed_costs[0].amount_per_year, "36000");
     assert_eq!(form.fixed_costs[0].cash_kind, calc::CashKind::Cash);
+}
+
+#[test]
+fn fixed_costs_say_included_asset_depreciation_is_already_counted() {
+    let plan = calc::Plan {
+        production: calc::ProductionPlan {
+            yield_source: calc::YieldSource::Direct,
+            sellable_yield_kg: Some(20_000.into()),
+            price_source: calc::PriceSource::Average,
+            average_price_per_kg: Some(80.into()),
+            ..Default::default()
+        },
+        variable_cost_state: calc::CostSectionState::ConfirmedNone,
+        ..Default::default()
+    };
+    let form = PlanForm::from_plan(&plan);
+
+    let without = render("fixed-costs", false, form.clone());
+    assert!(!without.contains("asset-depreciation-note"));
+    assert!(without.contains("แม้ไม่มีทุเรียนขาย ปีนี้ยังมีอะไรต้องจ่ายไหม"));
+    assert!(without.contains("ยังคำนวณกำไรสุทธิไม่ได้"));
+
+    let with = render_with_assets("fixed-costs", false, form.clone(), vec![included_asset()]);
+    assert!(with.contains("asset-depreciation-note"));
+    assert!(with.contains("เฉลี่ยลงมาเป็นค่าใช้จ่ายประจำแล้ว 20,000.00 บาท/ปี (ค่าเสื่อม)"));
+    assert!(with.contains("ไม่ต้องกรอกซ้ำที่นี่"));
+    assert!(with.contains("href=\"/plans/42/assets\""));
+    assert!(with.contains("นอกจากค่าเสื่อมของที่เลือกไว้ ปีนี้ยังมีอะไรต้องจ่ายแม้ไม่มีทุเรียนขายไหม"));
+    assert!(with.contains("ระบบจะนับเฉพาะค่าเสื่อมของที่เลือกไว้"));
+    assert!(
+        with.contains("ยังคำนวณกำไรสุทธิไม่ได้"),
+        "depreciation alone does not make the unknown section known"
+    );
+
+    let mut confirmed = form;
+    confirmed.fixed_cost_state = calc::CostSectionState::ConfirmedNone;
+    let html = render_with_assets("fixed-costs", false, confirmed, vec![included_asset()]);
+    assert!(
+        html.contains("กำไรสุทธิโดยประมาณ 1,580,000.00 บาท"),
+        "the live figure on the page counts the included asset: {html}"
+    );
+}
+
+#[test]
+fn hub_names_counted_depreciation_beside_the_missing_fixed_answer() {
+    let plan = calc::Plan {
+        variable_cost_state: calc::CostSectionState::ConfirmedNone,
+        ..Default::default()
+    };
+    let form = PlanForm::from_plan(&plan);
+    assert_eq!(
+        form.section_readiness_with_assets("fixed-costs", Some(20_000.into()))
+            .label,
+        "ค่าเสื่อมของที่เลือกไว้รวมแล้ว ยังต้องกรอกหรือยืนยันว่าไม่มีค่าใช้จ่ายประจำอื่น"
+    );
+    assert_eq!(
+        form.section_readiness_with_assets("fixed-costs", None)
+            .label,
+        "ยังขาดค่าใช้จ่ายประจำ หรือยืนยันว่าไม่มี"
+    );
+    let mut confirmed = form;
+    confirmed.fixed_cost_state = calc::CostSectionState::ConfirmedNone;
+    assert_eq!(
+        confirmed
+            .section_readiness_with_assets("fixed-costs", Some(20_000.into()))
+            .label,
+        "ยืนยันแล้วว่ามีเฉพาะค่าเสื่อมของที่เลือกไว้"
+    );
 }

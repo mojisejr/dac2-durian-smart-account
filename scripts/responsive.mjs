@@ -281,6 +281,43 @@ async function waitForHydratedValue(page, selector, accept, what) {
     });
 }
 
+// A navigation that hangs is only useful if it says where it hung. On a
+// timeout, ask the server for the same page without the browser and list the
+// requests Chrome still had open, so the failure names the side that stalled.
+async function gotoOrDiagnose(page, url, cookies) {
+  const pending = new Map();
+  const onRequest = (request) => pending.set(request, Date.now());
+  const onDone = (request) => pending.delete(request);
+  page.on('request', onRequest);
+  page.on('requestfinished', onDone);
+  page.on('requestfailed', onDone);
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  } catch (error) {
+    const cookie = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+    const started = Date.now();
+    let direct;
+    try {
+      const response = await fetch(url, {
+        headers: { cookie },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(10000),
+      });
+      direct = `server answered HTTP ${response.status} in ${Date.now() - started}ms`;
+    } catch (fetchError) {
+      direct = `server did not answer within 10s (${fetchError.message})`;
+    }
+    const open = [...pending.entries()]
+      .map(([request, at]) => `${request.method()} ${request.url()} open ${Date.now() - at}ms`)
+      .join('; ');
+    throw new Error(`${error.message}\n  ${direct}\n  browser requests still open: ${open || 'none'}`);
+  } finally {
+    page.off('request', onRequest);
+    page.off('requestfinished', onDone);
+    page.off('requestfailed', onDone);
+  }
+}
+
 async function signIn(browser) {
   const email = 'responsive-proof@dac2.local';
   const password = 'CorrectHorse123!';
@@ -681,6 +718,15 @@ async function signIn(browser) {
     throw new Error('starting capital did not persist independently');
   }
 
+  // Including an asset must be visible where the owner would look for its
+  // cost: the fixed-costs page says the depreciation is already counted and
+  // asks only about other regular costs, and the hub names it too.
+  await page.goto(`${BASE}/plans/${detailedPlanId}/fixed-costs`);
+  await page.getByText('เฉลี่ยลงมาเป็นค่าใช้จ่ายประจำแล้ว 20,000.00 บาท/ปี (ค่าเสื่อม)').waitFor({ timeout: 10000 });
+  await page.getByText('ไม่ต้องกรอกซ้ำที่นี่').waitFor({ timeout: 5000 });
+  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await page.getByText(/ค่าเสื่อมของที่เลือกไว้รวมแล้ว|ยืนยันแล้วว่ามีเฉพาะค่าเสื่อมของที่เลือกไว้|พอคำนวณค่าใช้จ่ายประจำแล้ว/).first().waitFor({ timeout: 10000 });
+
   // The same owner asset appears in another season without re-entry, but is
   // excluded there until the owner makes a second explicit choice.
   await page.goto(`${BASE}/plans/new`);
@@ -823,7 +869,7 @@ try {
       // long matrix from retaining old hydrated runtimes in one renderer.
       const page = await context.newPage();
       try {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await gotoOrDiagnose(page, url, cookies);
         await page.waitForTimeout(250);
         assess(`${size.name}px ${routeName}`, await inspect(page, size.width), size.width);
 
