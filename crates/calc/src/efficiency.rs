@@ -187,6 +187,7 @@ mod tests {
             quantity: Some(Decimal::from(999_999)),
             unit: "กก.".into(),
             unit_price: Some(Decimal::ONE),
+            total_amount: None,
         });
         assert_eq!(
             find(&results(&plan), KpiKind::YieldPerFertilizerKg).actual,

@@ -1,6 +1,6 @@
 use calc::{
     ActualOutcome, FixedCostLine, Grade, HealthAnswer, KpiTargets, MarketPlan, OutcomeMetrics,
-    Plan, ProductionPlan, QuickEstimate, VariableCostLine,
+    Plan, ProductionPlan, QuickEstimate, UnclassifiedExpense, VariableCostLine,
 };
 use rust_decimal::Decimal;
 use sqlx::{PgConnection, Row};
@@ -18,7 +18,8 @@ pub async fn load(
         "SELECT name, season_year, note, closed_at IS NOT NULL AS closed,
                 starting_capital,
                 forecast_mode, quick_sellable_yield_kg,
-                quick_average_price_per_kg, quick_total_cost
+                quick_average_price_per_kg, quick_total_cost,
+                variable_cost_state, fixed_cost_state
          FROM plans
          WHERE id = $1 AND owner_id = $2",
     )
@@ -103,7 +104,7 @@ pub async fn load(
         .collect::<Result<_, StoreError>>()?;
 
     let rows = sqlx::query(
-        "SELECT name, kind, quantity, unit, unit_price
+        "SELECT name, kind, quantity, unit, unit_price, total_amount
          FROM variable_cost_lines
          WHERE plan_id = $1 AND owner_id = $2 ORDER BY position",
     )
@@ -120,6 +121,7 @@ pub async fn load(
                 quantity: row.try_get("quantity")?,
                 unit: row.try_get("unit")?,
                 unit_price: row.try_get("unit_price")?,
+                total_amount: row.try_get("total_amount")?,
             })
         })
         .collect::<Result<_, StoreError>>()?;
@@ -141,6 +143,25 @@ pub async fn load(
                 cash_kind: codec::parse_cash_kind(row.try_get("cash_kind")?)?,
                 amount_per_year: row.try_get("amount_per_year")?,
                 investment_base: row.try_get("investment_base")?,
+            })
+        })
+        .collect::<Result<_, StoreError>>()?;
+
+    let rows = sqlx::query(
+        "SELECT name, amount, note FROM unclassified_expenses
+         WHERE plan_id = $1 AND owner_id = $2 ORDER BY position",
+    )
+    .bind(plan_id)
+    .bind(owner_id)
+    .fetch_all(&mut *connection)
+    .await?;
+    let unclassified_expenses = rows
+        .into_iter()
+        .map(|row| {
+            Ok(UnclassifiedExpense {
+                name: row.try_get("name")?,
+                amount: row.try_get("amount")?,
+                note: row.try_get("note")?,
             })
         })
         .collect::<Result<_, StoreError>>()?;
@@ -264,8 +285,17 @@ pub async fn load(
             name: plan_row.try_get("name")?,
             market,
             production,
+            variable_cost_state: codec::parse_cost_section_state(
+                "plans.variable_cost_state",
+                plan_row.try_get("variable_cost_state")?,
+            )?,
             variable_costs,
+            fixed_cost_state: codec::parse_cost_section_state(
+                "plans.fixed_cost_state",
+                plan_row.try_get("fixed_cost_state")?,
+            )?,
             fixed_costs,
+            unclassified_expenses,
             health_answers,
             targets,
         },

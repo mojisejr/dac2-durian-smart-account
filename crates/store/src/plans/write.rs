@@ -1,4 +1,4 @@
-use calc::Plan;
+use calc::{CostSectionState, Plan};
 use sqlx::PgConnection;
 
 use crate::users::UserId;
@@ -11,12 +11,48 @@ pub async fn replace_sections(
     plan_id: PlanId,
     plan: &Plan,
 ) -> Result<(), StoreError> {
+    // A section can only be confirmed empty while it is empty. The stored
+    // state is always the effective one: rows mean entered items, and a
+    // list emptied later reads as unknown rather than confirmed none.
+    for (field, stored, rows) in [
+        (
+            "plans.variable_cost_state",
+            plan.variable_cost_state,
+            plan.variable_costs.len(),
+        ),
+        (
+            "plans.fixed_cost_state",
+            plan.fixed_cost_state,
+            plan.fixed_costs.len(),
+        ),
+    ] {
+        if stored == CostSectionState::ConfirmedNone && rows > 0 {
+            return Err(StoreError::InvalidValue {
+                field,
+                value: format!("confirmed_none with {rows} rows"),
+            });
+        }
+    }
+    sqlx::query(
+        "UPDATE plans SET variable_cost_state = $3, fixed_cost_state = $4
+         WHERE id = $1 AND owner_id = $2",
+    )
+    .bind(plan_id)
+    .bind(owner_id)
+    .bind(codec::cost_section_state(
+        plan.effective_variable_cost_state(),
+    ))
+    .bind(codec::cost_section_state(plan.effective_fixed_cost_state()))
+    .execute(&mut *connection)
+    .await?;
+
     for statement in [
         "DELETE FROM market_plans WHERE plan_id = $1 AND owner_id = $2",
         "DELETE FROM yield_estimates WHERE plan_id = $1 AND owner_id = $2",
         "DELETE FROM grade_mix WHERE plan_id = $1 AND owner_id = $2",
         "DELETE FROM variable_cost_lines WHERE plan_id = $1 AND owner_id = $2",
         "DELETE FROM fixed_cost_lines WHERE plan_id = $1 AND owner_id = $2",
+        "DELETE FROM unclassified_expenses WHERE plan_id = $1 AND owner_id = $2",
         "DELETE FROM health_answers WHERE plan_id = $1 AND owner_id = $2",
         "DELETE FROM kpi_targets WHERE plan_id = $1 AND owner_id = $2",
     ] {
@@ -88,8 +124,9 @@ pub async fn replace_sections(
     for (index, line) in plan.variable_costs.iter().enumerate() {
         sqlx::query(
             "INSERT INTO variable_cost_lines (
-                plan_id, owner_id, position, name, kind, quantity, unit, unit_price
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                plan_id, owner_id, position, name, kind, quantity, unit, unit_price,
+                total_amount
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(plan_id)
         .bind(owner_id)
@@ -99,6 +136,7 @@ pub async fn replace_sections(
         .bind(line.quantity)
         .bind(&line.unit)
         .bind(line.unit_price)
+        .bind(line.total_amount)
         .execute(&mut *connection)
         .await?;
     }
@@ -117,6 +155,22 @@ pub async fn replace_sections(
         .bind(codec::cash_kind(line.cash_kind))
         .bind(line.amount_per_year)
         .bind(line.investment_base)
+        .execute(&mut *connection)
+        .await?;
+    }
+
+    for (index, expense) in plan.unclassified_expenses.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO unclassified_expenses (
+                plan_id, owner_id, position, name, amount, note
+             ) VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(plan_id)
+        .bind(owner_id)
+        .bind(position(index)?)
+        .bind(&expense.name)
+        .bind(expense.amount)
+        .bind(&expense.note)
         .execute(&mut *connection)
         .await?;
     }

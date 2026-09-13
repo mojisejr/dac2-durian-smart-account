@@ -2,8 +2,8 @@ use std::borrow::Cow;
 use std::path::Path;
 
 use calc::{
-    ActualOutcome, ForecastMode, Grade, PriceSource, QuickEstimate, VariableCostKind,
-    VariableCostLine, YieldSource, workbook_sample,
+    ActualOutcome, CostSectionState, ForecastMode, Grade, PriceSource, QuickEstimate,
+    UnclassifiedExpense, VariableCostKind, VariableCostLine, YieldSource, workbook_sample,
 };
 use rust_decimal::Decimal;
 use sqlx::migrate::Migrator;
@@ -140,6 +140,224 @@ async fn blank_zero_and_entered_branch_values_round_trip_distinctly(
         assert_eq!(loaded.plan.production.average_price_per_kg, price);
         assert_eq!(loaded.plan.market.buyer_committed_kg, yield_kg);
     }
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn cost_section_states_round_trip_derive_from_rows_and_refuse_a_false_none(
+    pool: PgPool,
+) -> Result<(), StoreError> {
+    let owner = users::create(&pool, "owner@example.test").await?;
+
+    // Unknown is the default for an empty plan.
+    let mut plan = calc::Plan::default();
+    let created = plans::create(&pool, owner.id, 2569, "", &plan).await?;
+    let loaded = plans::load(&pool, owner.id, created.id).await?.unwrap();
+    assert_eq!(loaded.plan.variable_cost_state, CostSectionState::Unknown);
+    assert_eq!(loaded.plan.fixed_cost_state, CostSectionState::Unknown);
+
+    // Confirmed none round-trips while the lists are empty.
+    plan.variable_cost_state = CostSectionState::ConfirmedNone;
+    plan.fixed_cost_state = CostSectionState::ConfirmedNone;
+    plans::save(&pool, owner.id, created.id, &plan).await?;
+    let loaded = plans::load(&pool, owner.id, created.id).await?.unwrap();
+    assert_eq!(
+        loaded.plan.variable_cost_state,
+        CostSectionState::ConfirmedNone
+    );
+    assert_eq!(
+        loaded.plan.fixed_cost_state,
+        CostSectionState::ConfirmedNone
+    );
+    assert_eq!(
+        calc::analyze(&loaded.plan).cost.total_cost,
+        Some(Decimal::ZERO)
+    );
+
+    // Rows make the stored state entered_items whatever was claimed.
+    plan.variable_cost_state = CostSectionState::Unknown;
+    plan.variable_costs = workbook_sample().variable_costs;
+    plans::save(&pool, owner.id, created.id, &plan).await?;
+    let loaded = plans::load(&pool, owner.id, created.id).await?.unwrap();
+    assert_eq!(
+        loaded.plan.variable_cost_state,
+        CostSectionState::EnteredItems
+    );
+
+    // Removing the last row reverts to unknown, never to confirmed none.
+    plan.variable_cost_state = CostSectionState::EnteredItems;
+    plan.variable_costs.clear();
+    plans::save(&pool, owner.id, created.id, &plan).await?;
+    let loaded = plans::load(&pool, owner.id, created.id).await?.unwrap();
+    assert_eq!(loaded.plan.variable_cost_state, CostSectionState::Unknown);
+
+    // Confirmed none with rows is refused, and nothing is written.
+    plan.fixed_cost_state = CostSectionState::ConfirmedNone;
+    plan.fixed_costs = workbook_sample().fixed_costs;
+    assert!(matches!(
+        plans::save(&pool, owner.id, created.id, &plan).await,
+        Err(StoreError::InvalidValue {
+            field: "plans.fixed_cost_state",
+            ..
+        })
+    ));
+    let loaded = plans::load(&pool, owner.id, created.id).await?.unwrap();
+    assert!(loaded.plan.fixed_costs.is_empty());
+    assert_eq!(
+        loaded.plan.fixed_cost_state,
+        CostSectionState::ConfirmedNone
+    );
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn unclassified_expenses_and_total_lines_round_trip_duplicate_and_freeze(
+    pool: PgPool,
+) -> Result<(), StoreError> {
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let mut plan = workbook_sample();
+    plan.unclassified_expenses = vec![
+        UnclassifiedExpense {
+            name: "ค่าอะไรสักอย่างเดือนสาม".into(),
+            amount: Some(Decimal::from(50_000)),
+            note: "จำได้ว่าจ่ายให้คนขับรถ".into(),
+        },
+        UnclassifiedExpense {
+            name: "ยังไม่รู้ยอด".into(),
+            amount: None,
+            note: String::new(),
+        },
+    ];
+    plan.variable_costs.push(VariableCostLine {
+        name: "ค่าจ้างเก็บที่จำได้แต่ยอดรวม".into(),
+        kind: VariableCostKind::HarvestLabor,
+        quantity: None,
+        unit: String::new(),
+        unit_price: None,
+        total_amount: Some(Decimal::from(12_000)),
+    });
+    let expected_total = calc::analyze(&plan).cost.total_cost.expect("known total");
+
+    let created = plans::create(&pool, owner.id, 2569, "", &plan).await?;
+    let loaded = plans::load(&pool, owner.id, created.id).await?.unwrap();
+    assert_eq!(loaded.plan, plan);
+
+    let duplicate = plans::duplicate(&pool, owner.id, created.id, 2570, "ปีหน้า", "").await?;
+    assert_eq!(
+        duplicate.plan.unclassified_expenses,
+        plan.unclassified_expenses
+    );
+    assert_eq!(
+        duplicate.plan.variable_costs.last().unwrap().total_amount,
+        Some(Decimal::from(12_000))
+    );
+
+    let closed =
+        plans::finalize_with_actual(&pool, owner.id, created.id, &actual_outcome()).await?;
+    let frozen = closed.actual_outcome.unwrap().forecast.unwrap();
+    assert_eq!(
+        frozen.total_cost,
+        Some(expected_total),
+        "the frozen total counts the total-only line and ignores unclassified captures"
+    );
+    let mut reclassified = plan.clone();
+    reclassified.unclassified_expenses.clear();
+    assert_closed(plans::save(&pool, owner.id, created.id, &reclassified).await);
+
+    // A line with both a total and a unit price is refused by the database
+    // as well as by the input contract.
+    let mut invalid = plan.clone();
+    invalid.variable_costs.last_mut().unwrap().unit_price = Some(Decimal::ONE);
+    assert!(matches!(
+        plans::save(&pool, owner.id, duplicate.id, &invalid).await,
+        Err(StoreError::Database(_))
+    ));
+    Ok(())
+}
+
+const STATES_MIGRATION: i64 = 202609130002;
+
+#[sqlx::test(migrations = false)]
+async fn existing_cost_rows_survive_the_states_migration_and_its_rollback(
+    pool: PgPool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut migrator = Migrator::new(Path::new("../../migrations")).await?;
+    let every_migration = migrator.migrations.to_vec();
+    migrator.migrations = Cow::Owned(
+        every_migration
+            .iter()
+            .filter(|migration| migration.version < STATES_MIGRATION)
+            .cloned()
+            .collect(),
+    );
+    migrator.run(&pool).await?;
+
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let plan_id: i64 = sqlx::query_scalar(
+        "INSERT INTO plans (owner_id, name, season_year) VALUES ($1, 'ปีเก่า', 2568)
+         RETURNING id",
+    )
+    .bind(owner.id)
+    .fetch_one(&pool)
+    .await?;
+    for statement in [
+        "INSERT INTO market_plans (plan_id, owner_id) VALUES ($1, $2)",
+        "INSERT INTO yield_estimates (plan_id, owner_id) VALUES ($1, $2)",
+        "INSERT INTO kpi_targets (plan_id, owner_id) VALUES ($1, $2)",
+        "INSERT INTO variable_cost_lines (plan_id, owner_id, position, name, kind, quantity, unit, unit_price)
+         VALUES ($1, $2, 0, 'ปุ๋ย', 'fertilizer', 5000, 'กก.', 20)",
+    ] {
+        sqlx::query(statement)
+            .bind(plan_id)
+            .bind(owner.id)
+            .execute(&pool)
+            .await?;
+    }
+
+    migrator.migrations = Cow::Owned(every_migration);
+    migrator.run(&pool).await?;
+
+    let loaded = plans::load(&pool, owner.id, plan_id)
+        .await?
+        .expect("the legacy plan loads");
+    assert_eq!(
+        loaded.plan.variable_cost_state,
+        CostSectionState::Unknown,
+        "the stored default is unknown; rows still make the effective state entered items"
+    );
+    assert_eq!(
+        loaded.plan.effective_variable_cost_state(),
+        CostSectionState::EnteredItems
+    );
+    assert_eq!(loaded.plan.fixed_cost_state, CostSectionState::Unknown);
+    assert_eq!(loaded.plan.variable_costs[0].total_amount, None);
+    assert_eq!(
+        calc::analyze(&loaded.plan).cost.variable_cost,
+        Some(Decimal::from(100_000)),
+        "a legacy line still totals quantity times unit price"
+    );
+    assert!(loaded.plan.unclassified_expenses.is_empty());
+
+    let rollback = std::fs::read_to_string(
+        "../../migrations/rollback/202609130002_cost_knowledge_states.sql",
+    )?;
+    sqlx::raw_sql(&rollback).execute(&pool).await?;
+    let quantity: Decimal = sqlx::query_scalar(
+        "SELECT quantity FROM variable_cost_lines WHERE plan_id = $1 AND position = 0",
+    )
+    .bind(plan_id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(quantity, Decimal::from(5_000));
+    let dropped: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.columns
+         WHERE (table_name = 'plans' AND column_name IN ('variable_cost_state', 'fixed_cost_state'))
+            OR (table_name = 'variable_cost_lines' AND column_name = 'total_amount')
+            OR table_name = 'unclassified_expenses'",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(dropped, 0, "rollback removes every added column and table");
     Ok(())
 }
 
@@ -400,6 +618,7 @@ async fn duplicate_is_a_deep_independent_copy(pool: PgPool) -> Result<(), StoreE
         quantity: Some(Decimal::ONE),
         unit: "ครั้ง".into(),
         unit_price: Some(Decimal::from(999)),
+        total_amount: None,
     });
     plans::save(&pool, owner.id, duplicate.id, &edited).await?;
 

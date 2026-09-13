@@ -8,10 +8,61 @@ pub struct Plan {
     pub name: String,
     pub market: MarketPlan,
     pub production: ProductionPlan,
+    /// What the owner has said about the variable section when it has no
+    /// rows. Rows always win: see [`Plan::effective_variable_cost_state`].
+    #[serde(default)]
+    pub variable_cost_state: CostSectionState,
     pub variable_costs: Vec<VariableCostLine>,
+    #[serde(default)]
+    pub fixed_cost_state: CostSectionState,
     pub fixed_costs: Vec<FixedCostLine>,
+    /// Remembered expenses the owner has not classified yet. They enter no
+    /// calculation.
+    #[serde(default)]
+    pub unclassified_expenses: Vec<UnclassifiedExpense>,
     pub health_answers: Vec<HealthAnswer>,
     pub targets: KpiTargets,
+}
+
+/// What is known about a cost section that may have no rows.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum CostSectionState {
+    /// The owner has not said; an empty list means nothing yet.
+    #[default]
+    Unknown,
+    /// The owner confirmed the section truly has no cost: a known zero.
+    ConfirmedNone,
+    /// Rows exist. Derived from the rows, never a stored claim on its own.
+    EnteredItems,
+}
+
+impl Plan {
+    /// Rows always mean entered items; without rows a stored `EnteredItems`
+    /// is stale and reads as unknown, never as a silent confirmation.
+    pub fn effective_variable_cost_state(&self) -> CostSectionState {
+        effective_state(self.variable_cost_state, self.variable_costs.is_empty())
+    }
+
+    pub fn effective_fixed_cost_state(&self) -> CostSectionState {
+        effective_state(self.fixed_cost_state, self.fixed_costs.is_empty())
+    }
+}
+
+fn effective_state(stored: CostSectionState, empty: bool) -> CostSectionState {
+    match (stored, empty) {
+        (_, false) => CostSectionState::EnteredItems,
+        (CostSectionState::ConfirmedNone, true) => CostSectionState::ConfirmedNone,
+        (_, true) => CostSectionState::Unknown,
+    }
+}
+
+/// An expense the owner remembers but has not yet said whether it grows with
+/// production, is paid in cash this year, or is a multi-year purchase.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct UnclassifiedExpense {
+    pub name: String,
+    pub amount: Option<Decimal>,
+    pub note: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -146,15 +197,40 @@ pub struct VariableCostLine {
     pub quantity: Option<Decimal>,
     pub unit: String,
     pub unit_price: Option<Decimal>,
+    /// A known total for the line instead of quantity times unit price. A
+    /// line carrying both is an input issue, never resolved silently.
+    #[serde(default)]
+    pub total_amount: Option<Decimal>,
 }
 
 impl VariableCostLine {
+    /// Whether this line is entered as one total rather than per unit.
+    pub fn is_total_only(&self) -> bool {
+        self.total_amount.is_some()
+    }
+
+    /// The quantity that feeds the line total and per-unit figures. A
+    /// total-only line has no quantity, so it yields no per-unit figure.
     pub fn effective_quantity(&self, sellable_yield_kg: Option<Decimal>) -> Option<Decimal> {
-        if self.kind.follows_sellable_yield() {
+        if self.is_total_only() {
+            None
+        } else if self.kind.follows_sellable_yield() {
             self.quantity.or(sellable_yield_kg)
         } else {
             self.quantity
         }
+    }
+
+    /// Whether the sellable-yield default is what fills this line's quantity.
+    pub fn uses_sellable_yield_default(&self) -> bool {
+        !self.is_total_only() && self.kind.follows_sellable_yield() && self.quantity.is_none()
+    }
+
+    pub fn total(&self, sellable_yield_kg: Option<Decimal>) -> Option<Decimal> {
+        if let Some(total) = self.total_amount {
+            return Some(total);
+        }
+        Some(self.effective_quantity(sellable_yield_kg)? * self.unit_price?)
     }
 }
 
