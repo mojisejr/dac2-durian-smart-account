@@ -109,6 +109,7 @@ button:disabled { cursor: default; opacity: 0.7; }
 .actions button { width: 100%; }
 
 .alternate, .form-message { margin-bottom: 0; }
+.alternate a { align-items: center; display: inline-flex; min-height: 48px; }
 .form-message:not(:empty) { background: color-mix(in srgb, var(--good) 12%, var(--surface)); border-left: 4px solid var(--good); border-radius: 0.35rem; padding: 0.75rem; }
 .bad-message { border-color: var(--bad); }
 details { border-top: 1px solid var(--border); padding-top: 0.8rem; }
@@ -138,6 +139,16 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 .step-count, .field-hint, .result-label { color: var(--muted); }
 .step-count { font-size: 0.88rem; font-weight: 700; margin-bottom: 0.5rem; }
 .field-hint { font-size: 0.82rem; font-weight: 400; }
+.formal-term { color: var(--muted); font-size: 0.8125rem; font-weight: 400; }
+.guided-help { display: grid; gap: 0.15rem; }
+.field-example, .field-effect { color: var(--muted); font-size: 0.8125rem; font-weight: 400; }
+.field-effect { color: var(--primary); }
+.guided-next { border-color: var(--primary); display: grid; gap: 0.75rem; }
+.guided-next > .button { width: 100%; }
+.guided-next p, .overview-heading p { margin-bottom: 0; }
+.overview-heading { display: grid; gap: 0.15rem; margin-top: 0.25rem; }
+.overview-heading h2 { margin-bottom: 0; }
+.overview-heading p { color: var(--muted); }
 .quick-mode-card, .detailed-mode-card, .quick-question-card, .quick-result-card, .quick-source-card, .quick-result-actions { display: grid; gap: 1rem; }
 .quick-mode-card > .button, .quick-question-card button, .quick-result-actions > .button, .quick-result-actions form button { width: 100%; }
 .quick-back { justify-self: start; }
@@ -174,11 +185,12 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 .advanced-planning > p { color: var(--muted); margin-bottom: 0; }
 .demo-banner { background: var(--surface); border: 1px solid var(--warn); border-left-width: 4px; border-radius: 0.7rem; color: var(--text); display: grid; gap: 0.15rem; padding: 0.8rem 1rem; }
 .demo-banner span { color: var(--muted); }
-.status { border: 1px solid currentcolor; border-radius: 999px; flex: 0 0 auto; font-size: 0.82rem; margin-left: 0.5rem; padding: 0.2rem 0.55rem; }
+.status { border: 1px solid currentcolor; border-radius: 999px; flex: 0 1 auto; font-size: 0.82rem; line-height: 1.35; margin-left: 0.5rem; max-width: 48%; padding: 0.3rem 0.55rem; text-align: center; }
 /* A status pill that stretches the width of its card reads as a button nobody
    can press. It is a statement, so it takes only the room its words need. */
 .figure-list > .status, .card > .status { justify-self: start; margin-left: 0; width: fit-content; }
 .good, .good-text { color: var(--good); }
+.status.warning { color: var(--warn); }
 .bad-text { color: var(--bad); }
 .muted { color: var(--muted); }
 
@@ -288,10 +300,14 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 
 .tax-methods { display: grid; gap: 0.7rem; }
 .tax-method { display: grid; gap: 0.1rem; }
-.tax-method.cheaper { border-color: var(--good); }
 .tax-method h3 { font-size: 1rem; margin: 0; }
 .caption { color: var(--muted); font-size: 0.82rem; }
-.tax-disclaimer { margin-bottom: 0; margin-top: 0.8rem; }
+.tax-disclaimer { background: color-mix(in srgb, var(--warn) 10%, var(--surface)); border-left: 4px solid var(--warn); color: var(--text); margin-bottom: 0.8rem; margin-top: 0.8rem; padding: 0.7rem 0.8rem; }
+
+@media (max-width: 360px) {
+  .section-card { align-items: flex-start; display: grid; gap: 0.6rem; }
+  .section-card .status { justify-self: start; margin-left: 0; max-width: 100%; }
+}
 
 .scenario-card { display: grid; gap: 0.7rem; }
 .slider-field { display: grid; gap: 0.4rem; }

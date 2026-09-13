@@ -7,8 +7,9 @@ use leptos_router::location::RequestUrl;
 use web::{
     plan_form::PlanForm,
     plan_ui::{
-        ActualCloseView, ActualComparisonView, ActualReviewView, DemoPage, PlanHub,
-        PlanSectionView, QuickQuestionView, QuickResultView, SeasonHistoryView,
+        ActualCloseView, ActualComparisonView, ActualReviewView, DemoPage,
+        DetailedModeActiveNotice, PlanHub, PlanSectionView, QuickQuestionView, QuickResultView,
+        SeasonHistoryView,
     },
     plans::{ActualOutcomeRecord, PlanRecord, SeasonHistoryItem},
 };
@@ -116,6 +117,24 @@ fn render_quick_result(estimate: calc::QuickEstimate) -> String {
         let view = view! {
             <Router><QuickResultView record=quick_record(estimate, false)/></Router>
         };
+        let mut html = String::new();
+        view.to_html_with_buf(
+            &mut html,
+            &mut Position::FirstChild,
+            true,
+            false,
+            Vec::new(),
+        );
+        html
+    })
+}
+
+fn render_detailed_mode_notice() -> String {
+    Owner::new().with(move || {
+        provide_context(RequestUrl::new("/plans/42/quick/production"));
+        let mut record = quick_record(calc::QuickEstimate::default(), false);
+        record.forecast_mode = calc::ForecastMode::Detailed;
+        let view = view! { <Router><DetailedModeActiveNotice record/></Router> };
         let mut html = String::new();
         view.to_html_with_buf(
             &mut html,
@@ -255,6 +274,10 @@ fn demonstration_is_an_editable_browser_surface_not_a_persisting_form() {
     assert!(html.contains("คืนค่าตัวอย่าง"));
     assert!(html.contains("สร้างฤดูกาลของฉัน"));
     assert!(!html.contains("<form"));
+    assert!(html.contains("ผลผลิตต่อต้น"));
+    assert!(html.contains("ค่านี้เปลี่ยนผลผลิต รายได้ และกำไร"));
+    assert!(html.contains("aria-describedby=\"demo-fruits-help\""));
+    assert!(html.contains("id=\"demo-fruits-help\""));
 }
 
 #[test]
@@ -404,6 +427,13 @@ fn detailed_hub_moves_targets_under_an_explicit_advanced_area() {
     assert!(html.contains("ค่าที่ตั้งไว้เดิมยังอยู่และแก้ได้ที่นี่"));
     assert!(html.contains("/plans/42/targets"));
     assert_eq!(html.matches("ตัวเลขเปรียบเทียบที่เจ้าของกำหนด").count(), 0);
+    assert!(html.contains("ขั้นที่แนะนำ"));
+    assert!(html.contains("ดูและแก้ข้อมูลทั้งหมด"));
+    assert!(html.contains("พอคำนวณรายได้แล้ว"));
+    assert!(html.contains("พอคำนวณค่าใช้จ่ายตามการผลิตแล้ว"));
+    assert!(html.contains("พอคำนวณค่าใช้จ่ายประจำแล้ว"));
+    assert!(!html.contains(">ครบ<"));
+    assert!(!html.contains("ยังไม่ครบ"));
 }
 
 #[test]
@@ -480,6 +510,10 @@ fn quick_mode_renders_one_ordered_question_per_page() {
         assert!(html.contains(question), "{step}");
         assert!(html.contains(field_label), "{step}");
         assert_eq!(html.matches("name=\"value\"").count(), 1, "{step}");
+        assert!(
+            html.contains("aria-describedby=\"quick-value-help\""),
+            "{step}"
+        );
         assert!(html.contains(back), "{step}");
         assert!(!html.contains("กำไรโดยประมาณ"), "{step}");
     }
@@ -548,4 +582,13 @@ fn detailed_section_is_not_silently_used_while_quick_mode_is_active() {
     assert!(html.contains("ประมาณการเร็วกำลังใช้งาน"));
     assert!(html.contains("ไม่สลับไปใช้ข้อมูลละเอียดโดยอัตโนมัติ"));
     assert!(!html.contains("บันทึกส่วนนี้"));
+}
+
+#[test]
+fn quick_url_truthfully_names_when_detailed_mode_is_active() {
+    let html = render_detailed_mode_notice();
+    assert!(html.contains("แผนละเอียดกำลังใช้งาน"));
+    assert!(html.contains("ค่าประมาณการเร็วเดิมยังเก็บไว้"));
+    assert!(html.contains("กลับไปดูและแก้แผนละเอียด"));
+    assert!(!html.contains("ประมาณการเร็วกำลังใช้งาน"));
 }

@@ -51,11 +51,12 @@ fn HomePage() -> impl IntoView {
     view! {
         <section class="card">
             <p class="eyebrow">"DAC2"</p>
-            <h1>"เริ่มใช้งาน"</h1>
-            <p>"สมัครด้วยอีเมลและรหัสผ่าน หรือเข้าสู่ระบบ"</p>
+            <h1>"เห็นรายได้ ต้นทุน และกำไรของสวนในฤดูกาลเดียว"</h1>
+            <p>"เริ่มจากตัวเลขคร่าว ๆ 3 ค่า แล้วค่อยเพิ่มรายละเอียดเมื่อพร้อม ระบบจะบอกว่าข้อมูลแต่ละส่วนช่วยคำนวณอะไร"</p>
             <div class="actions">
-                <A attr:class="button primary" href="/register">"สมัครใช้งาน"</A>
+                <A attr:class="button primary" href="/register">"เริ่มทำบัญชีสวน"</A>
                 <A attr:class="button secondary" href="/login">"เข้าสู่ระบบ"</A>
+                <A attr:class="button secondary" href="/demo">"ลองดูตัวอย่างโดยไม่บันทึก"</A>
             </div>
         </section>
     }
@@ -70,15 +71,17 @@ fn RegisterPage() -> impl IntoView {
         <section class="card auth-card">
             <p class="eyebrow">"สร้างบัญชี"</p>
             <h1>"สมัครใช้งาน"</h1>
-            <p>"กรอกเพียงอีเมลและรหัสผ่าน แล้วเปิด Mailpit เพื่อยืนยันอีเมล"</p>
+            <p>"กรอกอีเมลและตั้งรหัสผ่าน จากนั้นเปิดลิงก์ยืนยันที่ส่งไปทางอีเมล"</p>
             <ActionForm action=register>
-                <FormField label="อีเมล" name="email" input_type="email" autocomplete="email"/>
+                <FormField id="register-email" label="อีเมล" name="email" input_type="email" autocomplete="email" hint="ใช้รับลิงก์ยืนยันและกู้รหัสผ่าน"/>
                 <FormField
-                    label="รหัสผ่าน (อย่างน้อย 15 ตัวอักษร)"
+                    id="register-password"
+                    label="รหัสผ่าน"
                     name="password"
                     input_type="password"
                     autocomplete="new-password"
                     minlength="15"
+                    hint="ใช้อย่างน้อย 15 ตัวอักษร"
                 />
                 <button class="primary" type="submit">"สมัครใช้งาน"</button>
             </ActionForm>
@@ -87,7 +90,7 @@ fn RegisterPage() -> impl IntoView {
             <details>
                 <summary>"ยังไม่ได้รับลิงก์ยืนยัน"</summary>
                 <ActionForm action=resend>
-                    <FormField label="อีเมล" name="email" input_type="email" autocomplete="email"/>
+                    <FormField id="resend-email" label="อีเมลที่ใช้สมัคร" name="email" input_type="email" autocomplete="email" hint="ระบบจะส่งลิงก์ยืนยันฉบับใหม่ ถ้ามีบัญชีนี้"/>
                     <button class="secondary" type="submit">"ส่งลิงก์ใหม่"</button>
                 </ActionForm>
                 <ActionMessage action=resend/>
@@ -111,12 +114,14 @@ fn LoginPage() -> impl IntoView {
                 <p class="form-message">"ยืนยันอีเมลเรียบร้อยแล้ว เข้าสู่ระบบได้เลย"</p>
             </Show>
             <ActionForm action=action>
-                <FormField label="อีเมล" name="email" input_type="email" autocomplete="email"/>
+                <FormField id="login-email" label="อีเมล" name="email" input_type="email" autocomplete="email" hint="ใช้อีเมลเดียวกับที่สมัครบัญชี"/>
                 <FormField
+                    id="login-password"
                     label="รหัสผ่าน"
                     name="password"
                     input_type="password"
                     autocomplete="current-password"
+                    hint="รหัสผ่านที่ตั้งไว้ตอนสมัคร"
                 />
                 <button class="primary" type="submit">"เข้าสู่ระบบ"</button>
             </ActionForm>
@@ -139,7 +144,7 @@ fn VerifyEmailPage() -> impl IntoView {
             <p class="eyebrow">"ยืนยันอีเมล"</p>
             <h1>"เปิดใช้งานบัญชี"</h1>
             <Show when=invalid>
-                <p class="form-message">"ลิงก์ยืนยันไม่ถูกต้อง หมดอายุ หรือถูกใช้ไปแล้ว"</p>
+                <p class="form-message">"ลิงก์นี้ใช้ไม่ได้ อาจหมดอายุหรือเคยใช้แล้ว กลับไปหน้าสมัครเพื่อขอลิงก์ใหม่ได้"</p>
             </Show>
             <p>"กดปุ่มด้านล่างเพื่อใช้ลิงก์ยืนยันนี้หนึ่งครั้ง"</p>
             <ActionForm action=action>
@@ -159,9 +164,9 @@ fn ForgotPasswordPage() -> impl IntoView {
         <section class="card auth-card">
             <p class="eyebrow">"กู้บัญชี"</p>
             <h1>"ลืมรหัสผ่าน"</h1>
-            <p>"ระบบจะส่งลิงก์ตั้งรหัสผ่านใหม่ไปยัง Mailpit หากมีบัญชีนี้"</p>
+            <p>"กรอกอีเมลที่ใช้สมัคร ระบบจะส่งลิงก์ตั้งรหัสผ่านใหม่ให้หากมีบัญชีนี้"</p>
             <ActionForm action=action>
-                <FormField label="อีเมล" name="email" input_type="email" autocomplete="email"/>
+                <FormField id="forgot-email" label="อีเมลที่ใช้สมัคร" name="email" input_type="email" autocomplete="email" hint="เพื่อความเป็นส่วนตัว ระบบจะแสดงคำตอบเหมือนกันไม่ว่าจะพบบัญชีหรือไม่"/>
                 <button class="primary" type="submit">"ขอลิงก์ตั้งรหัสผ่านใหม่"</button>
             </ActionForm>
             <ActionMessage action=action/>
@@ -183,11 +188,13 @@ fn ResetPasswordPage() -> impl IntoView {
             <ActionForm action=action>
                 <input type="hidden" name="token" value=token/>
                 <FormField
-                    label="รหัสผ่านใหม่ (อย่างน้อย 15 ตัวอักษร)"
+                    id="reset-password"
+                    label="รหัสผ่านใหม่"
                     name="new_password"
                     input_type="password"
                     autocomplete="new-password"
                     minlength="15"
+                    hint="ใช้อย่างน้อย 15 ตัวอักษร แล้วเข้าสู่ระบบด้วยรหัสใหม่นี้"
                 />
                 <button class="primary" type="submit">"บันทึกรหัสผ่านใหม่"</button>
             </ActionForm>
@@ -199,23 +206,29 @@ fn ResetPasswordPage() -> impl IntoView {
 
 #[component]
 fn FormField(
+    id: &'static str,
     label: &'static str,
     name: &'static str,
     input_type: &'static str,
     autocomplete: &'static str,
+    hint: &'static str,
     #[prop(default = "1")] minlength: &'static str,
 ) -> impl IntoView {
+    let help_id = format!("{id}-help");
     view! {
         <label>
             <span>{label}</span>
             <input
+                id=id
                 type=input_type
                 name=name
                 autocomplete=autocomplete
                 minlength=minlength
                 maxlength="1024"
+                aria-describedby=help_id.clone()
                 required
             />
+            <small id=help_id class="field-hint">{hint}</small>
         </label>
     }
 }
