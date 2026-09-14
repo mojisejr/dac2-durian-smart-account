@@ -15,6 +15,7 @@
 // of a non-negotiable rule is how the rule got broken in the first place.
 
 import { chromium } from 'playwright';
+import { execSync } from 'node:child_process';
 
 const BASE = process.env.DAC2_BASE_URL ?? 'http://127.0.0.1:3000';
 const MAILPIT = process.env.DAC2_MAILPIT_URL ?? 'http://127.0.0.1:8025';
@@ -346,6 +347,22 @@ async function navigateOrDiagnose(page, url, cookies, navigate) {
     }
     // Chrome's own timing says whether a stalled request ever reached the
     // wire: requestStart stays -1 while it waits in the connection queue.
+    // Server-side view of the same moment: which sockets the application
+    // holds on its port and in what TCP state, and what every database
+    // session is doing, so a stall names the layer that stopped answering.
+    const shell = (command) => {
+      try {
+        return execSync(command, { encoding: 'utf8', timeout: 10000 }).trim() || '(none)';
+      } catch (shellError) {
+        return `(failed: ${shellError.message.split('\n')[0]})`;
+      }
+    };
+    const port = new URL(BASE).port || '80';
+    const sockets = shell(`lsof -nP -iTCP:${port} 2>/dev/null | tail -n +2`);
+    const dbSessions = shell(
+      "docker compose exec -T database psql -U postgres -d dac2 -At -F ' | ' -c " +
+      "\"SELECT pid, state, wait_event_type, wait_event, now() - query_start AS age, left(regexp_replace(query, '\\s+', ' ', 'g'), 120) FROM pg_stat_activity WHERE datname = 'dac2' AND pid <> pg_backend_pid() ORDER BY query_start\"",
+    );
     const open = [...pending.entries()]
       .map(([request, at]) => {
         const timing = request.timing();
@@ -355,7 +372,11 @@ async function navigateOrDiagnose(page, url, cookies, navigate) {
         return `${request.method()} ${request.url()} open ${Date.now() - at}ms, ${wire}`;
       })
       .join('; ');
-    throw new Error(`${error.message}\n  ${direct}\n  browser requests still open: ${open || 'none'}`);
+    throw new Error(
+      `${error.message}\n  ${direct}\n  browser requests still open: ${open || 'none'}` +
+      `\n  application sockets on :${port}:\n${sockets.replace(/^/gm, '    ')}` +
+      `\n  database sessions:\n${dbSessions.replace(/^/gm, '    ')}`,
+    );
   } finally {
     page.off('request', onRequest);
     page.off('requestfinished', onDone);
@@ -369,7 +390,7 @@ async function signIn(browser) {
   const context = await browser.newContext({ viewport: { width: 412, height: 915 } });
   const page = await context.newPage();
 
-  await page.goto(`${BASE}/register`);
+  await navigateOrDiagnose(page, `${BASE}/register`, null, () => page.goto(`${BASE}/register`));
   await page.fill('input[name="email"]', email);
   await page.fill('input[name="password"]', password);
   await page.click('button[type="submit"]');
@@ -381,9 +402,9 @@ async function signIn(browser) {
   const message = await (await fetch(`${MAILPIT}/api/v1/message/${id}`)).json();
   const link = (message.Text || '').match(/https?:\/\/[^\s]*verify-email\?token=[A-Za-z0-9]+/)?.[0];
   if (!link) throw new Error('the verification mail carries no link');
-  await page.goto(link);
+  await navigateOrDiagnose(page, link, null, () => page.goto(link));
 
-  await page.goto(`${BASE}/login`);
+  await navigateOrDiagnose(page, `${BASE}/login`, null, () => page.goto(`${BASE}/login`));
   await page.fill('input[name="email"]', email);
   await page.fill('input[name="password"]', password);
   await page.click('button[type="submit"]');
@@ -391,15 +412,15 @@ async function signIn(browser) {
 
   // The workbook sample is a browser-only sandbox. Editing and leaving it must
   // not create a season row.
-  await page.goto(`${BASE}/demo`);
+  await navigateOrDiagnose(page, `${BASE}/demo`, null, () => page.goto(`${BASE}/demo`));
   await page.getByLabel('ราคาเกรดแรก').fill('120');
   await page.click('button:has-text("คืนค่าตัวอย่าง")');
-  await page.goto(`${BASE}/plans`);
+  await navigateOrDiagnose(page, `${BASE}/plans`, null, () => page.goto(`${BASE}/plans`));
   if (await page.locator('.plan-list-item').count()) {
     throw new Error('the browser-only demonstration created a stored season');
   }
 
-  await page.goto(`${BASE}/plans/new`);
+  await navigateOrDiagnose(page, `${BASE}/plans/new`, null, () => page.goto(`${BASE}/plans/new`));
   await page.fill('input[name="season_year"]', '2569');
   await page.fill('input[name="name"]', 'สวนรวมสำหรับ responsive proof');
   await page.fill('textarea[name="note"]', 'ข้อมูลทดสอบที่สคริปต์ลบพร้อมบัญชี');
@@ -417,7 +438,7 @@ async function signIn(browser) {
 
   // Leaving after one answer and returning through the hub must resume at the
   // first unanswered question rather than restarting or inventing a result.
-  await page.goto(`${BASE}/plans/${planId}`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${planId}`, null, () => page.goto(`${BASE}/plans/${planId}`));
   await page.click('a:has-text("ทำประมาณการต่อ")');
   await page.waitForURL(new RegExp(`/plans/${planId}/quick/price$`));
   await page.fill('input[name="value"]', '80');
@@ -441,7 +462,7 @@ async function signIn(browser) {
 
   // Save a reviewable actual draft. Leaving review must keep the season open
   // and the draft available when the owner returns.
-  await page.goto(`${BASE}/plans/${planId}/close`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${planId}/close`, null, () => page.goto(`${BASE}/plans/${planId}/close`));
   await page.fill('input[name="sellable_yield_kg"]', '18000');
   await page.fill('input[name="revenue"]', '1530000');
   await page.fill('input[name="total_cost"]', '990000');
@@ -456,12 +477,12 @@ async function signIn(browser) {
     .catch(() => {
       throw new Error('leaving actual review closed the season unexpectedly');
     });
-  await page.goto(`${BASE}/plans/${planId}/close/review`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${planId}/close/review`, null, () => page.goto(`${BASE}/plans/${planId}/close/review`));
 
   // Keep a separate detailed-mode season in the same account so this proof
   // covers the new quick surfaces without dropping the pre-existing detailed
   // dashboard, analysis, and long-form input regression.
-  await page.goto(`${BASE}/plans/new`);
+  await navigateOrDiagnose(page, `${BASE}/plans/new`, null, () => page.goto(`${BASE}/plans/new`));
   await page.fill('input[name="season_year"]', '2570');
   await page.fill('input[name="name"]', 'สวนทดสอบละเอียด');
   await page.click('button:has-text("สร้างฤดูกาล")');
@@ -471,7 +492,7 @@ async function signIn(browser) {
   });
   const detailedPlanId = page.url().match(/\/plans\/(\d+)\/quick\/production$/)?.[1];
   if (!detailedPlanId) throw new Error('the detailed proof season was not created');
-  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}`));
   const modeResponse = page.waitForResponse(
     (response) => response.request().method() === 'POST',
     { timeout: 10000 },
@@ -485,11 +506,11 @@ async function signIn(browser) {
   await page
     .getByRole('heading', { name: 'แผนละเอียด', exact: true })
     .waitFor({ state: 'visible', timeout: 10000 });
-  await page.goto(`${BASE}/plans/${detailedPlanId}/quick/production`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}/quick/production`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}/quick/production`));
   await page
     .getByRole('heading', { name: 'แผนละเอียดกำลังใช้งาน', exact: true })
     .waitFor({ state: 'visible', timeout: 10000 });
-  await page.goto(`${BASE}/plans/${planId}/production`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${planId}/production`, null, () => page.goto(`${BASE}/plans/${planId}/production`));
   await page
     .getByRole('heading', { name: 'ประมาณการเร็วกำลังใช้งาน', exact: true })
     .waitFor({ state: 'visible', timeout: 10000 });
@@ -499,7 +520,7 @@ async function signIn(browser) {
   // back must keep the saved selection, and the unselected branch's figure is
   // quoted beside the entry rather than applied.
   const production = `${BASE}/plans/${detailedPlanId}/production`;
-  await page.goto(production);
+  await navigateOrDiagnose(page, production, null, () => page.goto(production));
   await page.locator('#production-trees').waitFor({ state: 'visible', timeout: 10000 });
   if (!(await page.isChecked('input[name="yield-source"][value="derived"]'))) {
     throw new Error('a new detailed plan does not start on the derived yield branch');
@@ -552,7 +573,7 @@ async function signIn(browser) {
 
   // Interrupted resume: leave for the market page, answer the buyer question,
   // and come back through browser history without losing either page.
-  await page.goto(`${BASE}/plans/${detailedPlanId}/market`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}/market`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}/market`));
   await page.locator('#market-buyer-committed-kg').waitFor({ state: 'visible', timeout: 10000 });
   await page.fill('#market-buyer-committed-kg', '25000');
   const marketSave = page.waitForResponse(
@@ -564,18 +585,18 @@ async function signIn(browser) {
     throw new Error('saving the market section returned a failing HTTP status');
   }
   await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
-  await page.goto(production);
+  await navigateOrDiagnose(page, production, null, () => page.goto(production));
   await page.locator('#production-sellable-yield').waitFor({ state: 'visible', timeout: 10000 });
   await page.goBack({ waitUntil: 'domcontentloaded' });
   // A restored history entry keeps the blur-formatted text; a re-rendered
   // one shows the stored figure. Either is the same saved answer. Owner pages
   // are served no-store, so back never replays the page from before the save.
   await waitForHydratedValue(page, '#market-buyer-committed-kg', (v) => v === '25000' || v === '25,000', 'browser back lost the saved buyer quantity');
-  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}`));
   await page.getByText('พร้อมเทียบยอดผู้ซื้อกับผลผลิต').waitFor({ timeout: 10000 });
 
   // Grade entry in kilograms converts visibly against the saved total.
-  await page.goto(production);
+  await navigateOrDiagnose(page, production, null, () => page.goto(production));
   await waitForHydratedValue(page, '#production-sellable-yield', (v) => v === '18000', 'the saved sellable kilograms did not hydrate before grade entry');
   await page.check('input[name="price-source"][value="by_grade"]');
   await page.click('button:has-text("+ เพิ่มเกรด")');
@@ -594,7 +615,7 @@ async function signIn(browser) {
   // it, and confirming a section empty changes the result from unavailable to
   // a figure.
   const expenses = `${BASE}/plans/${detailedPlanId}/expenses`;
-  await page.goto(expenses);
+  await navigateOrDiagnose(page, expenses, null, () => page.goto(expenses));
   await page.click('button:has-text("+ จดค่าใช้จ่ายที่จำได้")');
   await page.getByLabel('ค่าอะไร').first().fill('จ่ายคนขับรถเดือนสาม');
   await page.getByLabel('เท่าไร').first().fill('50000');
@@ -603,10 +624,10 @@ async function signIn(browser) {
   await page.click('button:has-text("บันทึกส่วนนี้")');
   if (!(await captureSave).ok()) throw new Error('saving a captured expense returned a failing HTTP status');
   await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
-  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}`));
   await page.getByText('มี 1 รายการยังไม่ได้บอกว่าเป็นแบบไหน').waitFor({ timeout: 10000 });
   await page.getByRole('heading', { name: 'บอกว่าค่าใช้จ่ายที่จดไว้เป็นแบบไหน', exact: true }).waitFor({ timeout: 10000 });
-  await page.goto(expenses);
+  await navigateOrDiagnose(page, expenses, null, () => page.goto(expenses));
   await waitForHydratedValue(page, '.repeat-row input[type="text"]', (v) => v === 'จ่ายคนขับรถเดือนสาม', 'the captured expense did not survive leaving and returning');
   await page.click('button:has-text("บอกว่าเป็นแบบไหน")');
   await page.check('input[name="classify-grows"][value="yes"]');
@@ -619,7 +640,7 @@ async function signIn(browser) {
   await page.click('button:has-text("บันทึกส่วนนี้")');
   if (!(await classifySave).ok()) throw new Error('saving a classified expense returned a failing HTTP status');
   await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
-  await page.goto(`${BASE}/plans/${detailedPlanId}/variable-costs`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}/variable-costs`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}/variable-costs`));
   await page.getByLabel('ยอดรวมทั้งฤดู').waitFor({ state: 'visible', timeout: 10000 });
   await waitForHydratedValue(page, '.repeat-row input[inputmode="decimal"]', (v) => v === '50000' || v === '50,000', 'the classified expense lost its amount on the way to variable costs');
   if (await page.locator('input[name="variable-cost-state"]').count()) {
@@ -640,7 +661,7 @@ async function signIn(browser) {
 
   // With variable costs entered and fixed costs unknown the profit is still
   // unavailable; confirming the fixed section empty makes it a figure.
-  await page.goto(`${BASE}/plans/${detailedPlanId}/fixed-costs`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}/fixed-costs`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}/fixed-costs`));
   await page.locator('input[name="fixed-cost-state"][value="confirmed_none"]').waitFor({ state: 'visible', timeout: 10000 });
   await page.getByText('ยังคำนวณกำไรสุทธิไม่ได้').waitFor({ timeout: 5000 });
   await page.check('input[name="fixed-cost-state"][value="confirmed_none"]');
@@ -651,12 +672,12 @@ async function signIn(browser) {
   await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
   await reloadOrDiagnose(page);
   await waitForHydratedValue(page, 'input[name="fixed-cost-state"][value="confirmed_none"]', (v) => v === true, 'refresh lost the confirmed-none answer');
-  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}`));
   await page.getByText('ยืนยันแล้วว่าไม่มีค่าใช้จ่ายส่วนนี้').waitFor({ timeout: 10000 });
 
   // A separate season reaches final comparison so the responsive matrix can
   // measure both the editable draft and immutable result states.
-  await page.goto(`${BASE}/plans/new`);
+  await navigateOrDiagnose(page, `${BASE}/plans/new`, null, () => page.goto(`${BASE}/plans/new`));
   await page.fill('input[name="season_year"]', '2571');
   await page.fill('input[name="name"]', 'สวนทดสอบผลจริง');
   await page.click('button:has-text("สร้างฤดูกาล")');
@@ -673,7 +694,7 @@ async function signIn(browser) {
     await page.click(`button:has-text("${action}")`);
   }
   await page.waitForURL(new RegExp(`/plans/${comparisonPlanId}/quick/result$`));
-  await page.goto(`${BASE}/plans/${comparisonPlanId}/close`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${comparisonPlanId}/close`, null, () => page.goto(`${BASE}/plans/${comparisonPlanId}/close`));
   await page.fill('input[name="sellable_yield_kg"]', '18000');
   await page.fill('input[name="revenue"]', '1530000');
   await page.fill('input[name="total_cost"]', '990000');
@@ -699,7 +720,7 @@ async function signIn(browser) {
   // Finalize the earlier 2569 draft with different values. History must then
   // compare the 2571 actual directly with 2569, name the skipped year, and use
   // the fixed transparent percentage rule rather than inventing 2570 data.
-  await page.goto(`${BASE}/plans/${planId}/close`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${planId}/close`, null, () => page.goto(`${BASE}/plans/${planId}/close`));
   await page.fill('input[name="sellable_yield_kg"]', '16000');
   await page.fill('input[name="revenue"]', '1400000');
   await page.fill('input[name="total_cost"]', '950000');
@@ -709,7 +730,7 @@ async function signIn(browser) {
   await page.click('button:has-text("ยืนยันผลจริงและปิดฤดูกาล")');
   await page.waitForURL(new RegExp(`/plans/${planId}/comparison$`));
 
-  await page.goto(`${BASE}/history`);
+  await navigateOrDiagnose(page, `${BASE}/history`, null, () => page.goto(`${BASE}/history`));
   await page
     .getByText('ผลผลิตที่ขายได้ สูงกว่าฤดูกาลก่อน 12.50%', { exact: true })
     .waitFor({ state: 'visible', timeout: 10000 });
@@ -719,7 +740,7 @@ async function signIn(browser) {
 
   // Targets remain available, but only behind the explicitly optional
   // advanced area. Saving one and returning must retain the owner's value.
-  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}`));
   const advancedTarget = page.locator('a:has-text("เป้าหมาย KPI")');
   if (await advancedTarget.isVisible()) {
     throw new Error('advanced targets appeared in the main journey before expansion');
@@ -731,7 +752,7 @@ async function signIn(browser) {
   await yieldTarget.fill('2200');
   await page.click('button:has-text("บันทึกส่วนนี้")');
   await page.getByText('บันทึกแล้ว', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
-  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}`));
   await page.click('summary:has-text("การวางแผนขั้นสูง (ไม่บังคับ)")');
   await page.click('a:has-text("เป้าหมาย KPI")');
   await page.waitForURL(new RegExp(`/plans/${detailedPlanId}/targets$`));
@@ -741,7 +762,7 @@ async function signIn(browser) {
 
   // An asset is entered once, starts excluded, and affects only a season the
   // owner explicitly includes it in. Starting capital stays visibly separate.
-  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}`));
   await page.click('summary:has-text("การวางแผนขั้นสูง (ไม่บังคับ)")');
   await page.click('a:has-text("ของที่ใช้หลายปี")');
   await page.waitForURL(new RegExp(`/plans/${detailedPlanId}/assets$`));
@@ -776,7 +797,7 @@ async function signIn(browser) {
   // Including an asset must be visible where the owner would look for its
   // cost: the fixed-costs page lists it as a read-only row in its own group
   // under the rows the owner types, with one total, and the hub names it too.
-  await page.goto(`${BASE}/plans/${detailedPlanId}/fixed-costs`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}/fixed-costs`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}/fixed-costs`));
   const manualGroup = page.locator('.cost-group-manual');
   const assetGroup = page.locator('.cost-group-assets');
   const fixedTotal = page.locator('.fixed-cost-total');
@@ -800,26 +821,26 @@ async function signIn(browser) {
   await page.locator('label:has(input[name="fixed-cost-state"][value="confirmed_none"])').click();
   await fixedTotal.locator('.cost-total-amount', { hasText: '20,000.00 บาท/ปี' }).waitFor({ timeout: 5000 });
   await page.getByText('กำไรสุทธิโดยประมาณ', { exact: false }).waitFor({ timeout: 5000 });
-  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}`));
   await page.getByText(/ค่าเสื่อมของที่เลือกไว้รวมแล้ว|ยืนยันแล้วว่ามีเฉพาะค่าเสื่อมของที่เลือกไว้|พอคำนวณค่าใช้จ่ายประจำแล้ว/).first().waitFor({ timeout: 10000 });
 
   // The same owner asset appears in another season without re-entry, but is
   // excluded there until the owner makes a second explicit choice.
-  await page.goto(`${BASE}/plans/new`);
+  await navigateOrDiagnose(page, `${BASE}/plans/new`, null, () => page.goto(`${BASE}/plans/new`));
   await page.fill('input[name="season_year"]', '2572');
   await page.fill('input[name="name"]', 'สวนทดสอบสินทรัพย์เปิด');
   await page.click('button:has-text("สร้างฤดูกาล")');
   await page.waitForURL(/\/plans\/\d+\/quick\/production$/);
   const assetOpenPlanId = page.url().match(/\/plans\/(\d+)\/quick\/production$/)?.[1];
   if (!assetOpenPlanId) throw new Error('the open asset proof season was not created');
-  await page.goto(`${BASE}/plans/${assetOpenPlanId}`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${assetOpenPlanId}`, null, () => page.goto(`${BASE}/plans/${assetOpenPlanId}`));
   await submitAndReload(page, page.locator('button:has-text("เปลี่ยนเป็นแผนละเอียด")'), 'asset proof mode switch');
-  await page.goto(`${BASE}/plans/${assetOpenPlanId}/assets`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${assetOpenPlanId}/assets`, null, () => page.goto(`${BASE}/plans/${assetOpenPlanId}/assets`));
   await page.getByText('ระบบน้ำกลางสวน', { exact: true }).waitFor({ state: 'visible' });
   await page.getByText('ยังไม่รวม', { exact: true }).waitFor({ state: 'visible' });
 
   // Keep an editable actual draft for the close and review layout matrix.
-  await page.goto(`${BASE}/plans/${assetOpenPlanId}/close`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${assetOpenPlanId}/close`, null, () => page.goto(`${BASE}/plans/${assetOpenPlanId}/close`));
   await page.fill('input[name="sellable_yield_kg"]', '17000');
   await page.fill('input[name="revenue"]', '1450000');
   await page.fill('input[name="total_cost"]', '910000');
@@ -829,7 +850,7 @@ async function signIn(browser) {
 
   // Closing freezes the selected facts and contribution. The closed asset page
   // must remain readable and expose no edit or selection controls.
-  await page.goto(`${BASE}/plans/${detailedPlanId}/close`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}/close`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}/close`));
   await page.fill('input[name="sellable_yield_kg"]', '18000');
   await page.fill('input[name="revenue"]', '1530000');
   await page.fill('input[name="total_cost"]', '990000');
@@ -837,7 +858,7 @@ async function signIn(browser) {
   await page.waitForURL(new RegExp(`/plans/${detailedPlanId}/close/review$`));
   await page.click('button:has-text("ยืนยันผลจริงและปิดฤดูกาล")');
   await page.waitForURL(new RegExp(`/plans/${detailedPlanId}/comparison$`));
-  await page.goto(`${BASE}/plans/${detailedPlanId}/assets`);
+  await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}/assets`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}/assets`));
   await page.getByText('ข้อมูลนี้ถูกเก็บพร้อมตอนปิดฤดู · แก้ไขไม่ได้', { exact: true }).waitFor({ state: 'visible' });
   if (await page.locator('button:has-text("เอาออกจากฤดูนี้")').count()) {
     throw new Error('closed asset snapshot still exposed a selection control');
