@@ -38,27 +38,36 @@ async fn serve() -> Result<(), Box<dyn std::error::Error>> {
     use tower_sessions_sqlx_store::PostgresStore;
     use web::app::{App, shell};
 
-    let database_url = std::env::var("DATABASE_URL")?;
+    // Everything the environment must supply is read and refused by name
+    // before the first connection, so a misconfigured host fails at start
+    // with the variable's name and never with its value.
+    let env = |name: &str| std::env::var(name).ok();
+    let database_url = web::settings::required("DATABASE_URL", env("DATABASE_URL"))?;
+    let session_key = web::settings::required("SESSION_KEY", env("SESSION_KEY"))?;
+    let cookie_secure = web::settings::flag("COOKIE_SECURE", env("COOKIE_SECURE"))?;
+    let mail = web::mail::MailConfig::try_from_env()?;
+    web::settings::https_requires_secure_cookie(&mail.base_url, cookie_secure)?;
+    let gate = web::gate::GateConfig::from_lookup(env)?;
+    let pilot_notice = web::settings::flag("PILOT_NOTICE", env("PILOT_NOTICE"))?;
+    web::settings::set_pilot_notice(pilot_notice);
+
     let pool = store::connect(&database_url).await?;
     let row_count = store::migrate_and_probe(&pool).await?;
     println!("database stack probe complete: {row_count} rows");
 
     let session_store = PostgresStore::new(pool.clone());
     session_store.migrate().await?;
-    let session_key = std::env::var("SESSION_KEY")?;
     let session_key = tower_sessions::cookie::Key::try_from(session_key.as_bytes())
         .map_err(|error| format!("SESSION_KEY must contain at least 64 bytes: {error}"))?;
     // Secure stays off for the localhost workflow, where there is no TLS to
-    // carry the cookie; a deployment behind HTTPS sets COOKIE_SECURE=true.
-    let cookie_secure = web::settings::flag("COOKIE_SECURE", std::env::var("COOKIE_SECURE").ok())?;
+    // carry the cookie; a deployment behind HTTPS sets COOKIE_SECURE=true and
+    // the check above refuses an https base URL without it.
     let session_layer = SessionManagerLayer::new(session_store)
         .with_http_only(true)
         .with_same_site(tower_sessions::cookie::SameSite::Lax)
         .with_secure(cookie_secure)
         .with_signed(session_key);
-    // A mail misconfiguration should stop the server here, not fail silently
-    // at the first registration. Only the host, port, and mode are printed.
-    let mail = web::mail::MailConfig::try_from_env()?;
+    // Only the relay's host, port, and mode are printed, never the login.
     println!(
         "mail relay {}:{} ({})",
         mail.smtp_host,
@@ -68,6 +77,22 @@ async fn serve() -> Result<(), Box<dyn std::error::Error>> {
             web::mail::SmtpSecurity::StartTls { .. } => "STARTTLS with login",
         }
     );
+
+    println!(
+        "gate: account {}/{}s, login {}/{}s, client address from {}",
+        gate.account.attempts,
+        gate.account.window.as_secs(),
+        gate.login.attempts,
+        gate.login.window.as_secs(),
+        match gate.address_source {
+            web::gate::AddressSource::Peer => "peer",
+            web::gate::AddressSource::ForwardedFor => "x-forwarded-for",
+        }
+    );
+    if pilot_notice {
+        println!("pilot notice shown");
+    }
+    let limiter = std::sync::Arc::new(web::gate::Limiter::new(gate));
 
     let auth_backend = store::AuthBackend::new(pool);
     let auth_layer = AuthManagerLayerBuilder::new(auth_backend, session_layer).build();
@@ -93,11 +118,21 @@ async fn serve() -> Result<(), Box<dyn std::error::Error>> {
         .fallback(leptos_axum::file_and_error_handler(shell))
         .route_layer(middleware::from_fn(web::auth::require_login))
         .layer(auth_layer)
+        // The gate sits outside the session so a refused request never
+        // touches the database.
+        .layer(middleware::from_fn_with_state(
+            limiter,
+            web::gate::limit_requests,
+        ))
         .with_state(options);
 
     let listener = tokio::net::TcpListener::bind(address).await?;
     println!("listening on http://{address}");
-    axum::serve(listener, app.into_make_service()).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 

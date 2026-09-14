@@ -18,6 +18,9 @@ pub mod plans;
 pub mod plan_ui;
 
 #[cfg(feature = "ssr")]
+pub mod gate;
+
+#[cfg(feature = "ssr")]
 pub mod mail;
 
 #[cfg(feature = "ssr")]

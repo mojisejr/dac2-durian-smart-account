@@ -18,7 +18,12 @@ fi
 : "${DATABASE_URL:=postgres://postgres@127.0.0.1:54329/dac2}"
 : "${SESSION_KEY:=$(head -c 96 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
 : "${APP_BASE_URL:=http://127.0.0.1:3000}"
-export DATABASE_URL SESSION_KEY APP_BASE_URL
+# The proof registers and logs in on every run; a second run inside the
+# default account window would be refused, so the budgets are widened here.
+# The default limits are proved by crates/web/tests/gate_http.rs.
+: "${RATE_LIMIT_ACCOUNT:=60/3600}"
+: "${RATE_LIMIT_LOGIN:=60/300}"
+export DATABASE_URL SESSION_KEY APP_BASE_URL RATE_LIMIT_ACCOUNT RATE_LIMIT_LOGIN
 
 docker compose up -d --wait
 cargo sqlx migrate run

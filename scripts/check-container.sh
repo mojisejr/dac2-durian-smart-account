@@ -27,6 +27,11 @@ fi
 : "${SESSION_KEY:=$(head -c 96 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
 : "${ROUNDS:=40}"
 : "${LOAD:=3}"
+# The proof registers twice per run; a rerun inside the default account
+# window would be refused, so the budgets are widened here. The default
+# limits are proved by crates/web/tests/gate_http.rs.
+: "${RATE_LIMIT_ACCOUNT:=60/3600}"
+: "${RATE_LIMIT_LOGIN:=60/300}"
 container="dac2-container-proof"
 base_url="http://127.0.0.1:${PORT}"
 
@@ -55,6 +60,9 @@ docker run -d --name "$container" -p "127.0.0.1:${PORT}:3000" \
   -e SESSION_KEY="$SESSION_KEY" \
   -e SMTP_HOST=host.docker.internal \
   -e APP_BASE_URL="$base_url" \
+  -e PILOT_NOTICE=true \
+  -e RATE_LIMIT_ACCOUNT="$RATE_LIMIT_ACCOUNT" \
+  -e RATE_LIMIT_LOGIN="$RATE_LIMIT_LOGIN" \
   "$IMAGE" >/dev/null
 
 for _ in $(seq 1 60); do
