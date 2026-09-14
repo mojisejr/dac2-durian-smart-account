@@ -12,8 +12,8 @@ use crate::{
     analysis_ui::{PlanAnalysisView, PlanDashboardView},
     auth::{Logout, current_user_email},
     plan_form::{
-        ExpenseClassification, FixedCostForm, GradeEntry, GradeForm, PlanForm, ReadinessTone,
-        UnclassifiedExpenseForm, VariableCostForm,
+        DecisionReadiness, DecisionState, ExpenseClassification, FixedCostForm, GradeEntry,
+        GradeForm, PlanForm, ReadinessTone, UnclassifiedExpenseForm, VariableCostForm,
     },
     plans::{
         CreateSeason, FinalizeActual, PlanRecord, SaveActualDraft, SavePlan, SaveQuickStep,
@@ -337,7 +337,7 @@ fn TrendCue(
     current_year: Option<i32>,
     previous_year: Option<i32>,
 ) -> impl IntoView {
-    let (label, unit) = comparison_metric_label(trend.metric);
+    let (label, _, unit) = comparison_metric_label(trend.metric);
     let years = format!(
         "ฤดูกาล {} → {}",
         previous_year.map_or_else(|| "ก่อนหน้า".into(), |year| year.to_string()),
@@ -376,7 +376,7 @@ fn HistoryMetricRow(
     trends: Vec<calc::MetricTrend>,
     baseline: bool,
 ) -> impl IntoView {
-    let (label, unit) = comparison_metric_label(metric);
+    let (label, formal, unit) = comparison_metric_label(metric);
     let actual_value = history_metric_value(&actual, metric);
     let forecast_delta = forecast
         .iter()
@@ -399,12 +399,12 @@ fn HistoryMetricRow(
                 direction_word(delta, "ฤดูก่อน"),
                 money(delta.abs())
             ),
-            _ => "ยังเปรียบเทียบไม่ได้".into(),
+            _ => "เทียบไม่ได้ ไม่มีตัวเลขฤดูก่อน".into(),
         }
     } else {
-        "ยังเปรียบเทียบไม่ได้".into()
+        "เทียบไม่ได้ ไม่มีตัวเลขฤดูก่อน".into()
     };
-    view! { <tr><th scope="row">{label}</th><td>{actual_metric(actual_value, unit)}</td><td>{forecast_text}</td><td>{trend_text}</td></tr> }
+    view! { <tr><th scope="row">{label}<small class="formal-term">{formal}</small></th><td>{actual_metric(actual_value, unit)}</td><td>{forecast_text}</td><td>{trend_text}</td></tr> }
 }
 
 fn history_metric_value(
@@ -423,7 +423,7 @@ fn history_metric_value(
 
 fn delta_text(delta: Option<rust_decimal::Decimal>, unit: &str, comparison: &str) -> String {
     delta.map_or_else(
-        || "ยังเปรียบเทียบไม่ได้".into(),
+        || "เทียบไม่ได้ ตอนปิดยังไม่มีประมาณการตัวนี้".into(),
         |delta| {
             format!(
                 "{} {} {unit}",
@@ -571,9 +571,12 @@ pub fn DemoPage() -> impl IntoView {
                 </div>
             </section>
             <section aria-live="polite">
-                {move || form.get().to_plan().ok().map(|plan| view! {
-                    <crate::analysis_ui::DashboardFigures analysis=calc::analyze(&plan)/>
-                })}
+                {move || {
+                    let form = form.get();
+                    form.to_plan().ok().map(|plan| view! {
+                        <crate::analysis_ui::DashboardFigures id=None analysis=calc::analyze(&plan) decisions=form.decision_readiness(&[], None)/>
+                    })
+                }}
             </section>
         </section>
     }
@@ -592,7 +595,7 @@ pub fn PlanHubPage() -> impl IntoView {
         <Suspense fallback=move || view! { <p>"กำลังอ่านฤดูกาล…"</p> }>
             {move || record.get().map(|result| match result {
                 Ok(Some(record)) => view! { <PlanHub record/> }.into_any(),
-                _ => view! { <section class="card"><h1>"ไม่พบฤดูกาลนี้"</h1><A href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
+                _ => view! { <section class="card recovery-state"><h1>"ไม่พบฤดูกาลนี้"</h1><A attr:class="button secondary" href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
             })}
         </Suspense>
     }
@@ -610,6 +613,7 @@ pub fn PlanHub(record: PlanRecord) -> impl IntoView {
     let forecast_mode = record.forecast_mode;
     let quick_estimate = record.quick_estimate;
     let asset_allocations = record.asset_allocations;
+    let starting_capital = record.starting_capital;
 
     view! {
         <section class="page-stack plan-page">
@@ -648,7 +652,7 @@ pub fn PlanHub(record: PlanRecord) -> impl IntoView {
                     <QuickModeHub id estimate=quick_estimate.clone() closed/>
                 }.into_any(),
                 calc::ForecastMode::Detailed => view! {
-                    <DetailedModeHub id form=form.clone() closed asset_depreciation=included_asset_depreciation(&asset_allocations)/>
+                    <DetailedModeHub id form=form.clone() closed asset_depreciation=included_asset_depreciation(&asset_allocations) decisions=form.decision_readiness(&asset_allocations, starting_capital)/>
                 }.into_any(),
             }}
             // No live total here. The bar exists so a figure moves while the
@@ -726,8 +730,9 @@ pub fn ActualCloseView(record: PlanRecord) -> impl IntoView {
                 <div><p class="eyebrow">{season}</p><h1>"บันทึกผลจริง"</h1></div>
                 <A attr:class="icon-button" href=format!("/plans/{id}") attr:aria-label="ยกเลิกและกลับหน้าฤดูกาล">"×"</A>
             </header>
+            <ComparisonPreview record=record.clone()/>
             <section class="card actual-entry-card">
-                <p>"กรอกยอดรวมเมื่อจบฤดู ระบบจะให้ตรวจทานอีกครั้งก่อนปิดถาวร"</p>
+                <p>"กรอกยอดรวมเมื่อจบฤดู ระบบจะให้ตรวจทานอีกครั้งก่อนปิดถาวร ตัวเลขจริงสามตัวนี้พอสำหรับปิดฤดู ประมาณการที่ยังไม่ครบไม่ขวางการปิด"</p>
                 <ActionForm action=save>
                     <input type="hidden" name="id" value=id/>
                     <label><span>"ขายได้จริงทั้งหมดเท่าไร"</span><small class="formal-term">"ผลผลิตที่ขายได้จริง"</small><span class="input-with-unit"><input id="actual-yield" type="text" name="sellable_yield_kg" inputmode="decimal" value=decimal_input(draft.sellable_yield_kg) aria-describedby="actual-yield-help" required autofocus/><span class="unit">"กก."</span></span><small id="actual-yield-help" class="field-hint">"ดูจากยอดส่งขายหรือสรุปน้ำหนักหลังหักผลเสีย ใช้คำนวณราคาขายจริงต่อกิโลกรัม"</small></label>
@@ -796,13 +801,14 @@ pub fn ActualReviewView(record: PlanRecord) -> impl IntoView {
             <section class="card">
                 <h2>"ข้อมูลที่กำลังจะล็อก"</h2>
                 <dl class="season-metadata">
-                    <div><dt>"ผลผลิตที่ขายได้จริง"</dt><dd>{format!("{} กก.", money(actual.sellable_yield_kg.expect("complete actual yield")))}</dd></div>
-                    <div><dt>"รายได้จริง"</dt><dd>{format!("{} บาท", money(actual.revenue.expect("complete actual revenue")))}</dd></div>
-                    <div><dt>"ต้นทุนรวมจริง"</dt><dd>{format!("{} บาท", money(actual.total_cost.expect("complete actual cost")))}</dd></div>
-                    <div><dt>"กำไรหรือขาดทุนจริง"</dt><dd>{format!("{} บาท", money(analysis.metrics.profit.expect("complete actual profit")))}</dd></div>
+                    <div><dt>"ขายได้จริงกี่กิโล"<small class="formal-term">"ผลผลิตที่ขายได้จริง"</small></dt><dd>{format!("{} กก.", money(actual.sellable_yield_kg.expect("complete actual yield")))}</dd></div>
+                    <div><dt>"รับเงินจริงเท่าไร"<small class="formal-term">"รายได้จริง"</small></dt><dd>{format!("{} บาท", money(actual.revenue.expect("complete actual revenue")))}</dd></div>
+                    <div><dt>"จ่ายจริงทั้งหมดเท่าไร"<small class="formal-term">"ต้นทุนรวมจริง"</small></dt><dd>{format!("{} บาท", money(actual.total_cost.expect("complete actual cost")))}</dd></div>
+                    <div><dt>"เหลือหรือขาดจริงเท่าไร"<small class="formal-term">"กำไรหรือขาดทุนจริง"</small></dt><dd>{format!("{} บาท", money(analysis.metrics.profit.expect("complete actual profit")))}</dd></div>
                     <div><dt>"บันทึก"</dt><dd>{if actual.note.is_empty() { "—".into() } else { actual.note.clone() }}</dd></div>
                 </dl>
             </section>
+            <ComparisonPreview record=record.clone()/>
             <section class="card confirm-box">
                 <h2>"ยืนยันครั้งสุดท้าย"</h2>
                 <p>"เมื่อยืนยันแล้ว ผลจริงและประมาณการ ณ ตอนนี้จะถูกเก็บเป็นภาพนิ่ง ฤดูกาลนี้จะแก้ไขไม่ได้"</p>
@@ -860,14 +866,14 @@ pub fn ActualComparisonView(record: PlanRecord) -> impl IntoView {
             <header class="page-heading compact-heading"><div><p class="eyebrow">{season}</p><h1>"ผลจริงเทียบประมาณการ"</h1></div><A attr:class="icon-button" href=format!("/plans/{id}") attr:aria-label="กลับหน้าฤดูกาล">"×"</A></header>
             <section class="card actual-result-card">
                 <p class="eyebrow">"ผลจริง"</p>
-                <p class="result-label">{if actual_metrics.profit.is_some_and(|value| value >= rust_decimal::Decimal::ZERO) { "กำไรจริง" } else { "ขาดทุนจริง" }}</p>
+                <p class="result-label">{if actual_metrics.profit.is_some_and(|value| value >= rust_decimal::Decimal::ZERO) { "เหลือจริงหลังหักค่าใช้จ่าย" } else { "ขาดจริงหลังหักค่าใช้จ่าย" }}<small class="formal-term">{if actual_metrics.profit.is_some_and(|value| value >= rust_decimal::Decimal::ZERO) { "กำไรจริง" } else { "ขาดทุนจริง" }}</small></p>
                 <strong class="hero-value">{format!("{} บาท", money(actual_metrics.profit.unwrap_or_default().abs()))}</strong>
                 <dl class="season-metadata">
-                    <div><dt>"ผลผลิตที่ขายได้"</dt><dd>{actual_metric(actual_metrics.sellable_yield_kg, "กก.")}</dd></div>
-                    <div><dt>"รายได้"</dt><dd>{actual_metric(actual_metrics.revenue, "บาท")}</dd></div>
-                    <div><dt>"ต้นทุนรวม"</dt><dd>{actual_metric(actual_metrics.total_cost, "บาท")}</dd></div>
-                    <div><dt>"ราคาขายเฉลี่ย"</dt><dd>{actual_metric(actual_metrics.average_price_per_kg, "บาท/กก.")}</dd></div>
-                    <div><dt>"ต้นทุนต่อกิโลกรัม"</dt><dd>{actual_metric(actual_metrics.cost_per_kg, "บาท/กก.")}</dd></div>
+                    <div><dt>"กิโลที่ขายได้"<small class="formal-term">"ผลผลิตที่ขายได้"</small></dt><dd>{actual_metric(actual_metrics.sellable_yield_kg, "กก.")}</dd></div>
+                    <div><dt>"เงินที่ขายได้"<small class="formal-term">"รายได้"</small></dt><dd>{actual_metric(actual_metrics.revenue, "บาท")}</dd></div>
+                    <div><dt>"เงินที่จ่ายไปทั้งหมด"<small class="formal-term">"ต้นทุนรวม"</small></dt><dd>{actual_metric(actual_metrics.total_cost, "บาท")}</dd></div>
+                    <div><dt>"ราคาเฉลี่ยต่อกิโล"<small class="formal-term">"ราคาขายเฉลี่ย"</small></dt><dd>{actual_metric(actual_metrics.average_price_per_kg, "บาท/กก.")}</dd></div>
+                    <div><dt>"ที่จ่ายต่อ 1 กก. ที่ขาย"<small class="formal-term">"ต้นทุนต่อกิโลกรัม"</small></dt><dd>{actual_metric(actual_metrics.cost_per_kg, "บาท/กก.")}</dd></div>
                 </dl>
                 <p class="caption">{if actual.note.is_empty() { "ไม่มีบันทึกผลจริง".into() } else { actual.note.clone() }}</p>
             </section>
@@ -890,9 +896,9 @@ fn legacy_actual_unavailable(id: i64, season: String) -> AnyView {
 }
 
 fn comparison_card(row: calc::MetricComparison) -> impl IntoView {
-    let (label, unit) = comparison_metric_label(row.metric);
+    let (label, formal, unit) = comparison_metric_label(row.metric);
     let result = row.delta.map_or_else(
-        || "ยังเปรียบเทียบไม่ได้".into(),
+        || "เทียบไม่ได้ ตอนปิดยังไม่มีประมาณการตัวนี้".into(),
         |delta| {
             let direction = if delta > rust_decimal::Decimal::ZERO {
                 "สูงกว่าประมาณการ"
@@ -906,9 +912,9 @@ fn comparison_card(row: calc::MetricComparison) -> impl IntoView {
     );
     view! {
         <article class="card comparison-card">
-            <h3>{label}</h3><strong>{result}</strong>
+            <h3>{label}</h3><small class="formal-term">{formal}</small><strong>{result}</strong>
             <dl class="comparison-values">
-                <div><dt>"ประมาณการ"</dt><dd>{actual_metric(row.forecast, unit)}</dd></div>
+                <div><dt>"ประมาณการ"</dt><dd>{forecast_metric(row.forecast, unit)}</dd></div>
                 <div><dt>"ผลจริง"</dt><dd>{actual_metric(row.actual, unit)}</dd></div>
             </dl>
             <p class="caption">"ผลต่าง = ผลจริง - ประมาณการ"</p>
@@ -916,14 +922,90 @@ fn comparison_card(row: calc::MetricComparison) -> impl IntoView {
     }
 }
 
-fn comparison_metric_label(metric: ComparisonMetric) -> (&'static str, &'static str) {
+/// The owner's words for a compared figure, its formal name, and its unit.
+fn comparison_metric_label(metric: ComparisonMetric) -> (&'static str, &'static str, &'static str) {
     match metric {
-        ComparisonMetric::SellableYieldKg => ("ผลผลิตที่ขายได้", "กก."),
-        ComparisonMetric::Revenue => ("รายได้", "บาท"),
-        ComparisonMetric::TotalCost => ("ต้นทุนรวม", "บาท"),
-        ComparisonMetric::Profit => ("กำไรหรือขาดทุน", "บาท"),
-        ComparisonMetric::AveragePricePerKg => ("ราคาขายเฉลี่ย", "บาท/กก."),
-        ComparisonMetric::CostPerKg => ("ต้นทุนต่อกิโลกรัม", "บาท/กก."),
+        ComparisonMetric::SellableYieldKg => ("กิโลที่ขายได้", "ผลผลิตที่ขายได้", "กก."),
+        ComparisonMetric::Revenue => ("เงินที่ขายได้", "รายได้", "บาท"),
+        ComparisonMetric::TotalCost => ("เงินที่จ่ายไปทั้งหมด", "ต้นทุนรวม", "บาท"),
+        ComparisonMetric::Profit => ("ที่เหลือหลังหักค่าใช้จ่าย", "กำไรหรือขาดทุน", "บาท"),
+        ComparisonMetric::AveragePricePerKg => ("ราคาเฉลี่ยต่อกิโล", "ราคาขายเฉลี่ย", "บาท/กก."),
+        ComparisonMetric::CostPerKg => ("ที่จ่ายต่อ 1 กก. ที่ขาย", "ต้นทุนต่อกิโลกรัม", "บาท/กก."),
+    }
+}
+
+/// A frozen forecast figure, or the fact that none existed when the season
+/// closed. Never a zero.
+fn forecast_metric(value: Option<rust_decimal::Decimal>, unit: &str) -> String {
+    value.map_or_else(
+        || "ไม่มีตอนปิด".into(),
+        |value| format!("{} {unit}", money(value)),
+    )
+}
+
+/// Which of the six comparisons a close would freeze with a figure, from the
+/// same forecast snapshot the close writes. Shown before the owner closes,
+/// so an incomplete forecast is a known consequence, never a lock.
+#[component]
+fn ComparisonPreview(record: PlanRecord) -> impl IntoView {
+    let id = record.id;
+    let plan = record.form.to_plan().ok();
+    let forecast = plan.as_ref().map(|plan| {
+        calc::forecast_metrics_with_assets(
+            record.forecast_mode,
+            &record.quick_estimate,
+            plan,
+            &record.asset_allocations,
+            record.starting_capital,
+        )
+    });
+    let gap = match record.forecast_mode {
+        calc::ForecastMode::Detailed => record
+            .form
+            .decision_readiness(&record.asset_allocations, record.starting_capital)
+            .into_iter()
+            .find(|readiness| readiness.decision == crate::plan_form::Decision::FirstEstimate)
+            .and_then(|readiness| match readiness.state {
+                DecisionState::Missing { question, section } => Some((question, section)),
+                _ => None,
+            }),
+        calc::ForecastMode::Quick => None,
+    };
+    let rows = ComparisonMetric::ALL
+        .into_iter()
+        .map(|metric| {
+            let (plain, formal, _) = comparison_metric_label(metric);
+            let available = forecast
+                .as_ref()
+                .is_some_and(|forecast| history_metric_value(forecast, metric).is_some());
+            (plain, formal, available)
+        })
+        .collect::<Vec<_>>();
+    let unavailable = rows.iter().filter(|(_, _, available)| !available).count();
+    view! {
+        <section class="card comparison-preview">
+            <h2>"หลังปิด จะเทียบอะไรกับที่วางไว้ได้บ้าง"</h2><small class="formal-term">"ผลจริงเทียบประมาณการ"</small>
+            <p>{if unavailable == 0 {
+                "ประมาณการครบ ทุกข้อจะเทียบได้ ระบบจะเก็บประมาณการ ณ ตอนนี้ไว้เป็นภาพนิ่ง".to_owned()
+            } else {
+                format!("ปิดได้เลย ไม่ต้องกรอกประมาณการให้ครบ แต่ {unavailable} ข้อจะเทียบไม่ได้ เพราะยังไม่มีประมาณการ และหลังปิดจะเติมไม่ได้")
+            }}</p>
+            <ul class="comparison-preview-rows">
+                {rows.into_iter().map(|(plain, formal, available)| view! {
+                    <li class="comparison-preview-row">
+                        <span class="decision-question"><strong>{plain}</strong><small class="formal-term">{formal}</small></span>
+                        {if available {
+                            view! { <span class="status good">"จะเทียบได้"</span> }.into_any()
+                        } else {
+                            view! { <span class="status muted">"จะเทียบไม่ได้"</span> }.into_any()
+                        }}
+                    </li>
+                }).collect_view()}
+            </ul>
+            {gap.filter(|_| unavailable > 0).map(|(question, section)| view! {
+                <A attr:class="text-button" href=format!("/plans/{id}/{section}")>{format!("ยังขาด: {question} · กลับไปตอบก่อนก็ได้")}</A>
+            })}
+        </section>
     }
 }
 
@@ -948,7 +1030,7 @@ fn decimal_input(value: Option<rust_decimal::Decimal>) -> String {
 }
 
 fn not_found_view() -> AnyView {
-    view! { <section class="card"><h1>"ไม่พบฤดูกาลนี้"</h1><A href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any()
+    view! { <section class="card recovery-state"><h1>"ไม่พบฤดูกาลนี้"</h1><A attr:class="button secondary" href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any()
 }
 
 #[component]
@@ -996,6 +1078,7 @@ fn DetailedModeHub(
     form: PlanForm,
     closed: bool,
     asset_depreciation: Option<rust_decimal::Decimal>,
+    decisions: Vec<DecisionReadiness>,
 ) -> impl IntoView {
     let switch = ServerAction::<SwitchForecastMode>::new();
     let next = ["production", "expenses", "variable-costs", "fixed-costs"]
@@ -1054,6 +1137,7 @@ fn DetailedModeHub(
             <A attr:class="button primary" href=guide_href>{guide_action}</A>
             <p class="caption">"คุณยังเปิดดูหรือแก้ส่วนอื่นด้านล่างได้ตลอด ระบบไม่ล็อกลำดับ"</p>
         </section>
+        <DecisionList plan_id=id decisions compact=true/>
         <div class="overview-heading">
             <h2>"ดูและแก้ข้อมูลทั้งหมด"</h2>
             <p>"เลือกเฉพาะส่วนที่ต้องการได้ คำสถานะบอกว่าตอนนี้คำนวณอะไรได้แล้ว"</p>
@@ -1125,7 +1209,7 @@ pub fn QuickPlanRoute() -> impl IntoView {
                         view! { <QuickResultView record/> }.into_any(),
                     Ok(Some(record)) if matches!(step.as_str(), "production" | "price" | "cost") =>
                         view! { <QuickQuestionView record step/> }.into_any(),
-                    _ => view! { <section class="card"><h1>"ไม่พบขั้นตอนนี้"</h1><A href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
+                    _ => view! { <section class="card recovery-state"><h1>"ไม่พบขั้นตอนนี้"</h1><A attr:class="button secondary" href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
                 }
             })}
         </Suspense>
@@ -1370,7 +1454,7 @@ pub fn PlanSectionRoute() -> impl IntoView {
                         view! { <PlanAnalysisView record/> }.into_any(),
                     Ok(Some(record)) if EDITABLE_SECTIONS.iter().any(|(slug, _, _)| *slug == section) =>
                         view! { <PlanSectionView record section/> }.into_any(),
-                    _ => view! { <section class="card"><h1>"ไม่พบส่วนนี้"</h1><A href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
+                    _ => view! { <section class="card recovery-state"><h1>"ไม่พบส่วนนี้"</h1><A attr:class="button secondary" href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
                 }
             })}
         </Suspense>
@@ -1837,7 +1921,7 @@ fn TargetFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
 #[component]
 fn HealthFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
     view! { <section class="card field-stack health-card">
-        <div class="section-title"><div><h2>"สุขภาพสวน 12 ข้อ"</h2><p>"1 = ต้องเร่งปรับปรุง · 5 = แข็งแรง"</p></div><strong>{move || format!("{}/12", form.get().health_scores.iter().filter(|v| !v.is_empty()).count())}</strong></div>
+        <div class="section-title"><div><h2>"สวนพร้อมแค่ไหน ตามที่คุณเห็น 12 ข้อ"</h2><small class="formal-term">"สุขภาพธุรกิจ · ประเมินตนเอง"</small><p>"ให้คะแนนตัวเอง 1 = ยังไม่พร้อมเลย · 5 = พร้อมมาก คะแนนเป็นภาพที่คุณเห็น ไม่ใช่การวินิจฉัย"</p></div><strong>{move || format!("{}/12", form.get().health_scores.iter().filter(|v| !v.is_empty()).count())}</strong></div>
         {HealthQuestion::ALL.into_iter().enumerate().map(|(index, question)| view! {
             <fieldset><legend>{health_question_label(question)}</legend>{if closed {
                 view! { <p class="readonly-value">{form.get().health_scores.get(index).cloned().filter(|value| !value.is_empty()).unwrap_or_else(|| "—".into())}</p> }.into_any()
@@ -1970,6 +2054,42 @@ where
 fn route_plan_id() -> impl Fn() -> Option<i64> + Copy {
     let params = use_params_map();
     move || params.with(|params| params.get("id").and_then(|id| id.parse().ok()))
+}
+
+/// The same six decisions, in the same words, on the hub, the dashboard, and
+/// the analysis page: what can be answered now, which single fact is still
+/// missing, and which optional fact would add a result.
+#[component]
+pub(crate) fn DecisionList(
+    plan_id: i64,
+    decisions: Vec<DecisionReadiness>,
+    #[prop(optional)] compact: bool,
+) -> impl IntoView {
+    view! {
+        <section class="card decision-list" class:decision-list-compact=compact>
+            <h2>"ตอนนี้ตอบได้ว่า"</h2>
+            <ul class="decision-rows">
+                {decisions.into_iter().map(|readiness| {
+                    let question = readiness.decision.question();
+                    let formal = readiness.decision.formal_term();
+                    let words = view! { <span class="decision-question"><strong>{question}</strong><small class="formal-term">{formal}</small></span> };
+                    // A row that still needs something is one link to the page
+                    // that asks it, the same shape as the section cards below.
+                    match readiness.state {
+                        DecisionState::Ready => view! {
+                            <li><span class="decision-row">{words}<span class="status good">"ดูได้แล้ว"</span></span></li>
+                        }.into_any(),
+                        DecisionState::Missing { question, section } => view! {
+                            <li><A attr:class="decision-row" href=format!("/plans/{plan_id}/{section}")>{words}<span class="status warning">{format!("ยังขาด: {question}")}</span></A></li>
+                        }.into_any(),
+                        DecisionState::Optional { unlock, section } => view! {
+                            <li><A attr:class="decision-row" href=format!("/plans/{plan_id}/{section}")>{words}<span class="status muted">{format!("เพิ่มได้: {unlock}")}</span></A></li>
+                        }.into_any(),
+                    }
+                }).collect_view()}
+            </ul>
+        </section>
+    }
 }
 
 pub(crate) fn money(value: rust_decimal::Decimal) -> String {

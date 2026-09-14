@@ -1,7 +1,17 @@
 #![recursion_limit = "256"]
 
+// One worker thread on purpose. With the default multi-thread runtime, a
+// server-rendered page occasionally sent its shell with the Suspense fallback
+// and never sent the resolved chunk, so the browser waited on an open
+// connection until its timeout. The stall reproduces without a browser
+// (scripts/check-stall.sh: about one page in a hundred while the server also
+// streams the wasm bundle) and stops entirely with a single worker, because
+// the SSR Suspense machinery in leptos 0.8.20 / reactive_graph 0.2.14 races
+// between the thread rendering the page and the thread resolving its
+// resource. This is a mitigation, not the fix: the fix belongs upstream, and
+// this line should be revisited when leptos is next upgraded.
 #[cfg(feature = "ssr")]
-#[tokio::main]
+#[tokio::main(worker_threads = 1)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     use axum::{Router, middleware, routing::get};
     use axum_login::{AuthManagerLayerBuilder, tower_sessions::SessionManagerLayer};

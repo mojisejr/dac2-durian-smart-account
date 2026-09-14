@@ -15,6 +15,7 @@ use rust_decimal::Decimal;
 use web::{
     analysis_ui::{PlanAnalysisView, PlanDashboardView},
     plan_form::PlanForm,
+    plan_ui::PlanHub,
     plans::PlanRecord,
 };
 
@@ -52,6 +53,38 @@ fn render_with(form: PlanForm, analysis_view: bool) -> String {
 
 fn dashboard(form: PlanForm) -> String {
     render_with(form, false)
+}
+
+fn dashboard_for(plan: &Plan) -> String {
+    dashboard(PlanForm::from_plan(plan))
+}
+
+fn render_hub(form: PlanForm) -> String {
+    Owner::new().with(move || {
+        provide_context(RequestUrl::new("/plans/42"));
+        let record = PlanRecord {
+            id: 42,
+            season_year: Some(2569),
+            note: "ปีทดสอบ".into(),
+            closed: false,
+            forecast_mode: calc::ForecastMode::Detailed,
+            quick_estimate: calc::QuickEstimate::default(),
+            starting_capital: None,
+            asset_allocations: Vec::new(),
+            actual_outcome: None,
+            form,
+        };
+        let view = view! { <Router><PlanHub record/></Router> };
+        let mut html = String::new();
+        view.to_html_with_buf(
+            &mut html,
+            &mut Position::FirstChild,
+            true,
+            false,
+            Vec::new(),
+        );
+        html
+    })
 }
 
 fn analysis(form: PlanForm) -> String {
@@ -151,18 +184,152 @@ fn missing_investment_and_non_positive_cash_flow_name_the_actual_blocker() {
 }
 
 #[test]
-fn an_empty_plan_names_what_is_missing_instead_of_showing_a_figure() {
+fn an_empty_plan_names_the_missing_question_instead_of_showing_a_figure() {
     let html = dashboard(PlanForm::from_plan(&Plan::default()));
 
-    assert!(html.contains("ยังคำนวณไม่ได้"));
-    assert!(html.contains("/plans/42/production"));
-    assert!(html.contains("/plans/42/variable-costs"));
-    assert!(html.contains("/plans/42/fixed-costs"));
-    assert!(!html.contains("/plans/42/market"));
-    assert!(!html.contains("/plans/42/health"));
-    assert!(html.contains("ยังขาดผลผลิตที่ขายได้"));
-    assert!(!html.contains("ยังไม่ครบ"));
     assert!(!html.contains("hero-value"));
+    assert!(html.contains("ยังบอกไม่ได้"));
+    assert!(html.contains("ยังขาด: ปีนี้จะขายได้กี่กิโล"));
+    assert!(html.contains("href=\"/plans/42/production\""));
+    // Optional results are named as optional, with their unlock, never as
+    // something missing; nothing is called incomplete.
+    assert!(html.contains("เพิ่มได้: ยอดที่ผู้ซื้อคุยว่าจะรับ"));
+    assert!(html.contains("เพิ่มได้: แบบประเมินสวน 12 ข้อ"));
+    assert!(!html.contains("ยังไม่ครบ"));
+    assert!(!html.contains("ยังคำนวณไม่ได้"));
+    // No figure row shows a number for an absent input.
+    assert!(!html.contains("0.00 บาท"));
+}
+
+/// The six decisions, in the order the list renders them, as one string per
+/// row so two pages can be compared.
+fn decision_rows(html: &str) -> Vec<String> {
+    let start = html.find("decision-rows").expect("a decision list");
+    let rest = &html[start..];
+    let end = rest.find("</ul>").expect("the list closes");
+    rest[..end]
+        .split("<li")
+        .skip(1)
+        .map(|row| {
+            let mut text = String::new();
+            let mut in_tag = false;
+            for ch in row.chars() {
+                match ch {
+                    '<' => in_tag = true,
+                    '>' => in_tag = false,
+                    _ if !in_tag => text.push(ch),
+                    _ => {}
+                }
+            }
+            text.split_whitespace().collect::<Vec<_>>().join(" ")
+        })
+        .collect()
+}
+
+#[test]
+fn readiness_is_named_by_decision_and_agrees_across_hub_dashboard_and_analysis() {
+    // Sellable kilograms and a price are known; costs are not, and the
+    // owner has said nothing about buyers or the self-assessment.
+    let plan = Plan {
+        production: calc::ProductionPlan {
+            yield_source: calc::YieldSource::Direct,
+            sellable_yield_kg: Some(20_000.into()),
+            price_source: calc::PriceSource::Average,
+            average_price_per_kg: Some(80.into()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let form = PlanForm::from_plan(&plan);
+    let hub = render_hub(form.clone());
+    let dashboard = dashboard(form.clone());
+    let analysis = analysis(form);
+
+    let rows = decision_rows(&dashboard);
+    assert_eq!(rows.len(), 6, "{rows:?}");
+    assert_eq!(rows, decision_rows(&hub));
+    assert_eq!(rows, decision_rows(&analysis));
+
+    assert!(rows[0].contains("ปีนี้จะเหลือกำไรเท่าไร"));
+    assert!(rows[0].contains("กำไรสุทธิ"));
+    assert!(rows[0].contains("ยังขาด: ค่าใช้จ่ายที่เพิ่มตามการผลิต หรือยืนยันว่าไม่มี"));
+    assert!(rows[1].contains("เพิ่มได้: ยอดที่ผู้ซื้อคุยว่าจะรับ"));
+    assert!(rows[2].contains("ยังขาด: ค่าใช้จ่ายที่เพิ่มตามการผลิต"));
+    assert!(rows[3].contains("ยังขาด: ค่าใช้จ่ายที่เพิ่มตามการผลิต"));
+    assert!(rows[4].contains("เพิ่มได้: แบบประเมินสวน 12 ข้อ"));
+    assert!(
+        rows[5].contains("ดูได้แล้ว"),
+        "closing never waits on a forecast: {}",
+        rows[5]
+    );
+    for page in [&hub, &dashboard, &analysis] {
+        assert!(page.contains("href=\"/plans/42/variable-costs\""));
+    }
+
+    let ready = dashboard_for(&workbook_sample());
+    let rows = decision_rows(&ready);
+    assert!(rows.iter().all(|row| row.contains("ดูได้แล้ว")), "{rows:?}");
+}
+
+/// A formal term may appear only as the secondary label under the owner's
+/// words, never as the heading or the leading text of a figure.
+fn assert_formal_terms_lead_nowhere(html: &str, terms: &[&str]) {
+    for term in terms {
+        let mut found = 0;
+        for (index, _) in html.match_indices(term) {
+            found += 1;
+            let before = &html[..index];
+            let tag_start = before.rfind('<').expect("inside markup");
+            let tag = &before[tag_start..];
+            let leads = tag.starts_with("<h1")
+                || tag.starts_with("<h2")
+                || tag.starts_with("<h3")
+                || tag.starts_with("<strong")
+                || tag.starts_with("<span class=\"figure-words\"")
+                || tag.starts_with("<span class=\"decision-question\"");
+            assert!(
+                !leads,
+                "{term} leads a figure or heading: …{}",
+                &html[index.saturating_sub(80)..index + term.len()]
+            );
+        }
+        assert!(found > 0, "{term} is no longer taught anywhere on the page");
+    }
+}
+
+#[test]
+fn dashboard_leads_with_familiar_wording_and_keeps_formal_terms_secondary() {
+    let html = dashboard(sample_form());
+    for plain in [
+        "เหลือหลังหักค่าใช้จ่ายทั้งหมด",
+        "ต้นทุนต่อ 1 กก. ที่ขาย",
+        "ต้องขายอย่างน้อยกี่กิโลจึงไม่ขาดทุน",
+        "กำไรเทียบกับเงินก้อนที่ลงไป",
+        "อีกกี่ปีเงินก้อนจะกลับมาครบ",
+        "ขายได้ทั้งฤดู",
+        "เงินสดที่เหลือจากฤดูนี้",
+        "ราคาเฉลี่ยของทุกเกรดรวมกัน",
+        "เงินเหลือต่อ 1 กก. ก่อนจ่ายค่าใช้จ่ายประจำ",
+        "ขายได้เกินขั้นต่ำที่ไม่ขาดทุนกี่กิโล",
+        "ของที่มีเทียบกับที่ผู้ซื้อคุยไว้",
+        "คะแนนที่ประเมินสวนเอง",
+    ] {
+        assert!(html.contains(plain), "{plain} is missing");
+    }
+    assert_formal_terms_lead_nowhere(
+        &html,
+        &[
+            "กำไรสุทธิ",
+            "จุดคุ้มทุน",
+            "ROI",
+            "ระยะคืนทุน",
+            "กระแสเงินสด",
+            "ราคาขายเฉลี่ยถ่วงน้ำหนัก",
+            "ส่วนเกินต่อหน่วย",
+            "ส่วนเผื่อความปลอดภัย",
+            "คะแนนสุขภาพธุรกิจ",
+        ],
+    );
 }
 
 #[test]
@@ -227,7 +394,7 @@ fn missing_physical_quantities_are_quiet_and_do_not_render_incomplete_kpis() {
             "{hidden} should stay quiet without a quantity"
         );
     }
-    assert!(html.contains("ข้อมูลที่ไม่กรอกจะไม่ถูกนับว่าไม่ครบ"));
+    assert!(html.contains("ตัวที่ไม่ได้กรอกไม่ถูกนับว่าขาด"));
 }
 
 #[test]
@@ -247,23 +414,35 @@ fn a_kpi_with_a_target_is_graded_against_it() {
 fn all_six_completeness_rules_render_with_a_route_that_would_fix_them() {
     let html = analysis(sample_form());
 
-    for label in [
-        "สัดส่วนเกรดรวมได้ 100%",
-        "มีผลผลิตที่ขายได้",
-        "ราคาขายสูงกว่าต้นทุนผันแปร",
-        "มีเงินลงทุนอย่างน้อย 1 รายการ",
-        "ต้นทุนรวมตรงกับรายการที่กรอก",
-        "ตอบคำถามสุขภาพครบ 12 ข้อ",
+    // Each rule is a plain question first and its formal name second.
+    for (question, formal) in [
+        ("สัดส่วนเกรดรวมกันครบ 100% ไหม", "สัดส่วนเกรดรวมได้ 100%"),
+        ("มีกิโลที่จะขายได้มากกว่าศูนย์ไหม", "ผลผลิตขายได้เป็นบวก"),
+        (
+            "ขายได้กิโลละมากกว่าที่จ่ายต่อกิโลไหม",
+            "ราคาขายสูงกว่าต้นทุนผันแปรต่อหน่วย",
+        ),
+        ("มีเงินก้อนที่ลงไปอย่างน้อย 1 รายการไหม", "ฐานเงินลงทุนเป็นบวก"),
+        ("ยอดรวมค่าใช้จ่ายมาจากรายการที่กรอกไหม", "ต้นทุนรวมเชื่อมกับรายการ"),
+        ("ตอบแบบประเมินสวนครบ 12 ข้อไหม", "คำตอบสุขภาพธุรกิจครบ"),
     ] {
-        assert!(html.contains(label), "{label} is missing");
+        assert!(html.contains(question), "{question} is missing");
+        assert!(
+            html.contains(&format!("<small class=\"formal-term\">{formal}")),
+            "{formal} is not the secondary label"
+        );
     }
+    // A rule's answer is an observation about the entered figures, never a
+    // verdict about the orchard.
+    assert!(!html.contains("ต้องแก้"));
+    assert!(!html.contains("พร้อมใช้ตัดสินใจ"));
     assert!(html.contains("/plans/42/production"));
     assert!(html.contains("/plans/42/variable-costs"));
     assert!(html.contains("/plans/42/fixed-costs"));
 
     let readiness = match sample_analysis().checks.overall {
-        calc::Readiness::Ready => "พร้อมใช้ตัดสินใจ",
-        calc::Readiness::NeedsReview => "ยังต้องตรวจ",
+        calc::Readiness::Ready => "ไม่พบข้อที่ควรตรวจ",
+        calc::Readiness::NeedsReview => "มีข้อที่ควรตรวจ",
     };
     assert!(
         html.contains(readiness),
@@ -339,4 +518,54 @@ fn an_unanalysable_plan_shows_no_tab_content_it_cannot_support() {
         !html.contains("ถึงเป้า"),
         "no KPI is graded when nothing can be calculated"
     );
+}
+
+/// Result surfaces make arithmetic observations. They never tell the owner
+/// what to do, what caused a figure, or what is wrong with the orchard, and
+/// every ⓘ sheet links to the page holding the inputs it was computed from.
+#[test]
+fn result_explanations_observe_arithmetic_and_link_to_their_inputs() {
+    let forbidden = [
+        "ไม่ควร",
+        "ต้องเร่ง",
+        "สาเหตุ",
+        "แนะนำให้",
+        "ควรทำ",
+        "ล้มได้",
+        "มักแปลว่า",
+        "ทำได้ทางเดียว",
+        "ต้องปรับปรุง",
+        "ต้องแก้",
+        "พร้อมใช้ตัดสินใจ",
+    ];
+    for (name, html) in [
+        ("dashboard", dashboard(sample_form())),
+        ("analysis", analysis(sample_form())),
+        ("hub", render_hub(sample_form())),
+    ] {
+        // The tax disclaimer's "ไม่ควรใช้เลือกวิธียื่น" is the boundary of
+        // the estimate, not advice about the orchard, and stays.
+        let scanned = html.replace(web::explanations::TAX_DISCLAIMER, "");
+        for phrase in forbidden {
+            assert!(
+                !scanned.contains(phrase),
+                "{name} still says {phrase}: …{}…",
+                excerpt(&scanned, phrase)
+            );
+        }
+        let sheets = html.matches("class=\"figure-explanation\"").count();
+        let links = html.matches("explanation-input").count();
+        if sheets > 0 {
+            assert_eq!(sheets, links, "{name}: every ⓘ sheet links to its inputs");
+            assert!(html.contains("href=\"/plans/42/"));
+        }
+    }
+}
+
+fn excerpt(html: &str, phrase: &str) -> String {
+    let at = html.find(phrase).unwrap_or(0);
+    let start = at.saturating_sub(60);
+    html[start..(at + phrase.len() + 30).min(html.len())]
+        .chars()
+        .collect()
 }
