@@ -46,6 +46,31 @@ async function submitAndReload(page, button, label) {
   await page.reload({ waitUntil: 'domcontentloaded' });
 }
 
+// Submits an action and leaves the page where it is. The caller then waits for
+// the change to appear, and `assertNoReload` proves the page showed it by
+// reading its data again rather than by a navigation, which is the defect the
+// owner met on the assets page: the action saved, the screen stayed stale.
+async function submitInPlace(page, button, label) {
+  await page.evaluate(() => { window.__dac2InPlace = true; });
+  const pending = page.waitForResponse(
+    (response) => response.request().method() === 'POST',
+    { timeout: 10000 },
+  );
+  await button.click();
+  const response = await pending;
+  if (!response.ok()) {
+    throw new Error(`${label} returned HTTP ${response.status()}`);
+  }
+  await page.waitForTimeout(300);
+  const error = (await page.locator('.bad-message').allTextContents()).join(' ').trim();
+  if (error) throw new Error(`${label} failed: ${error}`);
+}
+
+async function assertNoReload(page, label) {
+  const kept = await page.evaluate(() => window.__dac2InPlace === true);
+  if (!kept) throw new Error(`${label}: the page reloaded instead of updating in place`);
+}
+
 async function inspect(page, intendedWidth) {
   return page.evaluate((intendedWidth) => {
     const inScroller = (el) => {
@@ -307,8 +332,16 @@ async function gotoOrDiagnose(page, url, cookies) {
     } catch (fetchError) {
       direct = `server did not answer within 10s (${fetchError.message})`;
     }
+    // Chrome's own timing says whether a stalled request ever reached the
+    // wire: requestStart stays -1 while it waits in the connection queue.
     const open = [...pending.entries()]
-      .map(([request, at]) => `${request.method()} ${request.url()} open ${Date.now() - at}ms`)
+      .map(([request, at]) => {
+        const timing = request.timing();
+        const wire = timing.requestStart >= 0
+          ? `sent at +${Math.round(timing.requestStart)}ms, connect ${Math.round(timing.connectStart)}..${Math.round(timing.connectEnd)}ms`
+          : `never sent (connectStart ${Math.round(timing.connectStart)}ms)`;
+        return `${request.method()} ${request.url()} open ${Date.now() - at}ms, ${wire}`;
+      })
       .join('; ');
     throw new Error(`${error.message}\n  ${direct}\n  browser requests still open: ${open || 'none'}`);
   } finally {
@@ -706,14 +739,24 @@ async function signIn(browser) {
   await create.locator('input[name="original_cost"]').fill('100000');
   await create.locator('input[name="start_year"]').fill('2568');
   await create.locator('input[name="useful_life_years"]').fill('5');
-  await submitAndReload(page, create.locator('button:has-text("บันทึกของชิ้นนี้")'), 'asset creation');
+  // Each assets action must show its result without a reload: the owner saw
+  // "รวมในฤดูนี้" save and the page stay as it was until a manual refresh.
+  await submitInPlace(page, create.locator('button:has-text("บันทึกของชิ้นนี้")'), 'asset creation');
+  await page.getByText('ระบบน้ำกลางสวน', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
   await page.getByText('ยังไม่รวม', { exact: true }).waitFor({ state: 'visible' });
+  await assertNoReload(page, 'asset creation');
 
   await page.getByText('ระบบจะไม่เดาหรือลบรายการเดิมให้', { exact: false }).waitFor({ state: 'visible' });
-  await submitAndReload(page, page.locator('button:has-text("รวมในฤดูนี้")'), 'asset inclusion');
-  await page.getByText('รวมในฤดูนี้', { exact: true }).waitFor({ state: 'visible' });
+  await submitInPlace(page, page.locator('button:has-text("รวมในฤดูนี้")'), 'asset inclusion');
+  await page.locator('.asset-row .status', { hasText: 'รวมในฤดูนี้' }).waitFor({ state: 'visible', timeout: 10000 });
+  await page.locator('.asset-totals', { hasText: '20,000.00 บาท/ปี' }).waitFor({ state: 'visible', timeout: 10000 });
+  await page.locator('button:has-text("เอาออกจากฤดูนี้")').waitFor({ state: 'visible' });
+  await assertNoReload(page, 'asset inclusion');
+
   await page.fill('input[name="starting_capital"]', '50000');
-  await submitAndReload(page, page.locator('button:has-text("บันทึกเงินก้อนตั้งต้น")'), 'starting capital save');
+  await submitInPlace(page, page.locator('button:has-text("บันทึกเงินก้อนตั้งต้น")'), 'starting capital save');
+  await page.locator('.asset-totals', { hasText: '50,000.00' }).waitFor({ state: 'visible', timeout: 10000 });
+  await assertNoReload(page, 'starting capital save');
   if (await page.locator('input[name="starting_capital"]').inputValue() !== '50000') {
     throw new Error('starting capital did not persist independently');
   }

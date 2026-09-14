@@ -182,26 +182,38 @@ pub async fn save_starting_capital(
 pub fn AssetPage() -> impl IntoView {
     let params = use_params_map();
     let id = move || params.with(|params| params.get("id").and_then(|id| id.parse::<i64>().ok()));
-    let data = Resource::new(id, |id| async move {
-        match id {
-            Some(id) => load_asset_page(id).await,
-            None => Ok(None),
-        }
-    });
+    // Every action on this page changes what it shows, so a completed action
+    // bumps this counter and the page reads itself again instead of waiting
+    // for a manual refresh.
+    let refresh = RwSignal::new(0usize);
+    let data = Resource::new(
+        move || (id(), refresh.get()),
+        |(id, _)| async move {
+            match id {
+                Some(id) => load_asset_page(id).await,
+                None => Ok(None),
+            }
+        },
+    );
     view! {
-        <Suspense fallback=move || view! { <p>"กำลังอ่านสินทรัพย์…"</p> }>
+        <Transition fallback=move || view! { <p>"กำลังอ่านสินทรัพย์…"</p> }>
             {move || data.get().map(|result| match result {
-                Ok(Some(data)) => view! { <AssetPageView data/> }.into_any(),
+                Ok(Some(data)) => view! { <AssetPageView data refresh/> }.into_any(),
                 _ => view! { <section class="card"><h1>"ไม่พบฤดูกาลนี้"</h1><A href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
             })}
-        </Suspense>
+        </Transition>
     }
 }
 
 #[component]
-pub fn AssetPageView(data: AssetPageData) -> impl IntoView {
+pub fn AssetPageView(
+    data: AssetPageData,
+    #[prop(default = RwSignal::new(0))] refresh: RwSignal<usize>,
+) -> impl IntoView {
     let create = ServerAction::<CreateOwnerAsset>::new();
     let capital = ServerAction::<SaveStartingCapital>::new();
+    refetch_after(create, refresh);
+    refetch_after(capital, refresh);
     let id = data.plan_id;
     let closed = data.closed;
     let year_label = data
@@ -256,7 +268,7 @@ pub fn AssetPageView(data: AssetPageData) -> impl IntoView {
                 {if data.assets.is_empty() {
                     view! { <p class="muted">"ยังไม่มีของที่ใช้หลายปี"</p> }.into_any()
                 } else {
-                    view! { <div class="asset-list">{data.assets.into_iter().map(|asset| view! { <AssetCard plan_id=id asset closed/> }).collect_view()}</div> }.into_any()
+                    view! { <div class="asset-list">{data.assets.into_iter().map(|asset| view! { <AssetCard plan_id=id asset closed refresh/> }).collect_view()}</div> }.into_any()
                 }}
             </section>
 
@@ -287,9 +299,16 @@ pub fn AssetPageView(data: AssetPageData) -> impl IntoView {
 }
 
 #[component]
-fn AssetCard(plan_id: i64, asset: AssetRow, closed: bool) -> impl IntoView {
+fn AssetCard(
+    plan_id: i64,
+    asset: AssetRow,
+    closed: bool,
+    refresh: RwSignal<usize>,
+) -> impl IntoView {
     let select = ServerAction::<SetSeasonAsset>::new();
     let update = ServerAction::<UpdateOwnerAsset>::new();
+    refetch_after(select, refresh);
+    refetch_after(update, refresh);
     let facts = asset.facts.clone();
     let allocation = asset.allocation.clone();
     let active = allocation.is_some();
@@ -375,6 +394,20 @@ fn AssetFields(facts: Option<calc::AssetFacts>, create: bool) -> impl IntoView {
         <label><span>"เลิกใช้แล้วน่าจะขายต่อได้เท่าไร (ไม่บังคับ)"</span><small class="formal-term">"มูลค่าคงเหลือ"</small><span class="input-with-unit"><input type="text" inputmode="decimal" name="residual_value" value=decimal_input(facts.residual_value)/><span class="unit">"บาท"</span></span><small class="field-hint">"ถ้าเว้นว่าง ระบบใช้ 0 บาทเฉพาะการวางแผน"</small></label>
         <label><span>"เลิกใช้ตั้งแต่ปี พ.ศ. (ไม่บังคับ)"</span><input type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" name="retired_year" value=facts.retired_year.map(|year| year.to_string()).unwrap_or_default()/></label>
     }
+}
+
+/// Reads the page again once `action` has succeeded. A failed action leaves
+/// the page as it is, so its error stays beside the form that produced it.
+fn refetch_after<S>(action: ServerAction<S>, refresh: RwSignal<usize>)
+where
+    S: server_fn::ServerFn<Output = ()> + Clone + Send + Sync + 'static,
+    S::Error: Clone + Send + Sync + 'static,
+{
+    Effect::new(move |_| {
+        if matches!(action.value().get(), Some(Ok(()))) {
+            refresh.update(|count| *count += 1);
+        }
+    });
 }
 
 #[component]
