@@ -346,9 +346,12 @@ reachable database. The application reads its Leptos configuration from
 `LEPTOS_OUTPUT_NAME` when `crates/web/Cargo.toml` is absent, as it is in the
 image; the image sets them, and a host that injects `PORT` overrides the port
 alone. For a relay on the network set `SMTP_TLS=starttls` with `SMTP_USERNAME`
-and `SMTP_PASSWORD`; the server refuses to start on any other `SMTP_TLS`
-value or on a missing login, and prints the relay host, port, and mode, never
-the credentials. The container runs as an unprivileged user and the Tokio
+and `SMTP_PASSWORD`; on a host that blocks outbound SMTP ports set
+`MAIL_TRANSPORT=brevo-api` with `BREVO_API_KEY` and mail leaves over HTTPS
+through Brevo's transactional API instead. The server refuses to start on any
+other `SMTP_TLS` or `MAIL_TRANSPORT` value or on a missing login or key, and
+prints where mail goes and how, never the credentials. A delivery that fails
+is written to the log by cause and status, without the recipient. The container runs as an unprivileged user and the Tokio
 runtime keeps its single worker thread, so the stall mitigation recorded in
 `crates/web/src/main.rs` applies unchanged.
 
@@ -386,6 +389,51 @@ stored for it.
 
 To run a published image locally, replace `dac2:local` in the `docker run`
 line above with the tag; the image is public and needs no login to pull.
+
+## The pilot on Render
+
+The pilot runs at <https://dac2-pilot.onrender.com>: a Render free web
+service in Singapore running the published image, a Neon free PostgreSQL over
+its direct endpoint, and Brevo's HTTP API for mail. `render.yaml` records the
+shape; the three secrets live in the Render dashboard and nowhere else. The
+service is a study copy and says so on every page.
+
+Facts the pilot rests on, verified on 2026-09-14/15:
+
+- Free Render web services **block outbound SMTP ports 25, 465, and 587**
+  (Render changelog, 2025-09-26). A registration through SMTP hung for the
+  full 60-second timeout; mail therefore goes through Brevo's HTTPS API.
+- A free service **spins down after 15 idle minutes** and takes up to a
+  minute to answer the next request; Neon's compute suspends after 5 idle
+  minutes and wakes on the first query in about a second.
+- Behind Render every connection's peer is the proxy, so
+  `CLIENT_ADDRESS_SOURCE=forwarded-for` is set; the rate limit then counts
+  real client addresses.
+- The verified Brevo sender is a Gmail address, so Brevo rewrites the From
+  header to its own domain for deliverability; the mail still arrives and
+  says who it is on behalf of. A sender on an owned domain would remove that.
+
+### Runbook for a study session
+
+1. **Ten minutes before**, open <https://dac2-pilot.onrender.com/> once and
+   wait for the page; that wakes the service. Then open `/login` once more so
+   the database is awake too.
+2. **If participants share one network** (a venue, a classroom), raise the
+   account budget for the day in the Render dashboard: Environment →
+   `RATE_LIMIT_ACCOUNT` → `60/3600` → Save, which redeploys in about a minute.
+   Put it back to `5/3600` afterwards.
+3. **Verification mail** arrives from Brevo on behalf of the sender; tell the
+   participant to check spam if it is not in the inbox within a minute.
+4. **Logs**: Render dashboard → the service → Logs. A start shows the database
+   probe, the mail line, the gate line, `pilot notice shown`, and `listening`.
+   A failed delivery shows `verification mail not delivered: …` with the cause
+   and never the address.
+5. **Deploying another build**: Settings → Image URL → paste the new
+   `ghcr.io/mojisejr/dac2-durian-smart-account:<full sha>` from a merged
+   `main` run → Save → Manual Deploy → Deploy latest reference. Rolling back
+   is the same steps with the previous tag; both tags stay on GHCR.
+6. **Clearing study data** is an owner action in Neon (SQL editor) and is not
+   part of this application.
 
 ## Plan workspace proof
 

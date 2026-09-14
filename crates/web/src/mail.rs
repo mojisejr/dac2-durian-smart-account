@@ -1,7 +1,7 @@
 use std::{env, fmt};
 
 use lettre::{
-    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
+    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor, message::Mailbox,
     transport::smtp::authentication::Credentials,
 };
 
@@ -13,20 +13,38 @@ pub enum SmtpSecurity {
     StartTls { username: String, password: String },
 }
 
+/// How a message leaves the process. SMTP is the local path and the path for
+/// a host that allows outbound SMTP; a host that blocks the SMTP ports, as a
+/// free Render web service does, reaches the relay over HTTPS instead.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Delivery {
+    Smtp {
+        host: String,
+        port: u16,
+        security: SmtpSecurity,
+    },
+    BrevoApi {
+        api_key: String,
+    },
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MailConfig {
-    pub smtp_host: String,
-    pub smtp_port: u16,
-    pub security: SmtpSecurity,
+    pub delivery: Delivery,
     pub from: String,
     pub base_url: String,
 }
 
+/// Where the Brevo transactional API lives. A test overrides it.
+pub const BREVO_API_URL: &str = "https://api.brevo.com/v3/smtp/email";
+
 impl MailConfig {
-    /// Reads the mail configuration. `SMTP_TLS` unset or `off` keeps the
-    /// plaintext Mailpit path; `starttls` requires `SMTP_USERNAME` and
-    /// `SMTP_PASSWORD`. Any other value is refused so a typo cannot silently
-    /// send credentials in the clear.
+    /// Reads the mail configuration. `MAIL_TRANSPORT` unset or `smtp` reads
+    /// the SMTP variables: `SMTP_TLS` unset or `off` keeps the plaintext
+    /// Mailpit path, `starttls` requires `SMTP_USERNAME` and `SMTP_PASSWORD`.
+    /// `MAIL_TRANSPORT=brevo-api` requires `BREVO_API_KEY` and ignores the
+    /// SMTP variables. Any other word is refused so a typo cannot silently
+    /// send credentials in the clear or send nothing at all.
     pub fn try_from_env() -> Result<Self, MailError> {
         Self::from_lookup(|name| env::var(name).ok())
     }
@@ -35,34 +53,67 @@ impl MailConfig {
     /// tested without touching the process environment.
     pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Result<Self, MailError> {
         let read = |name: &str| lookup(name).filter(|value| !value.trim().is_empty());
-        let security = match read("SMTP_TLS").as_deref() {
-            None | Some("off") => SmtpSecurity::Plain,
-            Some("starttls") => SmtpSecurity::StartTls {
-                username: read("SMTP_USERNAME")
-                    .ok_or_else(|| MailError("SMTP_TLS=starttls requires SMTP_USERNAME".into()))?,
-                password: read("SMTP_PASSWORD")
-                    .ok_or_else(|| MailError("SMTP_TLS=starttls requires SMTP_PASSWORD".into()))?,
+        let delivery = match read("MAIL_TRANSPORT").as_deref() {
+            None | Some("smtp") => {
+                let security = match read("SMTP_TLS").as_deref() {
+                    None | Some("off") => SmtpSecurity::Plain,
+                    Some("starttls") => SmtpSecurity::StartTls {
+                        username: read("SMTP_USERNAME").ok_or_else(|| {
+                            MailError("SMTP_TLS=starttls requires SMTP_USERNAME".into())
+                        })?,
+                        password: read("SMTP_PASSWORD").ok_or_else(|| {
+                            MailError("SMTP_TLS=starttls requires SMTP_PASSWORD".into())
+                        })?,
+                    },
+                    Some(_) => return Err(MailError("SMTP_TLS must be off or starttls".into())),
+                };
+                let default_port = match security {
+                    SmtpSecurity::Plain => 1025,
+                    SmtpSecurity::StartTls { .. } => 587,
+                };
+                let port = match read("SMTP_PORT") {
+                    None => default_port,
+                    Some(value) => value
+                        .trim()
+                        .parse()
+                        .map_err(|_| MailError("SMTP_PORT must be a port number".into()))?,
+                };
+                Delivery::Smtp {
+                    host: read("SMTP_HOST").unwrap_or_else(|| "127.0.0.1".into()),
+                    port,
+                    security,
+                }
+            }
+            Some("brevo-api") => Delivery::BrevoApi {
+                api_key: read("BREVO_API_KEY").ok_or_else(|| {
+                    MailError("MAIL_TRANSPORT=brevo-api requires BREVO_API_KEY".into())
+                })?,
             },
-            Some(_) => return Err(MailError("SMTP_TLS must be off or starttls".into())),
-        };
-        let default_port = match security {
-            SmtpSecurity::Plain => 1025,
-            SmtpSecurity::StartTls { .. } => 587,
-        };
-        let smtp_port = match read("SMTP_PORT") {
-            None => default_port,
-            Some(value) => value
-                .trim()
-                .parse()
-                .map_err(|_| MailError("SMTP_PORT must be a port number".into()))?,
+            Some(_) => return Err(MailError("MAIL_TRANSPORT must be smtp or brevo-api".into())),
         };
         Ok(Self {
-            smtp_host: read("SMTP_HOST").unwrap_or_else(|| "127.0.0.1".into()),
-            smtp_port,
-            security,
+            delivery,
             from: read("MAIL_FROM").unwrap_or_else(|| "DAC2 <no-reply@dac2.local>".into()),
             base_url: read("APP_BASE_URL").unwrap_or_else(|| "http://127.0.0.1:3000".into()),
         })
+    }
+
+    /// One line for the start-up log: where mail goes and how, never a login
+    /// or a key.
+    pub fn describe(&self) -> String {
+        match &self.delivery {
+            Delivery::Smtp {
+                host,
+                port,
+                security: SmtpSecurity::Plain,
+            } => format!("mail relay {host}:{port} (plaintext, local only)"),
+            Delivery::Smtp {
+                host,
+                port,
+                security: SmtpSecurity::StartTls { .. },
+            } => format!("mail relay {host}:{port} (STARTTLS with login)"),
+            Delivery::BrevoApi { .. } => "mail via the Brevo HTTP API (key configured)".into(),
+        }
     }
 }
 
@@ -78,26 +129,72 @@ impl fmt::Display for MailError {
 impl std::error::Error for MailError {}
 
 #[derive(Clone)]
+enum Transport {
+    Smtp(AsyncSmtpTransport<Tokio1Executor>),
+    BrevoApi {
+        client: reqwest::Client,
+        api_key: String,
+        url: String,
+    },
+}
+
+#[derive(Clone)]
 pub struct Mailer {
     config: MailConfig,
-    transport: AsyncSmtpTransport<Tokio1Executor>,
+    transport: Transport,
 }
 
 impl Mailer {
     pub fn new(config: MailConfig) -> Result<Self, MailError> {
-        let transport = match &config.security {
-            SmtpSecurity::Plain => {
-                AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(config.smtp_host.clone())
-                    .port(config.smtp_port)
-                    .build()
-            }
-            SmtpSecurity::StartTls { username, password } => {
-                AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&config.smtp_host)
+        Self::with_brevo_url(config, BREVO_API_URL)
+    }
+
+    /// `new` with the Brevo endpoint chosen by the caller, so a test can point
+    /// the mailer at a local server.
+    pub fn with_brevo_url(config: MailConfig, brevo_url: &str) -> Result<Self, MailError> {
+        let transport = match &config.delivery {
+            Delivery::Smtp {
+                host,
+                port,
+                security: SmtpSecurity::Plain,
+            } => Transport::Smtp(
+                AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(host.clone())
+                    .port(*port)
+                    .build(),
+            ),
+            Delivery::Smtp {
+                host,
+                port,
+                security: SmtpSecurity::StartTls { username, password },
+            } => Transport::Smtp(
+                AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(host)
                     .map_err(|error| MailError(format!("SMTP relay is not usable: {error}")))?
-                    .port(config.smtp_port)
+                    .port(*port)
                     .credentials(Credentials::new(username.clone(), password.clone()))
+                    .build(),
+            ),
+            Delivery::BrevoApi { api_key } => Transport::BrevoApi {
+                client: reqwest::Client::builder()
+                    // ring is the one TLS provider in this binary (sqlx and
+                    // lettre already use it); reqwest is told so explicitly
+                    // rather than pulling in a second one.
+                    .use_preconfigured_tls(
+                        rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+                            rustls::crypto::ring::default_provider(),
+                        ))
+                        .with_safe_default_protocol_versions()
+                        .map_err(|error| MailError(format!("TLS is not usable: {error}")))?
+                        .with_root_certificates(rustls::RootCertStore {
+                            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+                        })
+                        .with_no_client_auth(),
+                    )
+                    .timeout(std::time::Duration::from_secs(20))
                     .build()
-            }
+                    .map_err(|error| MailError(format!("HTTP client is not usable: {error}")))?,
+                api_key: api_key.clone(),
+                url: brevo_url.to_owned(),
+            },
         };
         Ok(Self { config, transport })
     }
@@ -137,24 +234,55 @@ impl Mailer {
         instruction: &str,
     ) -> Result<(), MailError> {
         let link = self.link(path, token);
-        let message = Message::builder()
-            .from(
-                self.config
-                    .from
-                    .parse()
-                    .map_err(|error| MailError(format!("invalid sender: {error}")))?,
-            )
-            .to(recipient
-                .parse()
-                .map_err(|error| MailError(format!("invalid recipient: {error}")))?)
-            .subject(subject)
-            .body(format!("{instruction}\n\n{link}\n"))
-            .map_err(|error| MailError(format!("could not build message: {error}")))?;
+        let body = format!("{instruction}\n\n{link}\n");
+        let sender: Mailbox = self
+            .config
+            .from
+            .parse()
+            .map_err(|error| MailError(format!("invalid sender: {error}")))?;
+        let recipient: Mailbox = recipient
+            .parse()
+            .map_err(|error| MailError(format!("invalid recipient: {error}")))?;
 
-        self.transport
-            .send(message)
-            .await
-            .map_err(|error| MailError(format!("SMTP delivery failed: {error}")))?;
+        match &self.transport {
+            Transport::Smtp(transport) => {
+                let message = Message::builder()
+                    .from(sender)
+                    .to(recipient)
+                    .subject(subject)
+                    .body(body)
+                    .map_err(|error| MailError(format!("could not build message: {error}")))?;
+                transport
+                    .send(message)
+                    .await
+                    .map_err(|error| MailError(format!("SMTP delivery failed: {error}")))?;
+            }
+            Transport::BrevoApi {
+                client,
+                api_key,
+                url,
+            } => {
+                let response = client
+                    .post(url)
+                    .header("api-key", api_key)
+                    .header(reqwest::header::ACCEPT, "application/json")
+                    .json(&brevo_request(&sender, &recipient, subject, &body))
+                    .send()
+                    .await
+                    .map_err(|error| {
+                        // reqwest's Display names the URL, never the key.
+                        MailError(format!("Brevo API request failed: {error}"))
+                    })?;
+                // The body is not read on failure: Brevo echoes the request,
+                // recipient included, and that does not belong in a log.
+                if !response.status().is_success() {
+                    return Err(MailError(format!(
+                        "Brevo API answered {}",
+                        response.status()
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -166,16 +294,42 @@ impl Mailer {
     }
 }
 
+/// The Brevo transactional request, kept as a pure function so its shape is
+/// tested without a network.
+fn brevo_request(
+    sender: &Mailbox,
+    recipient: &Mailbox,
+    subject: &str,
+    text: &str,
+) -> serde_json::Value {
+    let mut from = serde_json::json!({ "email": sender.email.to_string() });
+    if let Some(name) = &sender.name {
+        from["name"] = serde_json::Value::String(name.clone());
+    }
+    serde_json::json!({
+        "sender": from,
+        "to": [{ "email": recipient.email.to_string() }],
+        "subject": subject,
+        "textContent": text,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn local_smtp() -> Delivery {
+        Delivery::Smtp {
+            host: "127.0.0.1".into(),
+            port: 1025,
+            security: SmtpSecurity::Plain,
+        }
+    }
+
     #[test]
     fn links_use_the_configured_local_base_without_logging() {
         let mailer = Mailer::new(MailConfig {
-            smtp_host: "127.0.0.1".into(),
-            smtp_port: 1025,
-            security: SmtpSecurity::Plain,
+            delivery: local_smtp(),
             from: "DAC2 <no-reply@dac2.local>".into(),
             base_url: "http://127.0.0.1:3000/".into(),
         })
@@ -202,10 +356,12 @@ mod tests {
     #[test]
     fn unset_mail_variables_keep_the_local_plaintext_path() {
         let config = MailConfig::from_lookup(lookup(&[])).expect("defaults are valid");
-        assert_eq!(config.smtp_host, "127.0.0.1");
-        assert_eq!(config.smtp_port, 1025);
-        assert_eq!(config.security, SmtpSecurity::Plain);
+        assert_eq!(config.delivery, local_smtp());
         assert_eq!(config.base_url, "http://127.0.0.1:3000");
+        assert_eq!(
+            config.describe(),
+            "mail relay 127.0.0.1:1025 (plaintext, local only)"
+        );
     }
 
     #[test]
@@ -217,14 +373,23 @@ mod tests {
             ("SMTP_PASSWORD", "secret"),
         ]))
         .expect("a complete STARTTLS configuration is valid");
-        assert_eq!(config.smtp_port, 587);
         assert_eq!(
-            config.security,
-            SmtpSecurity::StartTls {
-                username: "login".into(),
-                password: "secret".into(),
+            config.delivery,
+            Delivery::Smtp {
+                host: "smtp-relay.example".into(),
+                port: 587,
+                security: SmtpSecurity::StartTls {
+                    username: "login".into(),
+                    password: "secret".into(),
+                },
             }
         );
+        let described = config.describe();
+        assert_eq!(
+            described,
+            "mail relay smtp-relay.example:587 (STARTTLS with login)"
+        );
+        assert!(!described.contains("secret"));
     }
 
     #[test]
@@ -252,5 +417,63 @@ mod tests {
         let error = MailConfig::from_lookup(lookup(&[("SMTP_PORT", "five")]))
             .expect_err("a port must parse");
         assert_eq!(error.to_string(), "SMTP_PORT must be a port number");
+    }
+
+    #[test]
+    fn the_brevo_api_needs_its_key_and_ignores_the_smtp_variables() {
+        let config = MailConfig::from_lookup(lookup(&[
+            ("MAIL_TRANSPORT", "brevo-api"),
+            ("BREVO_API_KEY", "xkeysib-test"),
+            ("SMTP_TLS", "nonsense-that-would-fail-under-smtp"),
+        ]))
+        .expect("a key is all the API path needs");
+        assert_eq!(
+            config.delivery,
+            Delivery::BrevoApi {
+                api_key: "xkeysib-test".into()
+            }
+        );
+        let described = config.describe();
+        assert_eq!(described, "mail via the Brevo HTTP API (key configured)");
+        assert!(!described.contains("xkeysib"));
+
+        let error = MailConfig::from_lookup(lookup(&[("MAIL_TRANSPORT", "brevo-api")]))
+            .expect_err("no key, no API path");
+        assert_eq!(
+            error.to_string(),
+            "MAIL_TRANSPORT=brevo-api requires BREVO_API_KEY"
+        );
+        let error = MailConfig::from_lookup(lookup(&[("MAIL_TRANSPORT", "sendgrid")]))
+            .expect_err("only the two transports are known");
+        assert_eq!(
+            error.to_string(),
+            "MAIL_TRANSPORT must be smtp or brevo-api"
+        );
+    }
+
+    #[test]
+    fn the_brevo_request_carries_sender_name_recipient_subject_and_text() {
+        let sender: Mailbox = "DAC2 <no-reply@dac2.local>".parse().unwrap();
+        let recipient: Mailbox = "owner@example.test".parse().unwrap();
+        let request = brevo_request(
+            &sender,
+            &recipient,
+            "ยืนยันอีเมล DAC2",
+            "กดลิงก์นี้\n\nhttps://x/y?token=t\n",
+        );
+        assert_eq!(
+            request,
+            serde_json::json!({
+                "sender": { "name": "DAC2", "email": "no-reply@dac2.local" },
+                "to": [{ "email": "owner@example.test" }],
+                "subject": "ยืนยันอีเมล DAC2",
+                "textContent": "กดลิงก์นี้\n\nhttps://x/y?token=t\n",
+            })
+        );
+        let bare: Mailbox = "no-reply@dac2.local".parse().unwrap();
+        assert_eq!(
+            brevo_request(&bare, &recipient, "s", "t")["sender"],
+            serde_json::json!({ "email": "no-reply@dac2.local" })
+        );
     }
 }

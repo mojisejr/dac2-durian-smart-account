@@ -67,17 +67,8 @@ async fn serve() -> Result<(), Box<dyn std::error::Error>> {
         .with_same_site(tower_sessions::cookie::SameSite::Lax)
         .with_secure(cookie_secure)
         .with_signed(session_key);
-    // Only the relay's host, port, and mode are printed, never the login.
-    println!(
-        "mail relay {}:{} ({})",
-        mail.smtp_host,
-        mail.smtp_port,
-        match mail.security {
-            web::mail::SmtpSecurity::Plain => "plaintext, local only",
-            web::mail::SmtpSecurity::StartTls { .. } => "STARTTLS with login",
-        }
-    );
-
+    // Where mail goes and how, never a login or a key.
+    println!("{}", mail.describe());
     println!(
         "gate: account {}/{}s, login {}/{}s, client address from {}",
         gate.account.attempts,

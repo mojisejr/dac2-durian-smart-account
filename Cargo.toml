@@ -18,7 +18,9 @@ leptos_axum = "=0.8.10"
 leptos_router = "=0.8.15"
 lettre = { version = "=0.11.23", default-features = false, features = ["builder", "smtp-transport", "tokio1", "tokio1-rustls-tls"] }
 rand = "=0.10.2"
+reqwest = { version = "=0.13.2", default-features = false, features = ["rustls-no-provider", "json"] }
 rust_decimal = { version = "=1.43.0", features = ["serde"] }
+rustls = { version = "=0.23.43", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.151"
 sha2 = "=0.11.0"
@@ -28,6 +30,7 @@ tower-sessions = { version = "=0.14.0", features = ["signed"] }
 tower-sessions-sqlx-store = "=0.15.0"
 tower = { version = "=0.5.3", features = ["util"] }
 wasm-bindgen = "=0.2.108"
+webpki-roots = "=1.0.9"
 
 [profile.wasm-release]
 inherits = "release"

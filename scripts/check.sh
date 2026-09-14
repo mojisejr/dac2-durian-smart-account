@@ -11,6 +11,7 @@ cargo test -p web --test analysis_ssr --features ssr
 cargo test -p web --test assets_ssr --features ssr
 cargo test -p web --test shell_ssr --features ssr
 cargo test -p web --test gate_http --features ssr
+cargo test -p web --test brevo_api --features ssr
 SQLX_OFFLINE=true cargo check --workspace --all-targets --all-features
 SQLX_OFFLINE=true cargo clippy --workspace --all-targets --all-features -- -D warnings
 SQLX_OFFLINE=true cargo leptos build
