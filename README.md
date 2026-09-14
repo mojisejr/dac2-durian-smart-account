@@ -276,8 +276,40 @@ cargo leptos serve
 Open the application at <http://127.0.0.1:3000>. After registration, open the
 message in Mailpit and follow its verification link before logging in. The
 cookie is non-Secure by default because this localhost workflow has no TLS to
-carry it; `COOKIE_SECURE=true` turns it on. A network deployment still requires
-the deferred rate limiting, a real SMTP relay, and HTTPS first.
+carry it; `COOKIE_SECURE=true` turns it on, and the server refuses to start
+with an `https://` `APP_BASE_URL` unless it is on. A network deployment still
+needs a real SMTP relay and HTTPS in front of it.
+
+## Network gate
+
+Two budgets per client address guard the account doors, each written in the
+environment as `attempts/seconds`. `RATE_LIMIT_ACCOUNT` (default `5/3600`)
+covers registration, verification resend, and the password-reset request, the
+routes that each send a message. `RATE_LIMIT_LOGIN` (default `10/300`) covers
+login, the verification link and form, and the reset itself, the routes that
+take a credential or a token. Everything else is unlimited. A refused request
+gets `429` with `Retry-After`; a browser form sees a plain page that says how
+long to wait, a hydrated form sees the same sentence where it shows every
+other message. A refused attempt is not counted, so waiting is enough.
+
+The address is the connection's peer unless `CLIENT_ADDRESS_SOURCE=forwarded-for`,
+which reads the first `X-Forwarded-For` entry; turn that on only behind a
+proxy that sets the header itself, because a client can write it too. The
+count lives in the process, so two instances would count separately.
+
+`PILOT_NOTICE=true` shows a one-line notice on every page saying the copy is a
+study copy whose data may be cleared. The notice is always in the markup and
+hidden by the stylesheet; the shell switches it on with `data-pilot` on
+`<html>`, so localhost and the study address hydrate the same tree.
+
+Every variable the server needs is checked before it binds: a missing
+`DATABASE_URL` or `SESSION_KEY`, a flag that is not `true` or `false`, a limit
+that does not parse, or an https base URL without a Secure cookie stops the
+process with the variable's name and never its value.
+
+Proof: `cargo test -p web --test gate_http --features ssr` for the budgets over
+HTTP and `--test shell_ssr` for the notice; `scripts/check-container.sh` runs
+the image with the notice on and re-measures the route matrix.
 
 ## Run the container locally
 

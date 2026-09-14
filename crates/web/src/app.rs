@@ -19,6 +19,13 @@ pub fn App() -> impl IntoView {
     view! {
         <Router>
             <main>
+                // Rendered on every page and shown only when the shell marks
+                // the document as a pilot copy, so the same markup hydrates
+                // on localhost and on the study address alike.
+                <p class="pilot-notice" role="note">
+                    "นี่คือสำเนาทดลอง ข้อมูลที่กรอกใช้เพื่อการศึกษาและอาจถูกลบ"
+                    <span class="pilot-notice-term">" (pilot)"</span>
+                </p>
                 <header class="site-header">
                     <A href="/">"DAC2 — Durian Smart Account"</A>
                 </header>
@@ -236,18 +243,25 @@ fn FormField(
 #[component]
 fn ActionMessage<S>(action: ServerAction<S>) -> impl IntoView
 where
-    S: server_fn::ServerFn<Output = String> + Clone + Send + Sync + 'static,
-    S::Error: Clone + std::fmt::Display + Send + Sync + 'static,
+    S: server_fn::ServerFn<Output = String, Error = ServerFnError> + Clone + Send + Sync + 'static,
 {
     view! {
         <p class="form-message" aria-live="polite">
-            {move || {
-                action
-                    .value()
-                    .get()
-                    .map(|result| result.unwrap_or_else(|error| error.to_string()))
-            }}
+            {move || action.value().get().map(plain_message)}
         </p>
+    }
+}
+
+/// The sentence a form shows for what the server answered. A message the
+/// server wrote for the owner is shown as written; the transport's own
+/// prefix ("error running server function") is not the owner's language and
+/// is dropped. Any other failure keeps its description, because it is the
+/// only clue anyone has.
+fn plain_message(result: Result<String, ServerFnError>) -> String {
+    match result {
+        Ok(message) => message,
+        Err(ServerFnError::ServerError(message)) => message,
+        Err(other) => other.to_string(),
     }
 }
 
@@ -264,9 +278,13 @@ fn NotFound() -> impl IntoView {
 
 #[cfg(feature = "ssr")]
 pub fn shell(options: LeptosOptions) -> impl IntoView {
+    // The attribute lives on <html>, outside what the body hydrates, so a
+    // notice that is on for the server is on for the client without either
+    // side rendering a different tree.
+    let pilot = crate::settings::pilot_notice().then_some("true");
     view! {
         <!DOCTYPE html>
-        <html lang="th">
+        <html lang="th" data-pilot=pilot>
             <head>
                 <meta charset="utf-8"/>
                 <meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -276,5 +294,26 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
             </head>
             <body><App/></body>
         </html>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_server_message_is_shown_as_written_without_the_transport_prefix() {
+        assert_eq!(
+            plain_message(Err(ServerFnError::new(crate::auth::LOGIN_FAILED))),
+            crate::auth::LOGIN_FAILED
+        );
+        assert_eq!(
+            plain_message(Err(ServerFnError::new(
+                "ลองหลายครั้งติดกันแล้ว กรุณารอ 5 นาที แล้วลองใหม่อีกครั้ง"
+            ))),
+            "ลองหลายครั้งติดกันแล้ว กรุณารอ 5 นาที แล้วลองใหม่อีกครั้ง"
+        );
+        assert_eq!(plain_message(Ok("เข้าสู่ระบบแล้ว".into())), "เข้าสู่ระบบแล้ว");
+        assert!(plain_message(Err(ServerFnError::Request("offline".into()))).contains("offline"));
     }
 }

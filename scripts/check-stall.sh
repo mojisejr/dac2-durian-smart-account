@@ -21,7 +21,12 @@ fi
 : "${APP_BASE_URL:=http://127.0.0.1:3000}"
 : "${ROUNDS:=40}"
 : "${LOAD:=3}"
-export DATABASE_URL SESSION_KEY APP_BASE_URL ROUNDS LOAD
+# The proof registers and logs in on every run; a second run inside the
+# default account window would be refused, so the budgets are widened here.
+# The default limits are proved by crates/web/tests/gate_http.rs.
+: "${RATE_LIMIT_ACCOUNT:=60/3600}"
+: "${RATE_LIMIT_LOGIN:=60/300}"
+export DATABASE_URL SESSION_KEY APP_BASE_URL RATE_LIMIT_ACCOUNT RATE_LIMIT_LOGIN ROUNDS LOAD
 
 docker compose up -d --wait
 cargo sqlx migrate run
