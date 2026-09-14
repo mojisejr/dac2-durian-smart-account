@@ -1843,7 +1843,7 @@ fn TargetFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
 #[component]
 fn HealthFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
     view! { <section class="card field-stack health-card">
-        <div class="section-title"><div><h2>"สุขภาพสวน 12 ข้อ"</h2><p>"1 = ต้องเร่งปรับปรุง · 5 = แข็งแรง"</p></div><strong>{move || format!("{}/12", form.get().health_scores.iter().filter(|v| !v.is_empty()).count())}</strong></div>
+        <div class="section-title"><div><h2>"สวนพร้อมแค่ไหน ตามที่คุณเห็น 12 ข้อ"</h2><small class="formal-term">"สุขภาพธุรกิจ · ประเมินตนเอง"</small><p>"ให้คะแนนตัวเอง 1 = ยังไม่พร้อมเลย · 5 = พร้อมมาก คะแนนเป็นภาพที่คุณเห็น ไม่ใช่การวินิจฉัย"</p></div><strong>{move || format!("{}/12", form.get().health_scores.iter().filter(|v| !v.is_empty()).count())}</strong></div>
         {HealthQuestion::ALL.into_iter().enumerate().map(|(index, question)| view! {
             <fieldset><legend>{health_question_label(question)}</legend>{if closed {
                 view! { <p class="readonly-value">{form.get().health_scores.get(index).cloned().filter(|value| !value.is_empty()).unwrap_or_else(|| "—".into())}</p> }.into_any()

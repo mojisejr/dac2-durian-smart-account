@@ -172,10 +172,17 @@ const fn health_status_label(status: HealthStatus) -> (&'static str, &'static st
 /// the figure it explains visible above it, and closes by its own button rather
 /// than by finding the same small icon again.
 #[component]
-pub fn Explain(explanation: Explanation, label: String) -> impl IntoView {
+pub fn Explain(
+    explanation: Explanation,
+    label: String,
+    /// The season whose inputs the sheet links to; `None` on the sample.
+    #[prop(default = None)]
+    plan_id: Option<i64>,
+) -> impl IntoView {
     let open = RwSignal::new(false);
     let title = label.clone();
     let sheet_label = label.clone();
+    let (input_section, input_label) = explanation.input;
     view! {
         <details class="figure-explanation" open=move || open.get()>
             <summary
@@ -196,6 +203,9 @@ pub fn Explain(explanation: Explanation, label: String) -> impl IntoView {
                     <h3>"ใช้ยังไง"</h3><p>{explanation.how}</p>
                     <h3>"ทำไมต้องมี"</h3><p>{explanation.why}</p>
                     <h3>"ไม่ใส่ได้ไหม"</h3><p>{explanation.missing}</p>
+                    {plan_id.map(|id| view! {
+                        <A attr:class="text-button explanation-input" href=format!("/plans/{id}/{input_section}")>{input_label}</A>
+                    })}
                 </div>
                 <button class="sheet-close" type="button" on:click=move |_| open.set(false)>"ปิด"</button>
             </div>
@@ -212,6 +222,7 @@ fn Figure(
     value: String,
     #[prop(optional)] explanation: Option<Explanation>,
     #[prop(default = None)] absent_reason: Option<String>,
+    #[prop(default = None)] plan_id: Option<i64>,
 ) -> impl IntoView {
     let explain_label = label;
     view! {
@@ -222,7 +233,7 @@ fn Figure(
                     {formal_term.map(|term| view! { <small class="formal-term">{term}</small> })}
                 </span>
                 {explanation.map(|explanation| view! {
-                    <Explain explanation label=explain_label.to_owned()/>
+                    <Explain explanation label=explain_label.to_owned() plan_id/>
                 })}
             </span>
             {match absent_reason {
@@ -340,7 +351,7 @@ pub(crate) fn DashboardFigures(
                 <section class="card hero-card">
                     <span class="figure-label">
                         <span class="figure-words">"เหลือหลังหักค่าใช้จ่ายทั้งหมด"<small class="formal-term">"กำไรสุทธิ"</small></span>
-                        <Explain explanation=explanations::NET_PROFIT label="เหลือหลังหักค่าใช้จ่ายทั้งหมด".into()/>
+                        <Explain explanation=explanations::NET_PROFIT label="เหลือหลังหักค่าใช้จ่ายทั้งหมด".into() plan_id=id/>
                     </span>
                     <strong class="hero-value">{baht(business.net_profit)}</strong>
                 </section>
@@ -362,7 +373,7 @@ pub(crate) fn DashboardFigures(
             <div class="card figure-tile">
                 <span class="figure-label">
                     <span class="figure-words">"ต้นทุนต่อ 1 กก. ที่ขาย"<small class="formal-term">"ต้นทุนต่อกิโลกรัม"</small></span>
-                    <Explain explanation=explanations::for_kpi(KpiKind::CostPerKg) label="ต้นทุนต่อ 1 กก. ที่ขาย".into()/>
+                    <Explain explanation=explanations::for_kpi(KpiKind::CostPerKg) label="ต้นทุนต่อ 1 กก. ที่ขาย".into() plan_id=id/>
                 </span>
                 {match (cost.cost_per_kg, &profit_absent) {
                     (Some(_), _) => view! { <strong>{with_unit(cost.cost_per_kg, "บาท/กก.")}</strong> }.into_any(),
@@ -373,7 +384,7 @@ pub(crate) fn DashboardFigures(
             <div class="card figure-tile">
                 <span class="figure-label">
                     <span class="figure-words">"ต้องขายอย่างน้อยกี่กิโลจึงไม่ขาดทุน"<small class="formal-term">"จุดคุ้มทุนด้านปริมาณ"</small></span>
-                    <Explain explanation=explanations::BREAK_EVEN label="ต้องขายอย่างน้อยกี่กิโลจึงไม่ขาดทุน".into()/>
+                    <Explain explanation=explanations::BREAK_EVEN label="ต้องขายอย่างน้อยกี่กิโลจึงไม่ขาดทุน".into() plan_id=id/>
                 </span>
                 {match (business.break_even_kg, &profit_absent) {
                     (Some(_), _) => view! { <strong>{with_unit(business.break_even_kg, "กก.")}</strong> }.into_any(),
@@ -384,7 +395,7 @@ pub(crate) fn DashboardFigures(
             <div class="card figure-tile">
                 <span class="figure-label">
                     <span class="figure-words">"กำไรเทียบกับเงินก้อนที่ลงไป"<small class="formal-term">"ผลตอบแทนต่อเงินลงทุน (ROI)"</small></span>
-                    <Explain explanation=explanations::ROI label="กำไรเทียบกับเงินก้อนที่ลงไป".into()/>
+                    <Explain explanation=explanations::ROI label="กำไรเทียบกับเงินก้อนที่ลงไป".into() plan_id=id/>
                 </span>
                 {match roi {
                     Ok(value) => view! { <strong>{value}</strong> }.into_any(),
@@ -394,7 +405,7 @@ pub(crate) fn DashboardFigures(
             <div class="card figure-tile">
                 <span class="figure-label">
                     <span class="figure-words">"อีกกี่ปีเงินก้อนจะกลับมาครบ"<small class="formal-term">"ระยะคืนทุน"</small></span>
-                    <Explain explanation=explanations::PAYBACK label="อีกกี่ปีเงินก้อนจะกลับมาครบ".into()/>
+                    <Explain explanation=explanations::PAYBACK label="อีกกี่ปีเงินก้อนจะกลับมาครบ".into() plan_id=id/>
                 </span>
                 {match payback {
                     Ok(value) => view! { <strong>{value}</strong> }.into_any(),
@@ -406,19 +417,19 @@ pub(crate) fn DashboardFigures(
         <section class="card figure-list">
             <Figure label="ขายได้ทั้งฤดู" formal_term="รายได้รวม" value=baht(revenue.revenue) absent_reason=revenue_absent/>
             <Figure label="จ่ายทั้งฤดู รวมค่าเสื่อม" formal_term="ต้นทุนรวม" value=baht(cost.total_cost)
-                explanation=explanations::VARIABLE_VERSUS_FIXED absent_reason=cost.total_cost.is_none().then(|| profit_absent.clone().unwrap_or_else(|| ABSENT.to_owned()))/>
+                explanation=explanations::VARIABLE_VERSUS_FIXED plan_id=id absent_reason=cost.total_cost.is_none().then(|| profit_absent.clone().unwrap_or_else(|| ABSENT.to_owned()))/>
             <Figure label="เงินสดที่เหลือจากฤดูนี้" formal_term="กระแสเงินสดจากการดำเนินงาน" value=baht(business.operating_cash_flow)
-                explanation=explanations::NET_PROFIT absent_reason=business.operating_cash_flow.is_none().then(|| cash_absent.clone().unwrap_or_else(|| ABSENT.to_owned()))/>
+                explanation=explanations::NET_PROFIT plan_id=id absent_reason=business.operating_cash_flow.is_none().then(|| cash_absent.clone().unwrap_or_else(|| ABSENT.to_owned()))/>
             <Figure label="ราคาเฉลี่ยของทุกเกรดรวมกัน" formal_term="ราคาขายเฉลี่ยถ่วงน้ำหนัก" value=with_unit(revenue.weighted_price_per_kg, "บาท/กก.")
-                explanation=explanations::WEIGHTED_PRICE absent_reason=revenue.weighted_price_per_kg.is_none().then(|| profit_absent.clone().unwrap_or_else(|| ABSENT.to_owned()))/>
+                explanation=explanations::WEIGHTED_PRICE plan_id=id absent_reason=revenue.weighted_price_per_kg.is_none().then(|| profit_absent.clone().unwrap_or_else(|| ABSENT.to_owned()))/>
             <Figure label="เงินเหลือต่อ 1 กก. ก่อนจ่ายค่าใช้จ่ายประจำ" formal_term="ส่วนเกินต่อหน่วย" value=with_unit(business.contribution_per_kg, "บาท/กก.")
-                explanation=explanations::CONTRIBUTION_PER_KG absent_reason=business.contribution_per_kg.is_none().then(|| profit_absent.clone().unwrap_or_else(|| ABSENT.to_owned()))/>
+                explanation=explanations::CONTRIBUTION_PER_KG plan_id=id absent_reason=business.contribution_per_kg.is_none().then(|| profit_absent.clone().unwrap_or_else(|| ABSENT.to_owned()))/>
             <Figure label="ขายได้เกินขั้นต่ำที่ไม่ขาดทุนกี่กิโล" formal_term="ส่วนเผื่อความปลอดภัย" value=with_unit(business.safety_margin_kg, "กก.")
-                explanation=explanations::SAFETY_MARGIN absent_reason=business.safety_margin_kg.is_none().then(|| profit_absent.clone().unwrap_or_else(|| ABSENT.to_owned()))/>
+                explanation=explanations::SAFETY_MARGIN plan_id=id absent_reason=business.safety_margin_kg.is_none().then(|| profit_absent.clone().unwrap_or_else(|| ABSENT.to_owned()))/>
             <Figure label="ของที่มีเทียบกับที่ผู้ซื้อคุยไว้" formal_term="การตอบสนองตลาด" value=percent(revenue.market_fulfillment)
-                explanation=explanations::MARKET_FULFILLMENT absent_reason=revenue.market_fulfillment.is_none().then(|| market_absent.clone().unwrap_or_else(|| ABSENT.to_owned()))/>
+                explanation=explanations::MARKET_FULFILLMENT plan_id=id absent_reason=revenue.market_fulfillment.is_none().then(|| market_absent.clone().unwrap_or_else(|| ABSENT.to_owned()))/>
             <Figure label="คะแนนที่ประเมินสวนเอง" formal_term="คะแนนสุขภาพธุรกิจ" value=score(health.overall_score)
-                explanation=explanations::HEALTH_SCORE absent_reason=health.overall_score.is_none().then(|| health_absent.clone().unwrap_or_else(|| ABSENT.to_owned()))/>
+                explanation=explanations::HEALTH_SCORE plan_id=id absent_reason=health.overall_score.is_none().then(|| health_absent.clone().unwrap_or_else(|| ABSENT.to_owned()))/>
         </section>
     }
 }
@@ -510,7 +521,7 @@ fn AnalysisTabs(id: i64, analysis: Analysis, tab: RwSignal<&'static str>) -> imp
             <ChecksPanel id checks/>
         </div>
         <div role="tabpanel" aria-label="ภาษี" hidden=move || tab.get() != "tax">
-            <TaxPanel tax/>
+            <TaxPanel id tax/>
         </div>
         <div role="tabpanel" aria-label="สถานการณ์" hidden=move || tab.get() != "scenario">
             <ScenarioPanel scenario/>
@@ -569,7 +580,7 @@ fn KpiRow(id: i64, kpi: KpiResult) -> impl IntoView {
         <div class="kpi-row">
             <span class="figure-label">
                 {label}
-                <Explain explanation=explanations::for_kpi(kpi.kind) label=label.to_owned()/>
+                <Explain explanation=explanations::for_kpi(kpi.kind) label=label.to_owned() plan_id=Some(id)/>
             </span>
             <span class="kpi-actual">{actual}</span>
             {match (target, verdict) {
@@ -625,7 +636,7 @@ fn CheckRow(id: i64, check: CheckResult) -> impl IntoView {
 }
 
 #[component]
-fn TaxPanel(tax: calc::TaxAnalysis) -> impl IntoView {
+fn TaxPanel(id: i64, tax: calc::TaxAnalysis) -> impl IntoView {
     let actual = tax.actual_expense.clone();
     let flat = tax.flat_sixty_percent.clone();
 
@@ -633,7 +644,7 @@ fn TaxPanel(tax: calc::TaxAnalysis) -> impl IntoView {
         <section class="card">
             <div class="section-title">
                 <div><h2>"ถ้าต้องเสียภาษี น่าจะประมาณเท่าไร"</h2><small class="formal-term">"ภาษีเงินได้บุคคลธรรมดา · ประมาณการ"</small></div>
-                <Explain explanation=explanations::TAX label="ถ้าต้องเสียภาษี น่าจะประมาณเท่าไร".into()/>
+                <Explain explanation=explanations::TAX label="ถ้าต้องเสียภาษี น่าจะประมาณเท่าไร".into() plan_id=Some(id)/>
             </div>
             <p class="caption tax-disclaimer">{explanations::TAX_DISCLAIMER}</p>
             <div class="tax-methods">
@@ -788,7 +799,7 @@ mod tests {
             CheckKind::TotalCostLinked,
             CheckKind::HealthAnswersComplete,
         ] {
-            let (_, section) = check_label(kind);
+            let (_, _, section) = check_label(kind);
             assert!(
                 SECTION_TITLES.iter().any(|(slug, _)| *slug == section),
                 "{kind:?} routes to {section}, which is not an input section"

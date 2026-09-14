@@ -519,3 +519,53 @@ fn an_unanalysable_plan_shows_no_tab_content_it_cannot_support() {
         "no KPI is graded when nothing can be calculated"
     );
 }
+
+/// Result surfaces make arithmetic observations. They never tell the owner
+/// what to do, what caused a figure, or what is wrong with the orchard, and
+/// every ⓘ sheet links to the page holding the inputs it was computed from.
+#[test]
+fn result_explanations_observe_arithmetic_and_link_to_their_inputs() {
+    let forbidden = [
+        "ไม่ควร",
+        "ต้องเร่ง",
+        "สาเหตุ",
+        "แนะนำให้",
+        "ควรทำ",
+        "ล้มได้",
+        "มักแปลว่า",
+        "ทำได้ทางเดียว",
+        "ต้องปรับปรุง",
+        "ต้องแก้",
+        "พร้อมใช้ตัดสินใจ",
+    ];
+    for (name, html) in [
+        ("dashboard", dashboard(sample_form())),
+        ("analysis", analysis(sample_form())),
+        ("hub", render_hub(sample_form())),
+    ] {
+        // The tax disclaimer's "ไม่ควรใช้เลือกวิธียื่น" is the boundary of
+        // the estimate, not advice about the orchard, and stays.
+        let scanned = html.replace(web::explanations::TAX_DISCLAIMER, "");
+        for phrase in forbidden {
+            assert!(
+                !scanned.contains(phrase),
+                "{name} still says {phrase}: …{}…",
+                excerpt(&scanned, phrase)
+            );
+        }
+        let sheets = html.matches("class=\"figure-explanation\"").count();
+        let links = html.matches("explanation-input").count();
+        if sheets > 0 {
+            assert_eq!(sheets, links, "{name}: every ⓘ sheet links to its inputs");
+            assert!(html.contains("href=\"/plans/42/"));
+        }
+    }
+}
+
+fn excerpt(html: &str, phrase: &str) -> String {
+    let at = html.find(phrase).unwrap_or(0);
+    let start = at.saturating_sub(60);
+    html[start..(at + phrase.len() + 30).min(html.len())]
+        .chars()
+        .collect()
+}
