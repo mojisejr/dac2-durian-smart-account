@@ -12,8 +12,8 @@ use crate::{
     analysis_ui::{PlanAnalysisView, PlanDashboardView},
     auth::{Logout, current_user_email},
     plan_form::{
-        ExpenseClassification, FixedCostForm, GradeEntry, GradeForm, PlanForm, ReadinessTone,
-        UnclassifiedExpenseForm, VariableCostForm,
+        DecisionReadiness, DecisionState, ExpenseClassification, FixedCostForm, GradeEntry,
+        GradeForm, PlanForm, ReadinessTone, UnclassifiedExpenseForm, VariableCostForm,
     },
     plans::{
         CreateSeason, FinalizeActual, PlanRecord, SaveActualDraft, SavePlan, SaveQuickStep,
@@ -571,9 +571,12 @@ pub fn DemoPage() -> impl IntoView {
                 </div>
             </section>
             <section aria-live="polite">
-                {move || form.get().to_plan().ok().map(|plan| view! {
-                    <crate::analysis_ui::DashboardFigures analysis=calc::analyze(&plan)/>
-                })}
+                {move || {
+                    let form = form.get();
+                    form.to_plan().ok().map(|plan| view! {
+                        <crate::analysis_ui::DashboardFigures id=None analysis=calc::analyze(&plan) decisions=form.decision_readiness(&[], None)/>
+                    })
+                }}
             </section>
         </section>
     }
@@ -610,6 +613,7 @@ pub fn PlanHub(record: PlanRecord) -> impl IntoView {
     let forecast_mode = record.forecast_mode;
     let quick_estimate = record.quick_estimate;
     let asset_allocations = record.asset_allocations;
+    let starting_capital = record.starting_capital;
 
     view! {
         <section class="page-stack plan-page">
@@ -648,7 +652,7 @@ pub fn PlanHub(record: PlanRecord) -> impl IntoView {
                     <QuickModeHub id estimate=quick_estimate.clone() closed/>
                 }.into_any(),
                 calc::ForecastMode::Detailed => view! {
-                    <DetailedModeHub id form=form.clone() closed asset_depreciation=included_asset_depreciation(&asset_allocations)/>
+                    <DetailedModeHub id form=form.clone() closed asset_depreciation=included_asset_depreciation(&asset_allocations) decisions=form.decision_readiness(&asset_allocations, starting_capital)/>
                 }.into_any(),
             }}
             // No live total here. The bar exists so a figure moves while the
@@ -996,6 +1000,7 @@ fn DetailedModeHub(
     form: PlanForm,
     closed: bool,
     asset_depreciation: Option<rust_decimal::Decimal>,
+    decisions: Vec<DecisionReadiness>,
 ) -> impl IntoView {
     let switch = ServerAction::<SwitchForecastMode>::new();
     let next = ["production", "expenses", "variable-costs", "fixed-costs"]
@@ -1054,6 +1059,7 @@ fn DetailedModeHub(
             <A attr:class="button primary" href=guide_href>{guide_action}</A>
             <p class="caption">"คุณยังเปิดดูหรือแก้ส่วนอื่นด้านล่างได้ตลอด ระบบไม่ล็อกลำดับ"</p>
         </section>
+        <DecisionList plan_id=id decisions compact=true/>
         <div class="overview-heading">
             <h2>"ดูและแก้ข้อมูลทั้งหมด"</h2>
             <p>"เลือกเฉพาะส่วนที่ต้องการได้ คำสถานะบอกว่าตอนนี้คำนวณอะไรได้แล้ว"</p>
@@ -1970,6 +1976,43 @@ where
 fn route_plan_id() -> impl Fn() -> Option<i64> + Copy {
     let params = use_params_map();
     move || params.with(|params| params.get("id").and_then(|id| id.parse().ok()))
+}
+
+/// The same six decisions, in the same words, on the hub, the dashboard, and
+/// the analysis page: what can be answered now, which single fact is still
+/// missing, and which optional fact would add a result.
+#[component]
+pub(crate) fn DecisionList(
+    plan_id: i64,
+    decisions: Vec<DecisionReadiness>,
+    #[prop(optional)] compact: bool,
+) -> impl IntoView {
+    view! {
+        <section class="card decision-list" class:decision-list-compact=compact>
+            <h2>"ตอนนี้ตอบได้ว่า"</h2>
+            <ul class="decision-rows">
+                {decisions.into_iter().map(|readiness| {
+                    let question = readiness.decision.question();
+                    let formal = readiness.decision.formal_term();
+                    let status = match readiness.state {
+                        DecisionState::Ready => view! { <span class="status good">"ดูได้แล้ว"</span> }.into_any(),
+                        DecisionState::Missing { question, section } => view! {
+                            <A attr:class="status warning" href=format!("/plans/{plan_id}/{section}")>{format!("ยังขาด: {question}")}</A>
+                        }.into_any(),
+                        DecisionState::Optional { unlock, section } => view! {
+                            <A attr:class="status muted" href=format!("/plans/{plan_id}/{section}")>{format!("เพิ่มได้: {unlock}")}</A>
+                        }.into_any(),
+                    };
+                    view! {
+                        <li class="decision-row">
+                            <span class="decision-question"><strong>{question}</strong><small class="formal-term">{formal}</small></span>
+                            {status}
+                        </li>
+                    }
+                }).collect_view()}
+            </ul>
+        </section>
+    }
 }
 
 pub(crate) fn money(value: rust_decimal::Decimal) -> String {

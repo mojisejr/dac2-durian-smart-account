@@ -173,6 +173,84 @@ pub struct SectionReadiness {
     pub tone: ReadinessTone,
 }
 
+/// The questions an owner opens this application to answer. Readiness is
+/// named per decision, not per input section: a page says which of these
+/// can be answered now and which single question is still missing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Decision {
+    FirstEstimate,
+    MarketComparison,
+    CashView,
+    InvestmentView,
+    HealthSelfReview,
+    FinalClose,
+}
+
+impl Decision {
+    pub const ALL: [Decision; 6] = [
+        Decision::FirstEstimate,
+        Decision::MarketComparison,
+        Decision::CashView,
+        Decision::InvestmentView,
+        Decision::HealthSelfReview,
+        Decision::FinalClose,
+    ];
+
+    /// The decision in the owner's words.
+    pub fn question(self) -> &'static str {
+        match self {
+            Decision::FirstEstimate => "ปีนี้จะเหลือกำไรเท่าไร",
+            Decision::MarketComparison => "ของที่มีพอกับที่ผู้ซื้อคุยไว้ไหม",
+            Decision::CashView => "ปีนี้เงินสดจะเหลือเท่าไร",
+            Decision::InvestmentView => "คุ้มกับเงินก้อนที่ลงไปไหม",
+            Decision::HealthSelfReview => "สวนพร้อมแค่ไหน ตามที่ประเมินเอง",
+            Decision::FinalClose => "ปิดฤดูด้วยตัวเลขจริง",
+        }
+    }
+
+    /// The accounting or planning term the decision is known by.
+    pub fn formal_term(self) -> &'static str {
+        match self {
+            Decision::FirstEstimate => "กำไรสุทธิ · จุดคุ้มทุน",
+            Decision::MarketComparison => "การตอบสนองตลาด",
+            Decision::CashView => "กระแสเงินสดจากการดำเนินงาน",
+            Decision::InvestmentView => "ผลตอบแทนต่อเงินลงทุน (ROI) · ระยะคืนทุน",
+            Decision::HealthSelfReview => "คะแนนสุขภาพธุรกิจ",
+            Decision::FinalClose => "ผลจริงเทียบประมาณการ",
+        }
+    }
+}
+
+/// What stands between the owner and one decision.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DecisionState {
+    /// The result can be shown from what is entered.
+    Ready,
+    /// A required fact is absent; `question` names it and `section` is the
+    /// page that asks it.
+    Missing {
+        question: &'static str,
+        section: &'static str,
+    },
+    /// The main results do not need this; `unlock` names what would add it.
+    Optional {
+        unlock: &'static str,
+        section: &'static str,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DecisionReadiness {
+    pub decision: Decision,
+    pub state: DecisionState,
+}
+
+impl DecisionReadiness {
+    pub fn is_ready(&self) -> bool {
+        self.state == DecisionState::Ready
+    }
+}
+
 impl PlanForm {
     pub fn from_plan(plan: &Plan) -> Self {
         let sellable_yield_kg = plan.production.selected_sellable_yield_kg();
@@ -592,6 +670,116 @@ impl PlanForm {
                 }
             }
             _ => readiness,
+        }
+    }
+
+    /// One readiness statement per decision, from the same analysis the
+    /// dashboard shows, so the hub, the dashboard, and the analysis page
+    /// cannot disagree about what can be answered.
+    pub fn decision_readiness(
+        &self,
+        assets: &[calc::AssetAllocation],
+        starting_capital: Option<Decimal>,
+    ) -> Vec<DecisionReadiness> {
+        let analysis = self
+            .to_plan()
+            .ok()
+            .map(|plan| calc::analyze_with_assets(&plan, assets, starting_capital));
+        Decision::ALL
+            .into_iter()
+            .map(|decision| DecisionReadiness {
+                decision,
+                state: self.decision_state(decision, analysis.as_ref()),
+            })
+            .collect()
+    }
+
+    fn decision_state(
+        &self,
+        decision: Decision,
+        analysis: Option<&calc::Analysis>,
+    ) -> DecisionState {
+        use DecisionState::{Missing, Optional, Ready};
+        let Some(analysis) = analysis else {
+            return match decision {
+                Decision::FinalClose => Ready,
+                Decision::HealthSelfReview => self.health_state(),
+                _ => Missing {
+                    question: "มีข้อมูลที่ต้องตรวจก่อน",
+                    section: "production",
+                },
+            };
+        };
+        // The first missing fact on the road to a profit figure, in the
+        // order the guided path asks them.
+        let first_estimate_gap = if analysis.revenue.sellable_yield_kg.is_none() {
+            Some(("ปีนี้จะขายได้กี่กิโล", "production"))
+        } else if analysis.revenue.weighted_price_per_kg.is_none() {
+            Some(("ขายกิโลละเท่าไร", "production"))
+        } else if !self.unclassified.is_empty() {
+            Some(("ค่าใช้จ่ายที่จดไว้เป็นแบบไหน", "expenses"))
+        } else if analysis.cost.variable_cost.is_none() {
+            Some(("ค่าใช้จ่ายที่เพิ่มตามการผลิต หรือยืนยันว่าไม่มี", "variable-costs"))
+        } else if analysis.cost.fixed_cost.is_none() {
+            Some(("ค่าใช้จ่ายประจำ หรือยืนยันว่าไม่มี", "fixed-costs"))
+        } else {
+            None
+        };
+        let gap = |gap: Option<(&'static str, &'static str)>| match gap {
+            Some((question, section)) => Missing { question, section },
+            None => Ready,
+        };
+        match decision {
+            Decision::FirstEstimate => gap(first_estimate_gap),
+            Decision::MarketComparison => {
+                if analysis.revenue.market_fulfillment.is_some() {
+                    Ready
+                } else if self.market.buyer_committed_kg.trim().is_empty() {
+                    Optional {
+                        unlock: "ยอดที่ผู้ซื้อคุยว่าจะรับ",
+                        section: "market",
+                    }
+                } else {
+                    Missing {
+                        question: "ปีนี้จะขายได้กี่กิโล",
+                        section: "production",
+                    }
+                }
+            }
+            Decision::CashView => {
+                if analysis.business.operating_cash_flow.is_some() {
+                    Ready
+                } else {
+                    gap(first_estimate_gap)
+                }
+            }
+            Decision::InvestmentView => {
+                if analysis.business.roi.is_some() {
+                    Ready
+                } else if first_estimate_gap.is_some() {
+                    gap(first_estimate_gap)
+                } else {
+                    Optional {
+                        unlock: "เงินก้อนที่ลงไป ของที่ใช้หลายปี หรือเงินก้อนตั้งต้น",
+                        section: "assets",
+                    }
+                }
+            }
+            Decision::HealthSelfReview => self.health_state(),
+            Decision::FinalClose => Ready,
+        }
+    }
+
+    fn health_state(&self) -> DecisionState {
+        if self.health_scores.len() == 12
+            && self.health_scores.iter().all(|score| !score.is_empty())
+        {
+            DecisionState::Ready
+        } else {
+            DecisionState::Optional {
+                unlock: "แบบประเมินสวน 12 ข้อ",
+                section: "health",
+            }
         }
     }
 
