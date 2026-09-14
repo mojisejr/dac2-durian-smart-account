@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use web::mail::{MailConfig, Mailer, SmtpSecurity};
+use web::mail::{Delivery, MailConfig, Mailer, SmtpSecurity};
 
 fn mailpit_get(path: &str) -> std::io::Result<String> {
     let mut stream = TcpStream::connect("127.0.0.1:8025")?;
@@ -73,9 +73,11 @@ fn messages_for(recipient: &str) -> std::io::Result<String> {
 async fn verification_and_reset_messages_reach_local_mailpit() {
     let marker = format!("mailpit-{}@example.test", std::process::id());
     let mailer = Mailer::new(MailConfig {
-        smtp_host: "127.0.0.1".into(),
-        smtp_port: 1025,
-        security: SmtpSecurity::Plain,
+        delivery: Delivery::Smtp {
+            host: "127.0.0.1".into(),
+            port: 1025,
+            security: SmtpSecurity::Plain,
+        },
         from: "DAC2 <no-reply@dac2.local>".into(),
         base_url: "http://127.0.0.1:3000".into(),
     })

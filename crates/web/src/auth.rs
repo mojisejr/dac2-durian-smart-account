@@ -33,8 +33,15 @@ pub async fn register(email: String, password: String) -> Result<String, ServerF
     match store::users::register(pool, &email, &password).await {
         Ok(user) => {
             if let Ok(token) = store::verification_tokens::issue(pool, user.id).await {
-                if let Ok(mailer) = crate::mail::Mailer::from_env() {
-                    let _ = mailer.send_verification(&user.email, token.expose()).await;
+                match crate::mail::Mailer::from_env() {
+                    Ok(mailer) => {
+                        if let Err(error) =
+                            mailer.send_verification(&user.email, token.expose()).await
+                        {
+                            eprintln!("verification mail not delivered: {error}");
+                        }
+                    }
+                    Err(error) => eprintln!("mail is not configured: {error}"),
                 }
             }
             Ok(REGISTRATION_ACCEPTED.into())
@@ -89,8 +96,15 @@ pub async fn resend_verification(email: String) -> Result<String, ServerFnError>
     match store::users::find_by_email(pool, &email).await {
         Ok(Some(user)) if !user.email_verified => {
             if let Ok(token) = store::verification_tokens::issue(pool, user.id).await {
-                if let Ok(mailer) = crate::mail::Mailer::from_env() {
-                    let _ = mailer.send_verification(&user.email, token.expose()).await;
+                match crate::mail::Mailer::from_env() {
+                    Ok(mailer) => {
+                        if let Err(error) =
+                            mailer.send_verification(&user.email, token.expose()).await
+                        {
+                            eprintln!("verification mail not delivered: {error}");
+                        }
+                    }
+                    Err(error) => eprintln!("mail is not configured: {error}"),
                 }
             }
         }

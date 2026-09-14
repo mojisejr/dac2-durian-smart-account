@@ -1,0 +1,46 @@
+# The Render service as deployed for the pilot, written down so the shape is
+# in Git. Render was not driven from this file: an image-backed service is
+# created in the dashboard, and this file names what was chosen there. Values
+# marked sync: false are set in the dashboard and never appear in Git.
+#
+# Image tags are full commit SHAs from the ci workflow; deploying a new tag is
+# an owner action (Settings > Image URL, then Manual Deploy).
+services:
+  - type: web
+    name: dac2-pilot
+    runtime: image
+    image:
+      url: ghcr.io/mojisejr/dac2-durian-smart-account:fddab20e9a28af628db9ba4cdbd844bf44da32e1
+    region: singapore
+    plan: free
+    healthCheckPath: /
+    autoDeploy: false
+    envVars:
+      - key: APP_BASE_URL
+        value: https://dac2-pilot.onrender.com
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: CLIENT_ADDRESS_SOURCE
+        value: forwarded-for
+      - key: PILOT_NOTICE
+        value: "true"
+      - key: LEPTOS_SITE_ADDR
+        value: 0.0.0.0:10000
+      # Free Render web services block outbound SMTP ports (25, 465, 587)
+      # since 2025-09-26, so mail leaves over HTTPS through Brevo's API.
+      - key: MAIL_TRANSPORT
+        value: brevo-api
+      - key: MAIL_FROM
+        value: DAC2 <nonthasak.l@gmail.com>
+      # Raise for an in-person study day when participants share one address,
+      # for example 60/3600; the default is 5/3600.
+      - key: RATE_LIMIT_ACCOUNT
+        value: 5/3600
+      - key: RATE_LIMIT_LOGIN
+        value: 10/300
+      - key: DATABASE_URL
+        sync: false # Neon direct connection string with sslmode=require
+      - key: SESSION_KEY
+        sync: false # openssl rand -hex 48
+      - key: BREVO_API_KEY
+        sync: false # Brevo > SMTP & API > API Keys
