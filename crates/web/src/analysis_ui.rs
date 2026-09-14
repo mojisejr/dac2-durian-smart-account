@@ -540,27 +540,39 @@ fn EfficiencyPanel(id: i64, kpis: Vec<KpiResult>, health: calc::HealthAnalysis) 
         <section class="card figure-list">
             <div class="section-title">
                 <div><h2>"สวนพร้อมแค่ไหน ตามที่ประเมินเอง"</h2><small class="formal-term">"คะแนนสุขภาพธุรกิจ"</small></div>
-                <strong>{score(health.overall_score)}</strong>
+                {health.overall_score.map(|_| view! { <strong>{score(health.overall_score)}</strong> })}
             </div>
             <p class="caption">"คะแนนมาจากคำตอบ 12 ข้อที่คุณให้เอง เป็นภาพที่คุณเห็นสวนของตัวเอง ไม่ใช่การวินิจฉัย"</p>
-            {health.overall_status.map(|status| {
-                let (label, class) = health_status_label(status);
-                view! { <span class=class>{label}</span> }
-            })}
-            {health.dimensions.into_iter().map(|dimension| {
-                let label = dimension_label(dimension.dimension);
-                let status = dimension.status.map(health_status_label);
+            {if health.overall_score.is_none() {
+                // No answers yet: one route to the questions, not six empty rows.
+                view! { <A attr:class="text-button" href=format!("/plans/{id}/health")>"เพิ่มได้: แบบประเมินสวน 12 ข้อ"</A> }.into_any()
+            } else {
                 view! {
-                    <div class="figure-row">
-                        <span class="figure-label">{label}</span>
-                        <span class="figure-value">
-                            <strong>{score(dimension.average)}</strong>
-                            {status.map(|(text, class)| view! { <span class=class>{text}</span> })}
-                        </span>
-                    </div>
-                }
-            }).collect_view()}
-        </section>
+                    {health.overall_status.map(|status| {
+                        let (label, class) = health_status_label(status);
+                        view! { <span class=class>{label}</span> }
+                    })}
+                    {health.dimensions.into_iter().map(|dimension| {
+                        let label = dimension_label(dimension.dimension);
+                        let status = dimension.status.map(health_status_label);
+                        view! {
+                            <div class="figure-row">
+                                <span class="figure-label">{label}</span>
+                                {match dimension.average {
+                                    Some(_) => view! {
+                                        <span class="figure-value">
+                                            <strong>{score(dimension.average)}</strong>
+                                            {status.map(|(text, class)| view! { <span class=class>{text}</span> })}
+                                        </span>
+                                    }.into_any(),
+                                    None => view! { <span class="figure-value figure-missing">"ยังตอบไม่ครบ 2 ข้อ"</span> }.into_any(),
+                                }}
+                            </div>
+                        }
+                    }).collect_view()}
+                }.into_any()
+            }}
+    </section>
     }
 }
 

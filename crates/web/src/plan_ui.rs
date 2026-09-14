@@ -2072,20 +2072,19 @@ pub(crate) fn DecisionList(
                 {decisions.into_iter().map(|readiness| {
                     let question = readiness.decision.question();
                     let formal = readiness.decision.formal_term();
-                    let status = match readiness.state {
-                        DecisionState::Ready => view! { <span class="status good">"ดูได้แล้ว"</span> }.into_any(),
+                    let words = view! { <span class="decision-question"><strong>{question}</strong><small class="formal-term">{formal}</small></span> };
+                    // A row that still needs something is one link to the page
+                    // that asks it, the same shape as the section cards below.
+                    match readiness.state {
+                        DecisionState::Ready => view! {
+                            <li><span class="decision-row">{words}<span class="status good">"ดูได้แล้ว"</span></span></li>
+                        }.into_any(),
                         DecisionState::Missing { question, section } => view! {
-                            <A attr:class="status warning" href=format!("/plans/{plan_id}/{section}")>{format!("ยังขาด: {question}")}</A>
+                            <li><A attr:class="decision-row" href=format!("/plans/{plan_id}/{section}")>{words}<span class="status warning">{format!("ยังขาด: {question}")}</span></A></li>
                         }.into_any(),
                         DecisionState::Optional { unlock, section } => view! {
-                            <A attr:class="status muted" href=format!("/plans/{plan_id}/{section}")>{format!("เพิ่มได้: {unlock}")}</A>
+                            <li><A attr:class="decision-row" href=format!("/plans/{plan_id}/{section}")>{words}<span class="status muted">{format!("เพิ่มได้: {unlock}")}</span></A></li>
                         }.into_any(),
-                    };
-                    view! {
-                        <li class="decision-row">
-                            <span class="decision-question"><strong>{question}</strong><small class="formal-term">{formal}</small></span>
-                            {status}
-                        </li>
                     }
                 }).collect_view()}
             </ul>
