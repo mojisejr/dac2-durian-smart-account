@@ -1,0 +1,7 @@
+# The build runs inside the image from the tracked sources; nothing generated
+# on the developer's machine, and no local secret, belongs in the context.
+target/
+node_modules/
+.env
+.git/
+.DS_Store

@@ -16,7 +16,7 @@ email_address = "=0.2.9"
 leptos = "=0.8.20"
 leptos_axum = "=0.8.10"
 leptos_router = "=0.8.15"
-lettre = { version = "=0.11.23", default-features = false, features = ["builder", "smtp-transport", "tokio1"] }
+lettre = { version = "=0.11.23", default-features = false, features = ["builder", "smtp-transport", "tokio1", "tokio1-rustls-tls"] }
 rand = "=0.10.2"
 rust_decimal = { version = "=1.43.0", features = ["serde"] }
 serde = { version = "=1.0.228", features = ["derive"] }
