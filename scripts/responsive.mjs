@@ -43,7 +43,7 @@ async function submitAndReload(page, button, label) {
   await page.waitForTimeout(300);
   const error = (await page.locator('.bad-message').allTextContents()).join(' ').trim();
   if (error) throw new Error(`${label} failed: ${error}`);
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await reloadOrDiagnose(page);
 }
 
 // Submits an action and leaves the page where it is. The caller then waits for
@@ -310,6 +310,17 @@ async function waitForHydratedValue(page, selector, accept, what) {
 // timeout, ask the server for the same page without the browser and list the
 // requests Chrome still had open, so the failure names the side that stalled.
 async function gotoOrDiagnose(page, url, cookies) {
+  await navigateOrDiagnose(page, url, cookies, () =>
+    page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }));
+}
+
+async function reloadOrDiagnose(page) {
+  await navigateOrDiagnose(page, page.url(), null, () =>
+    page.reload({ waitUntil: 'domcontentloaded' }));
+}
+
+// `cookies` may be null: the diagnosis then reads them from the page's context.
+async function navigateOrDiagnose(page, url, cookies, navigate) {
   const pending = new Map();
   const onRequest = (request) => pending.set(request, Date.now());
   const onDone = (request) => pending.delete(request);
@@ -317,9 +328,10 @@ async function gotoOrDiagnose(page, url, cookies) {
   page.on('requestfinished', onDone);
   page.on('requestfailed', onDone);
   try {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await navigate();
   } catch (error) {
-    const cookie = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+    const jar = cookies ?? (await page.context().cookies());
+    const cookie = jar.map((c) => `${c.name}=${c.value}`).join('; ');
     const started = Date.now();
     let direct;
     try {
@@ -421,7 +433,7 @@ async function signIn(browser) {
   }
   await page.click('button:has-text("ถัดไป")');
   await page.waitForURL(new RegExp(`/plans/${planId}/quick/cost$`));
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await reloadOrDiagnose(page);
   await page.waitForTimeout(400);
   await page.fill('input[name="value"]', '900000');
   await page.click('button:has-text("ดูผลประมาณการ")');
@@ -469,7 +481,7 @@ async function signIn(browser) {
   if (!modeResult.ok()) {
     throw new Error(`switching to detailed mode returned HTTP ${modeResult.status()}`);
   }
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await reloadOrDiagnose(page);
   await page
     .getByRole('heading', { name: 'แผนละเอียด', exact: true })
     .waitFor({ state: 'visible', timeout: 10000 });
@@ -529,7 +541,7 @@ async function signIn(browser) {
     throw new Error('saving the production branches returned a failing HTTP status');
   }
   await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await reloadOrDiagnose(page);
   await waitForHydratedValue(page, 'input[name="yield-source"][value="direct"]', (v) => v === true, 'refresh lost the saved direct yield branch');
   await waitForHydratedValue(page, '#production-sellable-yield', (v) => v === '18000', 'refresh lost the saved direct sellable kilograms');
   await waitForHydratedValue(page, '#production-average-price', (v) => v === '79', 'refresh lost the saved average price');
@@ -637,7 +649,7 @@ async function signIn(browser) {
   await page.click('button:has-text("บันทึกส่วนนี้")');
   if (!(await confirmSave).ok()) throw new Error('confirming an empty fixed section returned a failing HTTP status');
   await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await reloadOrDiagnose(page);
   await waitForHydratedValue(page, 'input[name="fixed-cost-state"][value="confirmed_none"]', (v) => v === true, 'refresh lost the confirmed-none answer');
   await page.goto(`${BASE}/plans/${detailedPlanId}`);
   await page.getByText('ยืนยันแล้วว่าไม่มีค่าใช้จ่ายส่วนนี้').waitFor({ timeout: 10000 });
@@ -878,7 +890,7 @@ async function openEachExplanation(page, size, where) {
     await page.waitForTimeout(200);
     if (await page.locator('details[open] > .sheet').count()) {
       fail(`${where} @${size.name}px ⓘ#${index + 1}`, 'the explanation would not close');
-      await page.reload({ waitUntil: 'domcontentloaded' });
+      await reloadOrDiagnose(page);
     }
   }
 }
