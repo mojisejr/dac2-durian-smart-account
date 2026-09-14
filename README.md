@@ -357,6 +357,28 @@ stall probe at it:
 SKIP_BUILD=1 IMAGE=dac2:local ./scripts/check-container.sh   # reuse an image
 ```
 
+## The image from Git
+
+`.github/workflows/ci.yml` runs `scripts/check.sh` on every pull request. A
+push to `main` runs it again and then builds the `linux/amd64` image from the
+same `Dockerfile` and publishes it to GitHub's registry:
+
+```text
+ghcr.io/mojisejr/dac2-durian-smart-account:<full commit sha>
+ghcr.io/mojisejr/dac2-durian-smart-account:main
+```
+
+The commit tag is the one to deploy and to name in a record; `main` is a
+moving convenience for pulling the latest. Nothing in the workflow deploys:
+publishing an image and putting it in front of people are two different
+actions, and the second is the owner's. Every action in the workflow is pinned
+to a full commit SHA and each job holds only the permissions it needs; the
+publishing job authenticates with the workflow's own token, so no secret is
+stored for it.
+
+To run a published image locally, replace `dac2:local` in the `docker run`
+line above with the tag; the image is public and needs no login to pull.
+
 ## Plan workspace proof
 
 The browser retains raw field text while the owner types, then maps it into the
