@@ -43,7 +43,32 @@ async function submitAndReload(page, button, label) {
   await page.waitForTimeout(300);
   const error = (await page.locator('.bad-message').allTextContents()).join(' ').trim();
   if (error) throw new Error(`${label} failed: ${error}`);
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await reloadOrDiagnose(page);
+}
+
+// Submits an action and leaves the page where it is. The caller then waits for
+// the change to appear, and `assertNoReload` proves the page showed it by
+// reading its data again rather than by a navigation, which is the defect the
+// owner met on the assets page: the action saved, the screen stayed stale.
+async function submitInPlace(page, button, label) {
+  await page.evaluate(() => { window.__dac2InPlace = true; });
+  const pending = page.waitForResponse(
+    (response) => response.request().method() === 'POST',
+    { timeout: 10000 },
+  );
+  await button.click();
+  const response = await pending;
+  if (!response.ok()) {
+    throw new Error(`${label} returned HTTP ${response.status()}`);
+  }
+  await page.waitForTimeout(300);
+  const error = (await page.locator('.bad-message').allTextContents()).join(' ').trim();
+  if (error) throw new Error(`${label} failed: ${error}`);
+}
+
+async function assertNoReload(page, label) {
+  const kept = await page.evaluate(() => window.__dac2InPlace === true);
+  if (!kept) throw new Error(`${label}: the page reloaded instead of updating in place`);
 }
 
 async function inspect(page, intendedWidth) {
@@ -256,6 +281,88 @@ function assess(where, report, intendedWidth) {
   }
 }
 
+
+// Guided fields bind their value and checked state as properties, so the
+// server-rendered markup carries no value until hydration runs. Wait for the
+// hydrated value instead of reading whatever the pre-hydration DOM holds.
+async function waitForHydratedValue(page, selector, accept, what) {
+  await page
+    .waitForFunction(
+      ([selector, acceptSource]) => {
+        const accept = new Function('value', `return (${acceptSource})(value);`);
+        return [...document.querySelectorAll(selector)].some((element) =>
+          accept(element.type === 'radio' || element.type === 'checkbox' ? element.checked : element.value),
+        );
+      },
+      [selector, accept.toString()],
+      { timeout: 10000 },
+    )
+    .catch(async () => {
+      const seen = await page
+        .locator(selector)
+        .evaluateAll((elements) => elements.map((element) => (element.type === 'radio' || element.type === 'checkbox' ? element.checked : element.value)))
+        .catch(() => '(missing)');
+      throw new Error(`${what} (saw ${JSON.stringify(seen)} at ${page.url()})`);
+    });
+}
+
+// A navigation that hangs is only useful if it says where it hung. On a
+// timeout, ask the server for the same page without the browser and list the
+// requests Chrome still had open, so the failure names the side that stalled.
+async function gotoOrDiagnose(page, url, cookies) {
+  await navigateOrDiagnose(page, url, cookies, () =>
+    page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 }));
+}
+
+async function reloadOrDiagnose(page) {
+  await navigateOrDiagnose(page, page.url(), null, () =>
+    page.reload({ waitUntil: 'domcontentloaded' }));
+}
+
+// `cookies` may be null: the diagnosis then reads them from the page's context.
+async function navigateOrDiagnose(page, url, cookies, navigate) {
+  const pending = new Map();
+  const onRequest = (request) => pending.set(request, Date.now());
+  const onDone = (request) => pending.delete(request);
+  page.on('request', onRequest);
+  page.on('requestfinished', onDone);
+  page.on('requestfailed', onDone);
+  try {
+    await navigate();
+  } catch (error) {
+    const jar = cookies ?? (await page.context().cookies());
+    const cookie = jar.map((c) => `${c.name}=${c.value}`).join('; ');
+    const started = Date.now();
+    let direct;
+    try {
+      const response = await fetch(url, {
+        headers: { cookie },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(10000),
+      });
+      direct = `server answered HTTP ${response.status} in ${Date.now() - started}ms`;
+    } catch (fetchError) {
+      direct = `server did not answer within 10s (${fetchError.message})`;
+    }
+    // Chrome's own timing says whether a stalled request ever reached the
+    // wire: requestStart stays -1 while it waits in the connection queue.
+    const open = [...pending.entries()]
+      .map(([request, at]) => {
+        const timing = request.timing();
+        const wire = timing.requestStart >= 0
+          ? `sent at +${Math.round(timing.requestStart)}ms, connect ${Math.round(timing.connectStart)}..${Math.round(timing.connectEnd)}ms`
+          : `never sent (connectStart ${Math.round(timing.connectStart)}ms)`;
+        return `${request.method()} ${request.url()} open ${Date.now() - at}ms, ${wire}`;
+      })
+      .join('; ');
+    throw new Error(`${error.message}\n  ${direct}\n  browser requests still open: ${open || 'none'}`);
+  } finally {
+    page.off('request', onRequest);
+    page.off('requestfinished', onDone);
+    page.off('requestfailed', onDone);
+  }
+}
+
 async function signIn(browser) {
   const email = 'responsive-proof@dac2.local';
   const password = 'CorrectHorse123!';
@@ -326,7 +433,7 @@ async function signIn(browser) {
   }
   await page.click('button:has-text("ถัดไป")');
   await page.waitForURL(new RegExp(`/plans/${planId}/quick/cost$`));
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await reloadOrDiagnose(page);
   await page.waitForTimeout(400);
   await page.fill('input[name="value"]', '900000');
   await page.click('button:has-text("ดูผลประมาณการ")');
@@ -374,7 +481,7 @@ async function signIn(browser) {
   if (!modeResult.ok()) {
     throw new Error(`switching to detailed mode returned HTTP ${modeResult.status()}`);
   }
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await reloadOrDiagnose(page);
   await page
     .getByRole('heading', { name: 'แผนละเอียด', exact: true })
     .waitFor({ state: 'visible', timeout: 10000 });
@@ -434,17 +541,10 @@ async function signIn(browser) {
     throw new Error('saving the production branches returned a failing HTTP status');
   }
   await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.locator('#production-sellable-yield').waitFor({ state: 'visible', timeout: 10000 });
-  if (!(await page.isChecked('input[name="yield-source"][value="direct"]'))) {
-    throw new Error('refresh lost the saved direct yield branch');
-  }
-  if ((await page.locator('#production-sellable-yield').inputValue()) !== '18000') {
-    throw new Error('refresh lost the saved direct sellable kilograms');
-  }
-  if ((await page.locator('#production-average-price').inputValue()) !== '79') {
-    throw new Error('refresh lost the saved average price');
-  }
+  await reloadOrDiagnose(page);
+  await waitForHydratedValue(page, 'input[name="yield-source"][value="direct"]', (v) => v === true, 'refresh lost the saved direct yield branch');
+  await waitForHydratedValue(page, '#production-sellable-yield', (v) => v === '18000', 'refresh lost the saved direct sellable kilograms');
+  await waitForHydratedValue(page, '#production-average-price', (v) => v === '79', 'refresh lost the saved average price');
   await page.check('input[name="yield-source"][value="derived"]');
   if ((await page.locator('#production-trees').inputValue()) !== '200') {
     throw new Error('the unselected derived facts were not persisted with the section');
@@ -467,19 +567,16 @@ async function signIn(browser) {
   await page.goto(production);
   await page.locator('#production-sellable-yield').waitFor({ state: 'visible', timeout: 10000 });
   await page.goBack({ waitUntil: 'domcontentloaded' });
-  await page.locator('#market-buyer-committed-kg').waitFor({ state: 'visible', timeout: 10000 });
   // A restored history entry keeps the blur-formatted text; a re-rendered
-  // one shows the stored figure. Either is the same saved answer.
-  const buyerAfterBack = await page.locator('#market-buyer-committed-kg').inputValue();
-  if (!['25000', '25,000'].includes(buyerAfterBack)) {
-    throw new Error(`browser back lost the saved buyer quantity (saw ${JSON.stringify(buyerAfterBack)} at ${page.url()})`);
-  }
+  // one shows the stored figure. Either is the same saved answer. Owner pages
+  // are served no-store, so back never replays the page from before the save.
+  await waitForHydratedValue(page, '#market-buyer-committed-kg', (v) => v === '25000' || v === '25,000', 'browser back lost the saved buyer quantity');
   await page.goto(`${BASE}/plans/${detailedPlanId}`);
   await page.getByText('พร้อมเทียบยอดผู้ซื้อกับผลผลิต').waitFor({ timeout: 10000 });
 
   // Grade entry in kilograms converts visibly against the saved total.
   await page.goto(production);
-  await page.locator('#production-sellable-yield').waitFor({ state: 'visible', timeout: 10000 });
+  await waitForHydratedValue(page, '#production-sellable-yield', (v) => v === '18000', 'the saved sellable kilograms did not hydrate before grade entry');
   await page.check('input[name="price-source"][value="by_grade"]');
   await page.click('button:has-text("+ เพิ่มเกรด")');
   await page.check('input[name="grade-entry"][value="kilograms"]');
@@ -491,6 +588,71 @@ async function signIn(browser) {
   }
   await page.check('input[name="price-source"][value="average"]');
   await page.getByText('เกรดที่เคยกรอกไว้ยังเก็บอยู่').waitFor({ timeout: 5000 });
+
+  // Batch 3: a remembered expense is captured before it is classified, the
+  // hub names it as waiting, leaving and returning keeps it, classifying moves
+  // it, and confirming a section empty changes the result from unavailable to
+  // a figure.
+  const expenses = `${BASE}/plans/${detailedPlanId}/expenses`;
+  await page.goto(expenses);
+  await page.click('button:has-text("+ จดค่าใช้จ่ายที่จำได้")');
+  await page.getByLabel('ค่าอะไร').first().fill('จ่ายคนขับรถเดือนสาม');
+  await page.getByLabel('เท่าไร').first().fill('50000');
+  await page.getByText('ยังมี 1 รายการที่ยังไม่ได้บอกว่าเป็นแบบไหน จึงยังไม่ถูกนับ').waitFor({ timeout: 5000 });
+  const captureSave = page.waitForResponse((r) => r.request().method() === 'POST', { timeout: 10000 });
+  await page.click('button:has-text("บันทึกส่วนนี้")');
+  if (!(await captureSave).ok()) throw new Error('saving a captured expense returned a failing HTTP status');
+  await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
+  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await page.getByText('มี 1 รายการยังไม่ได้บอกว่าเป็นแบบไหน').waitFor({ timeout: 10000 });
+  await page.getByRole('heading', { name: 'บอกว่าค่าใช้จ่ายที่จดไว้เป็นแบบไหน', exact: true }).waitFor({ timeout: 10000 });
+  await page.goto(expenses);
+  await waitForHydratedValue(page, '.repeat-row input[type="text"]', (v) => v === 'จ่ายคนขับรถเดือนสาม', 'the captured expense did not survive leaving and returning');
+  await page.click('button:has-text("บอกว่าเป็นแบบไหน")');
+  await page.check('input[name="classify-grows"][value="yes"]');
+  await page.locator('.classify-flow select').selectOption('transport');
+  await page.click('button:has-text("ย้ายไปส่วนที่ถูก")');
+  if (await page.locator('button:has-text("บอกว่าเป็นแบบไหน")').count()) {
+    throw new Error('classifying did not remove the item from the waiting list');
+  }
+  const classifySave = page.waitForResponse((r) => r.request().method() === 'POST', { timeout: 10000 });
+  await page.click('button:has-text("บันทึกส่วนนี้")');
+  if (!(await classifySave).ok()) throw new Error('saving a classified expense returned a failing HTTP status');
+  await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
+  await page.goto(`${BASE}/plans/${detailedPlanId}/variable-costs`);
+  await page.getByLabel('ยอดรวมทั้งฤดู').waitFor({ state: 'visible', timeout: 10000 });
+  await waitForHydratedValue(page, '.repeat-row input[inputmode="decimal"]', (v) => v === '50000' || v === '50,000', 'the classified expense lost its amount on the way to variable costs');
+  if (await page.locator('input[name="variable-cost-state"]').count()) {
+    throw new Error('the unknown/confirmed-none question is still asked while rows exist');
+  }
+
+  // Keystrokes into a repeat-row number field must all land. A list that
+  // re-rendered on every change recreated the focused input after the first
+  // character; the owner saw one digit and then nothing.
+  await page.click('button:has-text("+ เพิ่มค่าใช้จ่าย")');
+  const quantity = page.locator('.repeat-row input[inputmode="decimal"]').last();
+  await quantity.click();
+  await page.keyboard.type('12345', { delay: 40 });
+  if ((await quantity.inputValue()) !== '12345') {
+    throw new Error(`a repeat-row number field dropped keystrokes (saw ${JSON.stringify(await quantity.inputValue())})`);
+  }
+  await page.click('.repeat-row:last-of-type button:has-text("ลบรายการ")');
+
+  // With variable costs entered and fixed costs unknown the profit is still
+  // unavailable; confirming the fixed section empty makes it a figure.
+  await page.goto(`${BASE}/plans/${detailedPlanId}/fixed-costs`);
+  await page.locator('input[name="fixed-cost-state"][value="confirmed_none"]').waitFor({ state: 'visible', timeout: 10000 });
+  await page.getByText('ยังคำนวณกำไรสุทธิไม่ได้').waitFor({ timeout: 5000 });
+  await page.check('input[name="fixed-cost-state"][value="confirmed_none"]');
+  await page.getByText('กำไรสุทธิโดยประมาณ').waitFor({ timeout: 5000 });
+  const confirmSave = page.waitForResponse((r) => r.request().method() === 'POST', { timeout: 10000 });
+  await page.click('button:has-text("บันทึกส่วนนี้")');
+  if (!(await confirmSave).ok()) throw new Error('confirming an empty fixed section returned a failing HTTP status');
+  await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
+  await reloadOrDiagnose(page);
+  await waitForHydratedValue(page, 'input[name="fixed-cost-state"][value="confirmed_none"]', (v) => v === true, 'refresh lost the confirmed-none answer');
+  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await page.getByText('ยืนยันแล้วว่าไม่มีค่าใช้จ่ายส่วนนี้').waitFor({ timeout: 10000 });
 
   // A separate season reaches final comparison so the responsive matrix can
   // measure both the editable draft and immutable result states.
@@ -581,25 +743,65 @@ async function signIn(browser) {
   // owner explicitly includes it in. Starting capital stays visibly separate.
   await page.goto(`${BASE}/plans/${detailedPlanId}`);
   await page.click('summary:has-text("การวางแผนขั้นสูง (ไม่บังคับ)")');
-  await page.click('a:has-text("สินทรัพย์และเงินลงทุน")');
+  await page.click('a:has-text("ของที่ใช้หลายปี")');
   await page.waitForURL(new RegExp(`/plans/${detailedPlanId}/assets$`));
-  await page.click('summary:has-text("+ เพิ่มสินทรัพย์")');
+  await page.click('summary:has-text("+ เพิ่มของที่ใช้หลายปี")');
   const create = page.locator('details.asset-create');
   await create.locator('input[name="name"]').fill('ระบบน้ำกลางสวน');
   await create.locator('input[name="original_cost"]').fill('100000');
   await create.locator('input[name="start_year"]').fill('2568');
   await create.locator('input[name="useful_life_years"]').fill('5');
-  await submitAndReload(page, create.locator('button:has-text("บันทึกสินทรัพย์")'), 'asset creation');
+  // Each assets action must show its result without a reload: the owner saw
+  // "รวมในฤดูนี้" save and the page stay as it was until a manual refresh.
+  await submitInPlace(page, create.locator('button:has-text("บันทึกของชิ้นนี้")'), 'asset creation');
+  await page.getByText('ระบบน้ำกลางสวน', { exact: true }).waitFor({ state: 'visible', timeout: 10000 });
   await page.getByText('ยังไม่รวม', { exact: true }).waitFor({ state: 'visible' });
+  await assertNoReload(page, 'asset creation');
 
   await page.getByText('ระบบจะไม่เดาหรือลบรายการเดิมให้', { exact: false }).waitFor({ state: 'visible' });
-  await submitAndReload(page, page.locator('button:has-text("รวมในฤดูนี้")'), 'asset inclusion');
-  await page.getByText('รวมในฤดูนี้', { exact: true }).waitFor({ state: 'visible' });
+  await submitInPlace(page, page.locator('button:has-text("รวมในฤดูนี้")'), 'asset inclusion');
+  await page.locator('.asset-row .status', { hasText: 'รวมในฤดูนี้' }).waitFor({ state: 'visible', timeout: 10000 });
+  await page.locator('.asset-totals', { hasText: '20,000.00 บาท/ปี' }).waitFor({ state: 'visible', timeout: 10000 });
+  await page.locator('button:has-text("เอาออกจากฤดูนี้")').waitFor({ state: 'visible' });
+  await assertNoReload(page, 'asset inclusion');
+
   await page.fill('input[name="starting_capital"]', '50000');
-  await submitAndReload(page, page.locator('button:has-text("บันทึกเงินทุนเริ่มต้น")'), 'starting capital save');
+  await submitInPlace(page, page.locator('button:has-text("บันทึกเงินก้อนตั้งต้น")'), 'starting capital save');
+  await page.locator('.asset-totals', { hasText: '50,000.00' }).waitFor({ state: 'visible', timeout: 10000 });
+  await assertNoReload(page, 'starting capital save');
   if (await page.locator('input[name="starting_capital"]').inputValue() !== '50000') {
     throw new Error('starting capital did not persist independently');
   }
+
+  // Including an asset must be visible where the owner would look for its
+  // cost: the fixed-costs page lists it as a read-only row in its own group
+  // under the rows the owner types, with one total, and the hub names it too.
+  await page.goto(`${BASE}/plans/${detailedPlanId}/fixed-costs`);
+  const manualGroup = page.locator('.cost-group-manual');
+  const assetGroup = page.locator('.cost-group-assets');
+  const fixedTotal = page.locator('.fixed-cost-total');
+  await manualGroup.getByText('กรอกเอง', { exact: true }).waitFor({ timeout: 10000 });
+  await assetGroup.getByText('ของที่ใช้หลายปี · ค่าเสื่อม', { exact: true }).waitFor({ timeout: 5000 });
+  await assetGroup.locator('.asset-cost-row', { hasText: 'ระบบน้ำกลางสวน' }).getByText('20,000.00 บาท/ปี').waitFor({ timeout: 5000 });
+  await assetGroup.locator('a[href$="/assets"]').first().waitFor({ state: 'visible' });
+  // The unknown / confirmed-none question belongs to the manual group only.
+  // The manual group was confirmed empty earlier, so asset-only fixed cost is
+  // a known figure; answering "ยังไม่รู้" makes the total unknown again even
+  // though the depreciation stays listed, and confirming brings it back.
+  await manualGroup.locator('input[name="fixed-cost-state"]').first().waitFor({ state: 'attached' });
+  if (await assetGroup.locator('input[name="fixed-cost-state"]').count()) {
+    throw new Error('the section-state question leaked into the asset group');
+  }
+  await fixedTotal.locator('.cost-total-amount', { hasText: '20,000.00 บาท/ปี' }).waitFor({ timeout: 5000 });
+  await page.locator('label:has(input[name="fixed-cost-state"][value="unknown"])').click();
+  await fixedTotal.locator('.cost-total-amount', { hasText: 'ยังไม่รู้' }).waitFor({ timeout: 5000 });
+  await fixedTotal.locator('.cost-total-note', { hasText: 'รวมอยู่แล้ว แต่ยอดรวมยังไม่รู้' }).waitFor({ timeout: 5000 });
+  await page.getByText('ยังคำนวณกำไรสุทธิไม่ได้', { exact: true }).waitFor({ timeout: 5000 });
+  await page.locator('label:has(input[name="fixed-cost-state"][value="confirmed_none"])').click();
+  await fixedTotal.locator('.cost-total-amount', { hasText: '20,000.00 บาท/ปี' }).waitFor({ timeout: 5000 });
+  await page.getByText('กำไรสุทธิโดยประมาณ', { exact: false }).waitFor({ timeout: 5000 });
+  await page.goto(`${BASE}/plans/${detailedPlanId}`);
+  await page.getByText(/ค่าเสื่อมของที่เลือกไว้รวมแล้ว|ยืนยันแล้วว่ามีเฉพาะค่าเสื่อมของที่เลือกไว้|พอคำนวณค่าใช้จ่ายประจำแล้ว/).first().waitFor({ timeout: 10000 });
 
   // The same owner asset appears in another season without re-entry, but is
   // excluded there until the owner makes a second explicit choice.
@@ -688,7 +890,7 @@ async function openEachExplanation(page, size, where) {
     await page.waitForTimeout(200);
     if (await page.locator('details[open] > .sheet').count()) {
       fail(`${where} @${size.name}px ⓘ#${index + 1}`, 'the explanation would not close');
-      await page.reload({ waitUntil: 'domcontentloaded' });
+      await reloadOrDiagnose(page);
     }
   }
 }
@@ -720,6 +922,7 @@ try {
     ['analysis', `${BASE}/plans/${detailedPlanId}/analysis`],
     ['production', `${BASE}/plans/${detailedPlanId}/production`],
     ['market', `${BASE}/plans/${detailedPlanId}/market`],
+    ['expenses', `${BASE}/plans/${detailedPlanId}/expenses`],
     ['variable-costs', `${BASE}/plans/${detailedPlanId}/variable-costs`],
     ['fixed-costs', `${BASE}/plans/${detailedPlanId}/fixed-costs`],
     ['health', `${BASE}/plans/${detailedPlanId}/health`],
@@ -742,7 +945,7 @@ try {
       // long matrix from retaining old hydrated runtimes in one renderer.
       const page = await context.newPage();
       try {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await gotoOrDiagnose(page, url, cookies);
         await page.waitForTimeout(250);
         assess(`${size.name}px ${routeName}`, await inspect(page, size.width), size.width);
 

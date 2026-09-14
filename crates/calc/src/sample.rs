@@ -1,8 +1,8 @@
 use rust_decimal::Decimal;
 
 use crate::{
-    CashKind, FixedCostLine, Grade, HealthAnswer, HealthQuestion, KpiTargets, MarketPlan, Plan,
-    PriceSource, ProductionPlan, VariableCostKind, VariableCostLine, YieldSource,
+    CashKind, CostSectionState, FixedCostLine, Grade, HealthAnswer, HealthQuestion, KpiTargets,
+    MarketPlan, Plan, PriceSource, ProductionPlan, VariableCostKind, VariableCostLine, YieldSource,
 };
 
 pub const WORKBOOK_SHA256: &str =
@@ -37,6 +37,7 @@ pub fn workbook_sample() -> Plan {
                 grade("ตกเกรด", 5, 2, 20, false),
             ],
         },
+        variable_cost_state: CostSectionState::EnteredItems,
         variable_costs: vec![
             variable(
                 "ปุ๋ยและธาตุอาหาร",
@@ -104,6 +105,7 @@ pub fn workbook_sample() -> Plan {
             variable("อื่นๆ 5", VariableCostKind::Other, Some(1), "ปี", 0, 0),
             variable("อื่นๆ 6", VariableCostKind::Other, Some(1), "ปี", 0, 0),
         ],
+        fixed_cost_state: CostSectionState::EnteredItems,
         fixed_costs: vec![
             fixed("ค่าเช่าที่ดิน", CashKind::Cash, 100_000, 0),
             fixed("ค่าเสื่อมระบบน้ำ", CashKind::NonCash, 18_000, 200_000),
@@ -117,6 +119,7 @@ pub fn workbook_sample() -> Plan {
             fixed("อื่นๆ 3", CashKind::Cash, 0, 0),
             fixed("อื่นๆ 4", CashKind::Cash, 0, 0),
         ],
+        unclassified_expenses: Vec::new(),
         health_answers: HealthQuestion::ALL
             .into_iter()
             .map(|question| HealthAnswer {
@@ -167,6 +170,7 @@ fn variable(
         quantity: quantity.map(Decimal::from),
         unit: unit.into(),
         unit_price: Some(Decimal::new(price_mantissa, price_scale)),
+        total_amount: None,
     }
 }
 

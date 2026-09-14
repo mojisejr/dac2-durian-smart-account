@@ -1,8 +1,8 @@
 use rust_decimal::Decimal;
 
 use crate::{
-    AssetAllocation, CashKind, CostAnalysis, Plan, RevenueAnalysis, VariableCostKind,
-    VariableCostResult,
+    AssetAllocation, CashKind, CostAnalysis, CostSectionState, Plan, RevenueAnalysis,
+    VariableCostKind, VariableCostResult,
 };
 
 pub fn calculate(plan: &Plan, revenue: &RevenueAnalysis) -> CostAnalysis {
@@ -23,9 +23,7 @@ pub fn calculate_with_assets(
             VariableCostResult {
                 kind: line.kind,
                 quantity,
-                total: quantity
-                    .zip(line.unit_price)
-                    .map(|(quantity, price)| quantity * price),
+                total: line.total(revenue.sellable_yield_kg),
                 yield_per_unit: revenue
                     .sellable_yield_kg
                     .zip(quantity)
@@ -35,7 +33,15 @@ pub fn calculate_with_assets(
         })
         .collect();
 
-    let variable_cost = complete_sum(variable_lines.iter().map(|line| line.total));
+    // A confirmed-none section is a known zero; an unknown one stays
+    // unavailable and withholds only the results that depend on it.
+    let variable_cost = match plan.effective_variable_cost_state() {
+        CostSectionState::EnteredItems => {
+            complete_sum(variable_lines.iter().map(|line| line.total))
+        }
+        CostSectionState::ConfirmedNone => Some(Decimal::ZERO),
+        CostSectionState::Unknown => None,
+    };
     for line in &mut variable_lines {
         line.share_of_variable_cost = line
             .total
@@ -46,25 +52,28 @@ pub fn calculate_with_assets(
     let variable_cost_per_kg = variable_cost
         .zip(revenue.sellable_yield_kg)
         .and_then(|(cost, yield_kg)| nonzero_ratio(cost, yield_kg));
-    let manual_fixed_cost = complete_sum(plan.fixed_costs.iter().map(|line| line.amount_per_year));
+    let fixed_state = plan.effective_fixed_cost_state();
+    let manual_fixed_cost = match fixed_state {
+        CostSectionState::EnteredItems => {
+            complete_sum(plan.fixed_costs.iter().map(|line| line.amount_per_year))
+        }
+        CostSectionState::ConfirmedNone => Some(Decimal::ZERO),
+        CostSectionState::Unknown => None,
+    };
     let asset_depreciation =
         present_sum(assets.iter().map(|asset| Some(asset.annual_depreciation)));
-    let fixed_cost = if plan.fixed_costs.is_empty() {
-        asset_depreciation
-    } else {
-        manual_fixed_cost.map(|manual| manual + asset_depreciation.unwrap_or(Decimal::ZERO))
-    };
-    let cash_fixed_cost = if plan.fixed_costs.is_empty() {
-        (!assets.is_empty()).then_some(Decimal::ZERO)
-    } else {
-        manual_fixed_cost.map(|_| {
-            plan.fixed_costs
-                .iter()
-                .filter(|line| line.cash_kind == CashKind::Cash)
-                .filter_map(|line| line.amount_per_year)
-                .sum()
-        })
-    };
+    // Depreciation from selected assets is added to what the owner said about
+    // the manual section. An unknown manual section keeps the total unknown
+    // even when assets exist: depreciation alone is not the whole fixed cost.
+    let fixed_cost =
+        manual_fixed_cost.map(|manual| manual + asset_depreciation.unwrap_or(Decimal::ZERO));
+    let cash_fixed_cost = manual_fixed_cost.map(|_| {
+        plan.fixed_costs
+            .iter()
+            .filter(|line| line.cash_kind == CashKind::Cash)
+            .filter_map(|line| line.amount_per_year)
+            .sum()
+    });
     let manual_investment_base =
         present_sum(plan.fixed_costs.iter().map(|line| line.investment_base));
     let asset_investment_base =
@@ -146,7 +155,7 @@ pub(crate) fn quantity_for_kind(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FixedCostLine, VariableCostLine, revenue, workbook_sample};
+    use crate::{FixedCostLine, UnclassifiedExpense, VariableCostLine, revenue, workbook_sample};
 
     #[test]
     fn workbook_cost_rollup_and_cash_split_match() {
@@ -210,6 +219,7 @@ mod tests {
                 quantity: Some(Decimal::ONE),
                 unit: "หน่วย".into(),
                 unit_price: Some(Decimal::ONE),
+                total_amount: None,
             })
             .collect();
         let revenue = revenue::calculate(&plan);
@@ -366,6 +376,7 @@ mod tests {
     fn asset_only_fixed_cost_has_a_known_zero_cash_component() {
         let mut plan = workbook_sample();
         plan.fixed_costs.clear();
+        plan.fixed_cost_state = CostSectionState::ConfirmedNone;
         let asset = crate::allocate(
             &crate::AssetFacts {
                 name: "ระบบน้ำ".into(),
@@ -393,5 +404,142 @@ mod tests {
                 .zip(result.cost.variable_cost)
                 .map(|(revenue, variable)| revenue - variable)
         );
+    }
+
+    fn asset_allocation() -> AssetAllocation {
+        crate::allocate(
+            &crate::AssetFacts {
+                name: "ระบบน้ำ".into(),
+                kind: crate::AssetKind::Equipment,
+                original_cost: Decimal::from(100_000),
+                start_year: 2568,
+                useful_life_years: Some(5),
+                residual_value: None,
+                retired_year: None,
+            },
+            2569,
+        )
+        .unwrap()
+        .unwrap()
+    }
+
+    #[test]
+    fn confirmed_none_is_a_known_zero_and_unknown_withholds_only_dependents() {
+        let mut plan = workbook_sample();
+        plan.variable_costs.clear();
+        plan.fixed_costs.clear();
+        let revenue = revenue::calculate(&plan);
+
+        plan.variable_cost_state = CostSectionState::ConfirmedNone;
+        plan.fixed_cost_state = CostSectionState::ConfirmedNone;
+        let none = calculate(&plan, &revenue);
+        assert_eq!(none.variable_cost, Some(Decimal::ZERO));
+        assert_eq!(none.fixed_cost, Some(Decimal::ZERO));
+        assert_eq!(none.cash_fixed_cost, Some(Decimal::ZERO));
+        assert_eq!(none.total_cost, Some(Decimal::ZERO));
+        assert_eq!(none.cost_per_kg, Some(Decimal::ZERO));
+        assert_eq!(
+            none.investment_base, None,
+            "confirmed none invents no investment"
+        );
+
+        plan.fixed_cost_state = CostSectionState::Unknown;
+        let half = calculate(&plan, &revenue);
+        assert_eq!(half.variable_cost, Some(Decimal::ZERO));
+        assert_eq!(half.fixed_cost, None);
+        assert_eq!(half.total_cost, None);
+        assert_eq!(half.cost_per_kg, None);
+        assert_eq!(
+            revenue.revenue,
+            Some(Decimal::from(1_645_875)),
+            "revenue does not depend on the cost sections"
+        );
+    }
+
+    #[test]
+    fn an_unknown_fixed_section_stays_unknown_even_with_asset_depreciation() {
+        let mut plan = workbook_sample();
+        plan.fixed_costs.clear();
+        let asset = asset_allocation();
+
+        let unknown = crate::analyze_with_assets(&plan, &[asset.clone()], None);
+        assert_eq!(unknown.cost.asset_depreciation, Some(Decimal::from(20_000)));
+        assert_eq!(unknown.cost.fixed_cost, None);
+        assert_eq!(unknown.cost.cash_fixed_cost, None);
+
+        plan.fixed_cost_state = CostSectionState::ConfirmedNone;
+        let confirmed = crate::analyze_with_assets(&plan, &[asset], None);
+        assert_eq!(confirmed.cost.fixed_cost, Some(Decimal::from(20_000)));
+        assert_eq!(confirmed.cost.cash_fixed_cost, Some(Decimal::ZERO));
+    }
+
+    #[test]
+    fn rows_always_win_over_a_stored_section_state() {
+        let mut plan = workbook_sample();
+        plan.variable_cost_state = CostSectionState::Unknown;
+        plan.fixed_cost_state = CostSectionState::Unknown;
+        let revenue = revenue::calculate(&plan);
+        assert_eq!(
+            calculate(&plan, &revenue).total_cost,
+            Some(Decimal::from(811_275))
+        );
+        assert_eq!(
+            plan.effective_variable_cost_state(),
+            CostSectionState::EnteredItems
+        );
+
+        plan.variable_costs.clear();
+        plan.variable_cost_state = CostSectionState::EnteredItems;
+        assert_eq!(
+            plan.effective_variable_cost_state(),
+            CostSectionState::Unknown,
+            "a stale entered-items claim without rows reads as unknown, not confirmed none"
+        );
+    }
+
+    #[test]
+    fn a_total_only_line_contributes_its_total_and_no_per_unit_figure() {
+        let mut plan = workbook_sample();
+        let revenue = revenue::calculate(&plan);
+        let before = calculate(&plan, &revenue).variable_cost.unwrap();
+        plan.variable_costs.push(VariableCostLine {
+            name: "ค่าจ้างคนช่วยที่จำได้แต่ยอดรวม".into(),
+            kind: VariableCostKind::HarvestLabor,
+            quantity: None,
+            unit: String::new(),
+            unit_price: None,
+            total_amount: Some(Decimal::from(12_000)),
+        });
+
+        let result = calculate(&plan, &revenue);
+        let line = result.variable_lines.last().unwrap();
+        assert_eq!(line.total, Some(Decimal::from(12_000)));
+        assert_eq!(
+            line.quantity, None,
+            "a total-only harvest line does not take the sellable-yield default"
+        );
+        assert_eq!(line.yield_per_unit, None);
+        assert_eq!(result.variable_cost, Some(before + Decimal::from(12_000)));
+        assert_eq!(
+            quantity_for_kind(&plan, &revenue, VariableCostKind::HarvestLabor),
+            None,
+            "a kind with a total-only line yields no per-unit efficiency figure"
+        );
+    }
+
+    #[test]
+    fn unclassified_expenses_enter_no_total() {
+        let mut plan = workbook_sample();
+        let revenue = revenue::calculate(&plan);
+        let before = calculate(&plan, &revenue);
+        plan.unclassified_expenses.push(UnclassifiedExpense {
+            name: "ค่าอะไรสักอย่างเดือนสาม".into(),
+            amount: Some(Decimal::from(50_000)),
+            note: String::new(),
+        });
+        let after = calculate(&plan, &revenue);
+        assert_eq!(after.variable_cost, before.variable_cost);
+        assert_eq!(after.fixed_cost, before.fixed_cost);
+        assert_eq!(after.total_cost, before.total_cost);
     }
 }

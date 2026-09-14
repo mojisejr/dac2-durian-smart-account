@@ -146,6 +146,107 @@ async fn plan_flow(auth_session: store::AuthSession) -> StatusCode {
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
 
+    // A remembered expense is kept before classification, enters no total,
+    // and moves into the chosen section with its amount intact through the
+    // capture section endpoint. Confirming a section empty is a known zero.
+    let mut capture = loaded.form.clone();
+    capture
+        .unclassified
+        .push(web::plan_form::UnclassifiedExpenseForm {
+            name: "จ่ายคนขับรถเดือนสาม".into(),
+            amount: "50,000".into(),
+            note: String::new(),
+        });
+    if web::plans::save_section_for_owner(pool, user.id, created.id, "expenses", &capture)
+        .await
+        .is_err()
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    loaded = match web::plans::load_for_owner(pool, user.id, created.id).await {
+        Ok(Some(record)) => record,
+        _ => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    let Some(captured) = loaded.form.to_plan().ok() else {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    };
+    if captured.unclassified_expenses.len() != 1
+        || calc::analyze(&captured).cost.total_cost != calc::analyze(&expected).cost.total_cost
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    let mut classify = loaded.form.clone();
+    classify.classify_expense(
+        0,
+        web::plan_form::ExpenseClassification::Variable(calc::VariableCostKind::Transport),
+    );
+    if web::plans::save_section_for_owner(pool, user.id, created.id, "expenses", &classify)
+        .await
+        .is_err()
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    expected.variable_costs.push(calc::VariableCostLine {
+        name: "จ่ายคนขับรถเดือนสาม".into(),
+        kind: calc::VariableCostKind::Transport,
+        quantity: None,
+        unit: String::new(),
+        unit_price: None,
+        total_amount: Some(Decimal::from(50_000)),
+    });
+    expected.variable_cost_state = calc::CostSectionState::EnteredItems;
+    expected.fixed_cost_state = calc::CostSectionState::EnteredItems;
+    loaded = match web::plans::load_for_owner(pool, user.id, created.id).await {
+        Ok(Some(record)) => record,
+        _ => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    if loaded.form.to_plan().ok().as_ref() != Some(&expected) {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    let mut confirm_none = loaded.form.clone();
+    confirm_none.fixed_costs.clear();
+    confirm_none.fixed_cost_state = calc::CostSectionState::ConfirmedNone;
+    if web::plans::save_section_for_owner(pool, user.id, created.id, "fixed-costs", &confirm_none)
+        .await
+        .is_err()
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    expected.fixed_costs.clear();
+    expected.fixed_cost_state = calc::CostSectionState::ConfirmedNone;
+    loaded = match web::plans::load_for_owner(pool, user.id, created.id).await {
+        Ok(Some(record)) => record,
+        _ => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    let Some(confirmed) = loaded.form.to_plan().ok() else {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    };
+    if confirmed != expected || calc::analyze(&confirmed).cost.fixed_cost != Some(Decimal::ZERO) {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    // Restore the fixed rows so the later duplicate and finalize expectations hold.
+    let restore = PlanForm::from_plan(&{
+        let mut restored = expected.clone();
+        restored.fixed_costs = calc::workbook_sample().fixed_costs;
+        restored.fixed_cost_state = calc::CostSectionState::EnteredItems;
+        restored
+    });
+    if web::plans::save_section_for_owner(pool, user.id, created.id, "fixed-costs", &restore)
+        .await
+        .is_err()
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    expected.fixed_costs = calc::workbook_sample().fixed_costs;
+    expected.fixed_cost_state = calc::CostSectionState::EnteredItems;
+    loaded = match web::plans::load_for_owner(pool, user.id, created.id).await {
+        Ok(Some(record)) => record,
+        _ => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    if loaded.form.to_plan().ok().as_ref() != Some(&expected) {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+
     let detailed = match web::plans::set_forecast_mode_for_owner(
         pool,
         user.id,

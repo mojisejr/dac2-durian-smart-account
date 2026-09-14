@@ -182,26 +182,38 @@ pub async fn save_starting_capital(
 pub fn AssetPage() -> impl IntoView {
     let params = use_params_map();
     let id = move || params.with(|params| params.get("id").and_then(|id| id.parse::<i64>().ok()));
-    let data = Resource::new(id, |id| async move {
-        match id {
-            Some(id) => load_asset_page(id).await,
-            None => Ok(None),
-        }
-    });
+    // Every action on this page changes what it shows, so a completed action
+    // bumps this counter and the page reads itself again instead of waiting
+    // for a manual refresh.
+    let refresh = RwSignal::new(0usize);
+    let data = Resource::new(
+        move || (id(), refresh.get()),
+        |(id, _)| async move {
+            match id {
+                Some(id) => load_asset_page(id).await,
+                None => Ok(None),
+            }
+        },
+    );
     view! {
-        <Suspense fallback=move || view! { <p>"กำลังอ่านสินทรัพย์…"</p> }>
+        <Transition fallback=move || view! { <p>"กำลังอ่านสินทรัพย์…"</p> }>
             {move || data.get().map(|result| match result {
-                Ok(Some(data)) => view! { <AssetPageView data/> }.into_any(),
+                Ok(Some(data)) => view! { <AssetPageView data refresh/> }.into_any(),
                 _ => view! { <section class="card"><h1>"ไม่พบฤดูกาลนี้"</h1><A href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
             })}
-        </Suspense>
+        </Transition>
     }
 }
 
 #[component]
-pub fn AssetPageView(data: AssetPageData) -> impl IntoView {
+pub fn AssetPageView(
+    data: AssetPageData,
+    #[prop(default = RwSignal::new(0))] refresh: RwSignal<usize>,
+) -> impl IntoView {
     let create = ServerAction::<CreateOwnerAsset>::new();
     let capital = ServerAction::<SaveStartingCapital>::new();
+    refetch_after(create, refresh);
+    refetch_after(capital, refresh);
     let id = data.plan_id;
     let closed = data.closed;
     let year_label = data
@@ -225,7 +237,7 @@ pub fn AssetPageView(data: AssetPageData) -> impl IntoView {
     view! {
         <section class="page-stack asset-page">
             <header class="page-heading">
-                <div><p class="eyebrow">{year_label}</p><h1>"สินทรัพย์และเงินลงทุน"</h1><p>{data.plan_name}</p></div>
+                <div><p class="eyebrow">{year_label}</p><h1>"ของที่ใช้หลายปี และเงินก้อนที่ลงไป"</h1><small class="formal-term">"สินทรัพย์ · ค่าเสื่อมราคา · เงินลงทุน"</small><p>{data.plan_name}</p></div>
                 <A attr:class="icon-button" href=format!("/plans/{id}") attr:aria-label="กลับหน้าฤดูกาล">"×"</A>
             </header>
             <Show when=move || closed>
@@ -234,49 +246,49 @@ pub fn AssetPageView(data: AssetPageData) -> impl IntoView {
             <Show when=move || data.forecast_mode == calc::ForecastMode::Quick>
                 <section class="card asset-mode-note">
                     <strong>"ไม่รวมในประมาณการเร็ว"</strong>
-                    <p>"สินทรัพย์และเงินทุนด้านล่างมีผลเมื่อใช้แผนละเอียดเท่านั้น ประมาณการเร็วยังคงใช้ 3 คำตอบเดิม"</p>
+                    <p>"ของที่ใช้หลายปีและเงินก้อนด้านล่างมีผลเมื่อใช้แผนละเอียดเท่านั้น ประมาณการเร็วยังคงใช้ 3 คำตอบเดิม"</p>
                 </section>
             </Show>
             <section class="card role-summary">
                 <h2>"แยกที่มาของตัวเลข"</h2>
                 <dl class="asset-totals">
-                    <div><dt>"ต้นทุนคงที่ที่กรอกเอง"</dt><dd>{money_or_dash(data.manual_fixed_cost)}</dd></div>
-                    <div><dt>"ค่าเสื่อมจากสินทรัพย์ที่เลือก"</dt><dd>{format!("{} บาท/ปี", money(selected_depreciation))}</dd></div>
-                    <div><dt>"เงินลงทุนที่กรอกในรายการเดิม"</dt><dd>{money_or_dash(data.manual_investment_base)}</dd></div>
-                    <div><dt>"มูลค่าสินทรัพย์ที่เลือก"</dt><dd>{format!("{} บาท", money(selected_investment))}</dd></div>
-                    <div><dt>"เงินทุนเริ่มต้น"</dt><dd>{money_or_dash(data.starting_capital)}</dd></div>
+                    <div><dt>"ค่าใช้จ่ายประจำที่กรอกเอง"<small class="formal-term">"ต้นทุนคงที่"</small></dt><dd>{money_or_dash(data.manual_fixed_cost)}</dd></div>
+                    <div><dt>"ค่าใช้ของหลายปีที่เฉลี่ยลงฤดูนี้"<small class="formal-term">"ค่าเสื่อมราคาจากสินทรัพย์ที่เลือก"</small></dt><dd>{format!("{} บาท/ปี", money(selected_depreciation))}</dd></div>
+                    <div><dt>"เงินก้อนที่กรอกไว้ในค่าใช้จ่ายประจำ"<small class="formal-term">"เงินลงทุนจากรายการเดิม"</small></dt><dd>{money_or_dash(data.manual_investment_base)}</dd></div>
+                    <div><dt>"เงินก้อนของของที่เลือกใช้ฤดูนี้"<small class="formal-term">"มูลค่าสินทรัพย์ที่เลือก"</small></dt><dd>{format!("{} บาท", money(selected_investment))}</dd></div>
+                    <div><dt>"เงินก้อนตั้งต้นของสวน"<small class="formal-term">"เงินทุนเริ่มต้น"</small></dt><dd>{money_or_dash(data.starting_capital)}</dd></div>
                 </dl>
-                <p class="warning-copy">"ก่อนเลือกสินทรัพย์ ตรวจว่าคุณไม่ได้กรอกค่าเสื่อมหรือเงินลงทุนของชิ้นเดียวกันไว้ในต้นทุนคงที่แล้ว ระบบจะไม่เดาหรือลบรายการเดิมให้"</p>
-                <A attr:class="text-button" href=format!("/plans/{id}/fixed-costs")>"ตรวจต้นทุนคงที่ที่กรอกเอง"</A>
+                <p class="warning-copy">"ก่อนเลือกของชิ้นไหน ตรวจว่าคุณไม่ได้กรอกค่าเฉลี่ยรายปีหรือเงินก้อนของชิ้นเดียวกันไว้ในค่าใช้จ่ายประจำแล้ว ระบบจะไม่เดาหรือลบรายการเดิมให้"</p>
+                <A attr:class="text-button" href=format!("/plans/{id}/fixed-costs")>"ตรวจค่าใช้จ่ายประจำที่กรอกเอง"</A>
             </section>
 
             <section class="card">
-                <h2>"สินทรัพย์ของฉัน"</h2>
-                <p>"บันทึกครั้งเดียว แล้วเลือกใช้แยกในแต่ละฤดู ค่าเสื่อมเป็นเพียงค่าประมาณเพื่อวางแผน ไม่ใช่ค่าเสื่อมทางภาษีหรือราคาตลาด"</p>
+                <h2>"ของที่ใช้หลายปีของฉัน"</h2><small class="formal-term">"สินทรัพย์"</small>
+                <p>"เช่น ระบบน้ำ รถ โรงเรือน ที่ดินที่ซื้อไว้ บันทึกครั้งเดียว แล้วเลือกใช้แยกในแต่ละฤดู ค่าที่เฉลี่ยลงแต่ละปีเป็นเพียงค่าประมาณเพื่อวางแผน ไม่ใช่ค่าเสื่อมทางภาษีหรือราคาตลาด"</p>
                 {if data.assets.is_empty() {
-                    view! { <p class="muted">"ยังไม่มีสินทรัพย์"</p> }.into_any()
+                    view! { <p class="muted">"ยังไม่มีของที่ใช้หลายปี"</p> }.into_any()
                 } else {
-                    view! { <div class="asset-list">{data.assets.into_iter().map(|asset| view! { <AssetCard plan_id=id asset closed/> }).collect_view()}</div> }.into_any()
+                    view! { <div class="asset-list">{data.assets.into_iter().map(|asset| view! { <AssetCard plan_id=id asset closed refresh/> }).collect_view()}</div> }.into_any()
                 }}
             </section>
 
             <Show when=move || !closed>
                 <details class="card asset-create">
-                    <summary>"+ เพิ่มสินทรัพย์"</summary>
+                    <summary>"+ เพิ่มของที่ใช้หลายปี"</summary>
                     <ActionForm action=create>
                         <input type="hidden" name="plan_id" value=id/>
                         <AssetFields facts=None create=true/>
-                        <button class="primary" type="submit">"บันทึกสินทรัพย์"</button>
+                        <button class="primary" type="submit">"บันทึกของชิ้นนี้"</button>
                     </ActionForm>
                     <ActionError action=create/>
                 </details>
                 <section class="card">
-                    <h2>"เงินทุนเริ่มต้น (ไม่บังคับ)"</h2>
-                    <p>"ใช้เป็นฐานคำนวณ ROI และระยะคืนทุนเท่านั้น ไม่ใช่ต้นทุนของฤดู และไม่ใช่มูลค่าสินทรัพย์"</p>
+                    <h2>"เงินก้อนตั้งต้นของสวน (ไม่บังคับ)"</h2><small class="formal-term">"เงินทุนเริ่มต้น"</small>
+                    <p>"ใช้เทียบกำไรกับเงินก้อนที่ลงไป (ROI) และดูว่ากี่ปีจึงคืนทุนเท่านั้น ไม่ใช่ค่าใช้จ่ายของฤดู และไม่ใช่มูลค่าของที่ใช้หลายปี"</p>
                     <ActionForm action=capital>
                         <input type="hidden" name="plan_id" value=id/>
-                        <label><span>"เงินทุนเริ่มต้น"</span><span class="input-with-unit"><input type="text" inputmode="decimal" name="starting_capital" value=decimal_input(data.starting_capital)/><span class="unit">"บาท"</span></span><small class="field-hint">"เว้นว่างเพื่อลบค่าเดิม"</small></label>
-                        <button class="secondary" type="submit">"บันทึกเงินทุนเริ่มต้น"</button>
+                        <label><span>"เงินก้อนที่ลงไปตอนเริ่มทำสวน"</span><small class="formal-term">"เงินทุนเริ่มต้น"</small><span class="input-with-unit"><input type="text" inputmode="decimal" name="starting_capital" value=decimal_input(data.starting_capital)/><span class="unit">"บาท"</span></span><small class="field-hint">"เว้นว่างเพื่อลบค่าเดิม"</small></label>
+                        <button class="secondary" type="submit">"บันทึกเงินก้อนตั้งต้น"</button>
                     </ActionForm>
                     <ActionError action=capital/>
                 </section>
@@ -287,9 +299,16 @@ pub fn AssetPageView(data: AssetPageData) -> impl IntoView {
 }
 
 #[component]
-fn AssetCard(plan_id: i64, asset: AssetRow, closed: bool) -> impl IntoView {
+fn AssetCard(
+    plan_id: i64,
+    asset: AssetRow,
+    closed: bool,
+    refresh: RwSignal<usize>,
+) -> impl IntoView {
     let select = ServerAction::<SetSeasonAsset>::new();
     let update = ServerAction::<UpdateOwnerAsset>::new();
+    refetch_after(select, refresh);
+    refetch_after(update, refresh);
     let facts = asset.facts.clone();
     let allocation = asset.allocation.clone();
     let active = allocation.is_some();
@@ -308,14 +327,14 @@ fn AssetCard(plan_id: i64, asset: AssetRow, closed: bool) -> impl IntoView {
                 <span class=if asset.selected && active { "status good" } else if asset.selected { "status warning" } else { "status muted" }>{status}</span>
             </div>
             <dl class="asset-facts">
-                <div><dt>"ราคาซื้อ/มูลค่าเดิม"</dt><dd>{format!("{} บาท", money(facts.original_cost))}</dd></div>
+                <div><dt>"ซื้อมาหรือสร้าง"</dt><dd>{format!("{} บาท", money(facts.original_cost))}</dd></div>
                 <div><dt>"เริ่มใช้ปี พ.ศ."</dt><dd>{facts.start_year}</dd></div>
                 {allocation.as_ref().map(|allocation| view! {
-                    <div><dt>"ค่าเสื่อมที่เพิ่มในฤดูนี้"</dt><dd>{format!("{} บาท/ปี", money(allocation.annual_depreciation))}</dd></div>
+                    <div><dt>"เฉลี่ยลงฤดูนี้"<small class="formal-term">"ค่าเสื่อมราคา"</small></dt><dd>{format!("{} บาท/ปี", money(allocation.annual_depreciation))}</dd></div>
                 })}
             </dl>
             {allocation.as_ref().filter(|allocation| allocation.residual_assumed_zero).map(|_| view! {
-                <p class="caption">"ไม่ได้ระบุมูลค่าคงเหลือ ระบบใช้ 0 บาทเฉพาะค่าประมาณนี้"</p>
+                <p class="caption">"ไม่ได้ระบุว่าจะเหลือมูลค่าเท่าไรเมื่อเลิกใช้ ระบบใช้ 0 บาทเฉพาะค่าประมาณนี้"</p>
             })}
             {if closed {
                 ().into_any()
@@ -364,17 +383,31 @@ fn AssetFields(facts: Option<calc::AssetFacts>, create: bool) -> impl IntoView {
         retired_year: None,
     });
     view! {
-        <label><span>"ชื่อสินทรัพย์"</span><input type="text" name="name" maxlength="120" value=facts.name required/></label>
-        <label><span>"ประเภท"</span><select name="kind"><option value="equipment" selected=facts.kind == calc::AssetKind::Equipment>"อุปกรณ์/สิ่งปลูกสร้าง"</option><option value="owned_land" selected=facts.kind == calc::AssetKind::OwnedLand>"ที่ดินที่เป็นเจ้าของ"</option></select><small class="field-hint">"ที่ดินที่เป็นเจ้าของนับเป็นเงินลงทุน แต่ไม่มีค่าเสื่อม ที่ดินเช่าให้กรอกเป็นต้นทุนคงที่"</small></label>
-        <label><span>"ราคาซื้อหรือมูลค่าเดิม"</span><span class="input-with-unit"><input type="text" inputmode="decimal" name="original_cost" value=if facts.original_cost.is_zero() { String::new() } else { facts.original_cost.normalize().to_string() } required/><span class="unit">"บาท"</span></span></label>
-        <label><span>"เริ่มใช้ปี พ.ศ."</span><input type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" name="start_year" value=if facts.start_year == 0 { String::new() } else { facts.start_year.to_string() }/></label>
+        <label><span>"ของอะไร"</span><small class="formal-term">"ชื่อสินทรัพย์"</small><input type="text" name="name" maxlength="120" value=facts.name required/></label>
+        <label><span>"เป็นของแบบไหน"</span><select name="kind"><option value="equipment" selected=facts.kind == calc::AssetKind::Equipment>"อุปกรณ์/สิ่งปลูกสร้าง"</option><option value="owned_land" selected=facts.kind == calc::AssetKind::OwnedLand>"ที่ดินที่เป็นเจ้าของ"</option></select><small class="field-hint">"ที่ดินที่เป็นเจ้าของนับเป็นเงินก้อนที่ลงไป แต่ไม่เฉลี่ยรายปี ที่ดินเช่าให้กรอกเป็นค่าใช้จ่ายประจำ"</small></label>
+        <label><span>"ซื้อมาหรือสร้างเท่าไร"</span><small class="formal-term">"ราคาซื้อหรือมูลค่าเดิม"</small><span class="input-with-unit"><input type="text" inputmode="decimal" name="original_cost" value=if facts.original_cost.is_zero() { String::new() } else { facts.original_cost.normalize().to_string() } required/><span class="unit">"บาท"</span></span></label>
+        <label><span>"เริ่มใช้ปี พ.ศ. ไหน"</span><input type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" name="start_year" value=if facts.start_year == 0 { String::new() } else { facts.start_year.to_string() }/></label>
         <Show when=move || create>
             <label><span>"หรือ ใช้มาแล้วประมาณกี่ปี ณ ฤดูนี้"</span><input type="text" inputmode="numeric" name="approximate_years_in_use"/><small class="field-hint">"กรอกอย่างใดอย่างหนึ่ง ระบบคำนวณจากปีฤดู ไม่ใช้วันที่ปัจจุบัน"</small></label>
         </Show>
-        <label><span>"อายุใช้งานที่คาด"</span><span class="input-with-unit"><input type="text" inputmode="numeric" name="useful_life_years" value=facts.useful_life_years.map(|value| value.to_string()).unwrap_or_default()/><span class="unit">"ปี"</span></span><small class="field-hint">"ที่ดินที่เป็นเจ้าของให้เว้นว่าง"</small></label>
-        <label><span>"มูลค่าคงเหลือที่คาด (ไม่บังคับ)"</span><span class="input-with-unit"><input type="text" inputmode="decimal" name="residual_value" value=decimal_input(facts.residual_value)/><span class="unit">"บาท"</span></span><small class="field-hint">"ถ้าเว้นว่าง ระบบใช้ 0 บาทเฉพาะการวางแผน"</small></label>
+        <label><span>"คาดว่าจะใช้ได้กี่ปี"</span><small class="formal-term">"อายุการใช้งาน"</small><span class="input-with-unit"><input type="text" inputmode="numeric" name="useful_life_years" value=facts.useful_life_years.map(|value| value.to_string()).unwrap_or_default()/><span class="unit">"ปี"</span></span><small class="field-hint">"ที่ดินที่เป็นเจ้าของให้เว้นว่าง"</small></label>
+        <label><span>"เลิกใช้แล้วน่าจะขายต่อได้เท่าไร (ไม่บังคับ)"</span><small class="formal-term">"มูลค่าคงเหลือ"</small><span class="input-with-unit"><input type="text" inputmode="decimal" name="residual_value" value=decimal_input(facts.residual_value)/><span class="unit">"บาท"</span></span><small class="field-hint">"ถ้าเว้นว่าง ระบบใช้ 0 บาทเฉพาะการวางแผน"</small></label>
         <label><span>"เลิกใช้ตั้งแต่ปี พ.ศ. (ไม่บังคับ)"</span><input type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" name="retired_year" value=facts.retired_year.map(|year| year.to_string()).unwrap_or_default()/></label>
     }
+}
+
+/// Reads the page again once `action` has succeeded. A failed action leaves
+/// the page as it is, so its error stays beside the form that produced it.
+fn refetch_after<S>(action: ServerAction<S>, refresh: RwSignal<usize>)
+where
+    S: server_fn::ServerFn<Output = ()> + Clone + Send + Sync + 'static,
+    S::Error: Clone + Send + Sync + 'static,
+{
+    Effect::new(move |_| {
+        if matches!(action.value().get(), Some(Ok(()))) {
+            refresh.update(|count| *count += 1);
+        }
+    });
 }
 
 #[component]

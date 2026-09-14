@@ -74,11 +74,11 @@ fn data(selected: bool, closed: bool) -> AssetPageData {
 fn open_asset_page_names_every_role_and_requires_explicit_season_inclusion() {
     let html = render_assets(data(false, false));
     for text in [
-        "ต้นทุนคงที่ที่กรอกเอง",
-        "ค่าเสื่อมจากสินทรัพย์ที่เลือก",
-        "เงินลงทุนที่กรอกในรายการเดิม",
-        "มูลค่าสินทรัพย์ที่เลือก",
-        "เงินทุนเริ่มต้น",
+        "ค่าใช้จ่ายประจำที่กรอกเอง",
+        "ค่าใช้ของหลายปีที่เฉลี่ยลงฤดูนี้",
+        "เงินก้อนที่กรอกไว้ในค่าใช้จ่ายประจำ",
+        "เงินก้อนของของที่เลือกใช้ฤดูนี้",
+        "เงินก้อนตั้งต้นของสวน",
         "ยังไม่รวม",
         "รวมในฤดูนี้",
         "ระบบจะไม่เดาหรือลบรายการเดิมให้",
@@ -95,7 +95,39 @@ fn closed_asset_page_is_a_snapshot_without_edit_controls() {
     assert!(html.contains("รวมในฤดูนี้"));
     assert!(!html.contains("เอาออกจากฤดูนี้"));
     assert!(!html.contains("แก้ข้อมูลหรือระบุปีเลิกใช้"));
-    assert!(!html.contains("บันทึกเงินทุนเริ่มต้น"));
+    assert!(!html.contains("บันทึกเงินก้อนตั้งต้น"));
+}
+
+#[test]
+fn asset_page_leads_with_familiar_wording_and_keeps_formal_terms_secondary() {
+    let html = render_assets(data(false, false));
+    assert!(html.contains("<h1>ของที่ใช้หลายปี และเงินก้อนที่ลงไป</h1>"));
+    for term in [
+        "สินทรัพย์",
+        "ค่าเสื่อมราคา",
+        "มูลค่าคงเหลือ",
+        "อายุการใช้งาน",
+        "เงินลงทุน",
+        "เงินทุนเริ่มต้น",
+    ] {
+        assert!(
+            html.contains(&format!("<small class=\"formal-term\">{term}")),
+            "{term} is a secondary label"
+        );
+    }
+    for heading in ["<h1>", "<h2>"] {
+        let mut rest = html.as_str();
+        while let Some(start) = rest.find(heading) {
+            let after = &rest[start + heading.len()..];
+            let end = after.find("</h").unwrap();
+            let text = &after[..end];
+            assert!(
+                !text.contains("สินทรัพย์") && !text.contains("เงินทุนเริ่มต้น"),
+                "formal term leads heading {text}"
+            );
+            rest = &after[end..];
+        }
+    }
 }
 
 #[test]

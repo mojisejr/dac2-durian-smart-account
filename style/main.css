@@ -216,7 +216,21 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 .branch-option input { flex: 0 0 auto; height: 24px; margin: 0; width: 24px; }
 .branch-option span { display: grid; gap: 0.1rem; min-width: 0; }
 .branch-option small { color: var(--muted); font-weight: 400; }
+.cost-group { border-top: 1px solid var(--border); display: grid; gap: 0.8rem; padding-top: 0.85rem; }
+.cost-group-title h3 { font-size: 1rem; margin: 0; }
+.cost-group-title .formal-term { display: block; }
+.asset-cost-list { display: grid; gap: 0.65rem; list-style: none; margin: 0; padding: 0; }
+.asset-cost-row { align-items: baseline; border: 1px solid var(--border); border-radius: 0.7rem; display: flex; flex-wrap: wrap; gap: 0.35rem 0.75rem; justify-content: space-between; padding: 0.85rem; }
+.asset-cost-name { flex: 1 1 8rem; overflow-wrap: anywhere; }
+.asset-cost-amount { font-variant-numeric: tabular-nums; }
+.asset-cost-row .text-button { flex-basis: 100%; }
+.cost-total { align-items: baseline; border-top: 2px solid var(--text); display: flex; flex-wrap: wrap; gap: 0.35rem 0.75rem; justify-content: space-between; padding-top: 0.7rem; }
+.cost-total .formal-term { display: block; }
+.cost-total-amount { font-size: 1.05rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.cost-total-note { color: var(--muted); flex-basis: 100%; }
 .branch-note { background: color-mix(in srgb, var(--primary) 8%, var(--surface)); border-left: 4px solid var(--primary); font-size: 0.9rem; margin: 0; padding: 0.6rem 0.75rem; }
+.classify-flow { border-top: 1px dashed var(--border); display: grid; gap: 0.7rem; padding-top: 0.8rem; }
+.live-total small { color: var(--muted); display: block; font-weight: 400; margin-top: 0.2rem; }
 .conversion { color: var(--muted); font-size: 0.85rem; margin: -0.4rem 0 0; }
 .check-field { align-items: center; display: flex; min-height: 48px; }
 .check-field input { min-height: 24px; width: 24px; }

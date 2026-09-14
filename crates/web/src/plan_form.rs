@@ -1,8 +1,9 @@
 use std::str::FromStr;
 
 use calc::{
-    CashKind, FixedCostLine, Grade, HealthAnswer, HealthQuestion, InputIssueKind, KpiTargets,
-    MarketPlan, Plan, PriceSource, ProductionPlan, VariableCostKind, VariableCostLine, YieldSource,
+    CashKind, CostSectionState, FixedCostLine, Grade, HealthAnswer, HealthQuestion, InputIssueKind,
+    KpiTargets, MarketPlan, Plan, PriceSource, ProductionPlan, UnclassifiedExpense,
+    VariableCostKind, VariableCostLine, YieldSource,
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -17,8 +18,14 @@ pub struct PlanForm {
     #[serde(default)]
     pub grade_entry: GradeEntry,
     pub grades: Vec<GradeForm>,
+    #[serde(default)]
+    pub variable_cost_state: CostSectionState,
     pub variable_costs: Vec<VariableCostForm>,
+    #[serde(default)]
+    pub fixed_cost_state: CostSectionState,
     pub fixed_costs: Vec<FixedCostForm>,
+    #[serde(default)]
+    pub unclassified: Vec<UnclassifiedExpenseForm>,
     pub targets: TargetsForm,
     pub health_scores: Vec<String>,
 }
@@ -77,6 +84,12 @@ pub struct VariableCostForm {
     pub quantity: String,
     pub unit: String,
     pub unit_price: String,
+    /// The owner knows only the total for this line. Only the selected way
+    /// of answering is read; the other fields are kept but not used.
+    #[serde(default)]
+    pub total_only: bool,
+    #[serde(default)]
+    pub total_amount: String,
 }
 
 impl Default for VariableCostForm {
@@ -87,8 +100,26 @@ impl Default for VariableCostForm {
             quantity: String::new(),
             unit: String::new(),
             unit_price: String::new(),
+            total_only: false,
+            total_amount: String::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct UnclassifiedExpenseForm {
+    pub name: String,
+    pub amount: String,
+    pub note: String,
+}
+
+/// How a remembered expense is filed once the owner answers the familiar
+/// questions. Variable lines take the amount as a total; fixed lines take it
+/// as the amount per year.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExpenseClassification {
+    Variable(VariableCostKind),
+    Fixed(CashKind),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -184,6 +215,7 @@ impl PlanForm {
                     counts_as_quality_grade: grade.counts_as_quality_grade,
                 })
                 .collect(),
+            variable_cost_state: plan.variable_cost_state,
             variable_costs: plan
                 .variable_costs
                 .iter()
@@ -193,6 +225,18 @@ impl PlanForm {
                     quantity: decimal(line.quantity),
                     unit: line.unit.clone(),
                     unit_price: decimal(line.unit_price),
+                    total_only: line.is_total_only(),
+                    total_amount: decimal(line.total_amount),
+                })
+                .collect(),
+            fixed_cost_state: plan.fixed_cost_state,
+            unclassified: plan
+                .unclassified_expenses
+                .iter()
+                .map(|expense| UnclassifiedExpenseForm {
+                    name: expense.name.clone(),
+                    amount: decimal(expense.amount),
+                    note: expense.note.clone(),
                 })
                 .collect(),
             fixed_costs: plan
@@ -343,20 +387,38 @@ impl PlanForm {
             .variable_costs
             .iter()
             .enumerate()
-            .map(|(index, line)| VariableCostLine {
-                name: line.name.trim().to_owned(),
-                kind: line.kind,
-                quantity: parse_decimal(
-                    &line.quantity,
-                    &format!("variable_costs[{index}].quantity"),
-                    &mut errors,
-                ),
-                unit: line.unit.trim().to_owned(),
-                unit_price: parse_decimal(
-                    &line.unit_price,
-                    &format!("variable_costs[{index}].unit_price"),
-                    &mut errors,
-                ),
+            .map(|(index, line)| {
+                if line.total_only {
+                    VariableCostLine {
+                        name: line.name.trim().to_owned(),
+                        kind: line.kind,
+                        quantity: None,
+                        unit: String::new(),
+                        unit_price: None,
+                        total_amount: parse_decimal(
+                            &line.total_amount,
+                            &format!("variable_costs[{index}].total_amount"),
+                            &mut errors,
+                        ),
+                    }
+                } else {
+                    VariableCostLine {
+                        name: line.name.trim().to_owned(),
+                        kind: line.kind,
+                        quantity: parse_decimal(
+                            &line.quantity,
+                            &format!("variable_costs[{index}].quantity"),
+                            &mut errors,
+                        ),
+                        unit: line.unit.trim().to_owned(),
+                        unit_price: parse_decimal(
+                            &line.unit_price,
+                            &format!("variable_costs[{index}].unit_price"),
+                            &mut errors,
+                        ),
+                        total_amount: None,
+                    }
+                }
             })
             .collect();
         let fixed_costs = self
@@ -441,12 +503,29 @@ impl PlanForm {
             ),
         };
 
+        let unclassified_expenses = self
+            .unclassified
+            .iter()
+            .enumerate()
+            .map(|(index, expense)| UnclassifiedExpense {
+                name: expense.name.trim().to_owned(),
+                amount: parse_decimal(
+                    &expense.amount,
+                    &format!("unclassified_expenses[{index}].amount"),
+                    &mut errors,
+                ),
+                note: expense.note.trim().to_owned(),
+            })
+            .collect();
         let plan = Plan {
             name: self.name.trim().to_owned(),
             market,
             production,
+            variable_cost_state: self.variable_cost_state,
             variable_costs,
+            fixed_cost_state: self.fixed_cost_state,
             fixed_costs,
+            unclassified_expenses,
             health_answers,
             targets,
         };
@@ -464,6 +543,12 @@ impl PlanForm {
                     InputIssueKind::DuplicateHealthAnswer => {
                         "คำถามข้อนี้มีคำตอบซ้ำ กรุณาเลือกเพียงคำตอบเดียว"
                     }
+                    InputIssueKind::TotalAndUnitEntered => {
+                        "รายการนี้กรอกทั้งยอดรวมและจำนวนกับราคาต่อหน่วย กรุณาเลือกกรอกแบบเดียว"
+                    }
+                    InputIssueKind::ConfirmedNoneWithRows => {
+                        "ส่วนนี้มีรายการอยู่ จึงยืนยันว่าไม่มีไม่ได้ ลบรายการก่อนหรือเปลี่ยนคำตอบ"
+                    }
                 }
                 .into(),
             }
@@ -477,6 +562,37 @@ impl PlanForm {
 
     pub fn section_complete(&self, section: &str) -> bool {
         self.section_readiness(section).tone == ReadinessTone::Ready
+    }
+
+    /// Readiness that knows about assets already included in the season, so
+    /// an unknown fixed section says the depreciation is counted and names
+    /// what is still missing instead of reading as if nothing exists.
+    pub fn section_readiness_with_assets(
+        &self,
+        section: &str,
+        asset_depreciation: Option<Decimal>,
+    ) -> SectionReadiness {
+        let readiness = self.section_readiness(section);
+        match (section, asset_depreciation, readiness.tone) {
+            ("fixed-costs", Some(_), ReadinessTone::Missing)
+                if self.fixed_costs.is_empty()
+                    && self.fixed_cost_state != CostSectionState::ConfirmedNone =>
+            {
+                SectionReadiness {
+                    label: "ค่าเสื่อมของที่เลือกไว้รวมแล้ว ยังต้องกรอกหรือยืนยันว่าไม่มีค่าใช้จ่ายประจำอื่น",
+                    tone: ReadinessTone::Missing,
+                }
+            }
+            ("fixed-costs", Some(_), ReadinessTone::Ready)
+                if self.fixed_cost_state == CostSectionState::ConfirmedNone =>
+            {
+                SectionReadiness {
+                    label: "ยืนยันแล้วว่ามีเฉพาะค่าเสื่อมของที่เลือกไว้",
+                    tone: ReadinessTone::Ready,
+                }
+            }
+            _ => readiness,
+        }
     }
 
     pub fn section_readiness(&self, section: &str) -> SectionReadiness {
@@ -516,21 +632,58 @@ impl PlanForm {
                 label: "พอคำนวณรายได้แล้ว",
                 tone: ReadinessTone::Ready,
             },
-            "variable-costs" if analysis.cost.variable_cost.is_some() => SectionReadiness {
-                label: "พอคำนวณค่าใช้จ่ายตามการผลิตแล้ว",
-                tone: ReadinessTone::Ready,
-            },
-            "variable-costs" => SectionReadiness {
-                label: "ยังขาดค่าใช้จ่ายตามการผลิต",
+            "expenses" if !plan.unclassified_expenses.is_empty() => SectionReadiness {
+                label: match plan.unclassified_expenses.len() {
+                    1 => "มี 1 รายการยังไม่ได้บอกว่าเป็นแบบไหน",
+                    2 => "มี 2 รายการยังไม่ได้บอกว่าเป็นแบบไหน",
+                    3 => "มี 3 รายการยังไม่ได้บอกว่าเป็นแบบไหน",
+                    _ => "มีหลายรายการยังไม่ได้บอกว่าเป็นแบบไหน",
+                },
                 tone: ReadinessTone::Missing,
             },
-            "fixed-costs" if analysis.cost.fixed_cost.is_some() => SectionReadiness {
-                label: "พอคำนวณค่าใช้จ่ายประจำแล้ว",
-                tone: ReadinessTone::Ready,
+            "expenses" => SectionReadiness {
+                label: "เพิ่มได้เมื่อจำค่าใช้จ่ายได้แต่ยังไม่รู้ประเภท",
+                tone: ReadinessTone::Optional,
             },
-            "fixed-costs" => SectionReadiness {
-                label: "ยังขาดค่าใช้จ่ายประจำ",
-                tone: ReadinessTone::Missing,
+            "variable-costs" => match plan.effective_variable_cost_state() {
+                CostSectionState::ConfirmedNone => SectionReadiness {
+                    label: "ยืนยันแล้วว่าไม่มีค่าใช้จ่ายส่วนนี้",
+                    tone: ReadinessTone::Ready,
+                },
+                CostSectionState::EnteredItems if analysis.cost.variable_cost.is_some() => {
+                    SectionReadiness {
+                        label: "พอคำนวณค่าใช้จ่ายตามการผลิตแล้ว",
+                        tone: ReadinessTone::Ready,
+                    }
+                }
+                CostSectionState::EnteredItems => SectionReadiness {
+                    label: "มีรายการที่ยังกรอกไม่ครบ",
+                    tone: ReadinessTone::Missing,
+                },
+                CostSectionState::Unknown => SectionReadiness {
+                    label: "ยังขาดค่าใช้จ่ายตามการผลิต หรือยืนยันว่าไม่มี",
+                    tone: ReadinessTone::Missing,
+                },
+            },
+            "fixed-costs" => match plan.effective_fixed_cost_state() {
+                CostSectionState::ConfirmedNone => SectionReadiness {
+                    label: "ยืนยันแล้วว่าไม่มีค่าใช้จ่ายส่วนนี้",
+                    tone: ReadinessTone::Ready,
+                },
+                CostSectionState::EnteredItems if analysis.cost.fixed_cost.is_some() => {
+                    SectionReadiness {
+                        label: "พอคำนวณค่าใช้จ่ายประจำแล้ว",
+                        tone: ReadinessTone::Ready,
+                    }
+                }
+                CostSectionState::EnteredItems => SectionReadiness {
+                    label: "มีรายการที่ยังกรอกไม่ครบ",
+                    tone: ReadinessTone::Missing,
+                },
+                CostSectionState::Unknown => SectionReadiness {
+                    label: "ยังขาดค่าใช้จ่ายประจำ หรือยืนยันว่าไม่มี",
+                    tone: ReadinessTone::Missing,
+                },
             },
             "targets" if self.targets.yield_per_rai.trim().is_empty() => SectionReadiness {
                 label: "เพิ่มได้เมื่ออยากตั้งเป้าหมายเอง",
@@ -576,11 +729,56 @@ impl PlanForm {
                 self.production = submitted.production.clone();
                 self.grades = submitted.grades.clone();
             }
-            "variable-costs" => self.variable_costs = submitted.variable_costs.clone(),
-            "fixed-costs" => self.fixed_costs = submitted.fixed_costs.clone(),
+            "variable-costs" => {
+                self.variable_costs = submitted.variable_costs.clone();
+                self.variable_cost_state = submitted.variable_cost_state;
+            }
+            "fixed-costs" => {
+                self.fixed_costs = submitted.fixed_costs.clone();
+                self.fixed_cost_state = submitted.fixed_cost_state;
+            }
+            // Classifying moves an item across sections, so the capture page
+            // owns all three cost lists together.
+            "expenses" => {
+                self.unclassified = submitted.unclassified.clone();
+                self.variable_costs = submitted.variable_costs.clone();
+                self.variable_cost_state = submitted.variable_cost_state;
+                self.fixed_costs = submitted.fixed_costs.clone();
+                self.fixed_cost_state = submitted.fixed_cost_state;
+            }
             "targets" => self.targets = submitted.targets.clone(),
             "health" => self.health_scores = submitted.health_scores.clone(),
             _ => return false,
+        }
+        true
+    }
+
+    /// File a remembered expense into the section the owner's answers point
+    /// to, carrying its name and amount. Returns false when there is no such
+    /// item.
+    pub fn classify_expense(
+        &mut self,
+        index: usize,
+        classification: ExpenseClassification,
+    ) -> bool {
+        if index >= self.unclassified.len() {
+            return false;
+        }
+        let expense = self.unclassified.remove(index);
+        match classification {
+            ExpenseClassification::Variable(kind) => self.variable_costs.push(VariableCostForm {
+                name: expense.name,
+                kind,
+                total_only: true,
+                total_amount: expense.amount,
+                ..VariableCostForm::default()
+            }),
+            ExpenseClassification::Fixed(cash_kind) => self.fixed_costs.push(FixedCostForm {
+                name: expense.name,
+                cash_kind,
+                amount_per_year: expense.amount,
+                investment_base: String::new(),
+            }),
         }
         true
     }
@@ -682,8 +880,13 @@ fn field_belongs_to_section(field: &str, section: &str) -> bool {
     match section {
         "market" => field.starts_with("market."),
         "production" => field.starts_with("production."),
-        "variable-costs" => field.starts_with("variable_costs["),
-        "fixed-costs" => field.starts_with("fixed_costs["),
+        "variable-costs" => field.starts_with("variable_costs[") || field == "variable_cost_state",
+        "fixed-costs" => field.starts_with("fixed_costs[") || field == "fixed_cost_state",
+        "expenses" => {
+            field.starts_with("unclassified_expenses[")
+                || field.starts_with("variable_costs[")
+                || field.starts_with("fixed_costs[")
+        }
         "targets" => field.starts_with("targets."),
         "health" => field.starts_with("health_answers"),
         _ => false,
@@ -1104,6 +1307,84 @@ mod tests {
             form.weighted_grade_price_per_kg(),
             Some(Decimal::new(825, 1)),
             "the grade price can be shown beside the average entry"
+        );
+    }
+
+    #[test]
+    fn cost_readiness_names_unknown_confirmed_none_and_waiting_captures() {
+        let mut form = PlanForm::from_plan(&calc::Plan::default());
+        assert_eq!(
+            form.section_readiness("variable-costs").label,
+            "ยังขาดค่าใช้จ่ายตามการผลิต หรือยืนยันว่าไม่มี"
+        );
+        assert_eq!(
+            form.section_readiness("expenses").tone,
+            ReadinessTone::Optional
+        );
+
+        form.variable_cost_state = CostSectionState::ConfirmedNone;
+        form.fixed_cost_state = CostSectionState::ConfirmedNone;
+        assert_eq!(
+            form.section_readiness("variable-costs").label,
+            "ยืนยันแล้วว่าไม่มีค่าใช้จ่ายส่วนนี้"
+        );
+        assert_eq!(
+            form.section_readiness("fixed-costs").tone,
+            ReadinessTone::Ready
+        );
+
+        form.unclassified.push(UnclassifiedExpenseForm {
+            name: "อะไรสักอย่าง".into(),
+            amount: "100".into(),
+            note: String::new(),
+        });
+        assert_eq!(
+            form.section_readiness("expenses").label,
+            "มี 1 รายการยังไม่ได้บอกว่าเป็นแบบไหน"
+        );
+        assert_eq!(
+            form.section_readiness("expenses").tone,
+            ReadinessTone::Missing
+        );
+
+        form.fixed_costs.push(FixedCostForm::default());
+        form.fixed_costs[0].amount_per_year = "1000".into();
+        let errors = form
+            .to_plan()
+            .expect_err("confirmed none with rows is refused");
+        assert!(errors.iter().any(|error| error.field == "fixed_cost_state"));
+        assert!(!form.section_errors("fixed-costs").is_empty());
+    }
+
+    #[test]
+    fn the_capture_section_owns_all_three_cost_lists_and_others_stay_local() {
+        let mut stored = PlanForm::from_plan(&calc::workbook_sample());
+        let mut submitted = stored.clone();
+        submitted
+            .unclassified
+            .push(UnclassifiedExpenseForm::default());
+        submitted.classify_expense(0, ExpenseClassification::Fixed(CashKind::NonCash));
+        submitted.market.target_customer = "ข้อมูลที่ไม่ควรมา".into();
+
+        assert!(stored.replace_section_from("expenses", &submitted));
+        assert_eq!(stored.fixed_costs.len(), submitted.fixed_costs.len());
+        assert_ne!(stored.market.target_customer, "ข้อมูลที่ไม่ควรมา");
+
+        let mut only_variable = PlanForm::from_plan(&calc::workbook_sample());
+        let mut cleared = only_variable.clone();
+        cleared.variable_costs.clear();
+        cleared.variable_cost_state = CostSectionState::ConfirmedNone;
+        cleared.fixed_costs.clear();
+        assert!(only_variable.replace_section_from("variable-costs", &cleared));
+        assert!(only_variable.variable_costs.is_empty());
+        assert_eq!(
+            only_variable.variable_cost_state,
+            CostSectionState::ConfirmedNone
+        );
+        assert_eq!(
+            only_variable.fixed_costs.len(),
+            calc::workbook_sample().fixed_costs.len(),
+            "fixed rows are untouched"
         );
     }
 }

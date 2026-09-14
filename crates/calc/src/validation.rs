@@ -1,7 +1,7 @@
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::{HealthQuestion, Plan, PriceSource};
+use crate::{CostSectionState, HealthQuestion, Plan, PriceSource};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum InputIssueKind {
@@ -10,6 +10,10 @@ pub enum InputIssueKind {
     GradeSharesDoNotTotalOne,
     HealthScoreOutsideRange,
     DuplicateHealthAnswer,
+    /// A variable line carries a total and a quantity or unit price.
+    TotalAndUnitEntered,
+    /// A cost section claims confirmed none while it has rows.
+    ConfirmedNoneWithRows,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -109,6 +113,40 @@ impl Plan {
                 &mut issues,
                 &format!("variable_costs[{index}].unit_price"),
                 line.unit_price,
+            );
+            check_non_negative(
+                &mut issues,
+                &format!("variable_costs[{index}].total_amount"),
+                line.total_amount,
+            );
+            if line.total_amount.is_some() && (line.quantity.is_some() || line.unit_price.is_some())
+            {
+                issues.push(InputIssue {
+                    field: format!("variable_costs[{index}].total_amount"),
+                    kind: InputIssueKind::TotalAndUnitEntered,
+                });
+            }
+        }
+        if self.variable_cost_state == CostSectionState::ConfirmedNone
+            && !self.variable_costs.is_empty()
+        {
+            issues.push(InputIssue {
+                field: "variable_cost_state".into(),
+                kind: InputIssueKind::ConfirmedNoneWithRows,
+            });
+        }
+        if self.fixed_cost_state == CostSectionState::ConfirmedNone && !self.fixed_costs.is_empty()
+        {
+            issues.push(InputIssue {
+                field: "fixed_cost_state".into(),
+                kind: InputIssueKind::ConfirmedNoneWithRows,
+            });
+        }
+        for (index, expense) in self.unclassified_expenses.iter().enumerate() {
+            check_non_negative(
+                &mut issues,
+                &format!("unclassified_expenses[{index}].amount"),
+                expense.amount,
             );
         }
         for (index, line) in self.fixed_costs.iter().enumerate() {
@@ -253,5 +291,31 @@ mod tests {
                 .any(|issue| issue.kind == InputIssueKind::OutsideShareRange),
             "an impossible share is still an error whichever branch is selected"
         );
+    }
+
+    #[test]
+    fn a_total_with_units_and_a_confirmed_none_with_rows_are_input_issues() {
+        let mut plan = workbook_sample();
+        plan.variable_costs[0].total_amount = Some(Decimal::from(10));
+        plan.fixed_cost_state = CostSectionState::ConfirmedNone;
+
+        let issues = plan.input_issues();
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.kind == InputIssueKind::TotalAndUnitEntered
+                    && issue.field == "variable_costs[0].total_amount")
+        );
+        assert!(
+            issues
+                .iter()
+                .any(|issue| issue.kind == InputIssueKind::ConfirmedNoneWithRows
+                    && issue.field == "fixed_cost_state")
+        );
+
+        plan.variable_costs[0].quantity = None;
+        plan.variable_costs[0].unit_price = None;
+        plan.fixed_costs.clear();
+        assert!(plan.input_issues().is_empty());
     }
 }

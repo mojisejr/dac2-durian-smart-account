@@ -1,4 +1,7 @@
-use calc::{CashKind, ForecastMode, HealthQuestion, PriceSource, VariableCostKind, YieldSource};
+use calc::{
+    CashKind, CostSectionState, ForecastMode, HealthQuestion, PriceSource, VariableCostKind,
+    YieldSource,
+};
 
 use super::StoreError;
 
@@ -17,6 +20,26 @@ pub fn parse_forecast_mode(value: String) -> Result<ForecastMode, StoreError> {
             field: "plans.forecast_mode",
             value,
         }),
+    }
+}
+
+pub fn cost_section_state(value: CostSectionState) -> &'static str {
+    match value {
+        CostSectionState::Unknown => "unknown",
+        CostSectionState::ConfirmedNone => "confirmed_none",
+        CostSectionState::EnteredItems => "entered_items",
+    }
+}
+
+pub fn parse_cost_section_state(
+    field: &'static str,
+    value: String,
+) -> Result<CostSectionState, StoreError> {
+    match value.as_str() {
+        "unknown" => Ok(CostSectionState::Unknown),
+        "confirmed_none" => Ok(CostSectionState::ConfirmedNone),
+        "entered_items" => Ok(CostSectionState::EnteredItems),
+        _ => Err(StoreError::InvalidValue { field, value }),
     }
 }
 
