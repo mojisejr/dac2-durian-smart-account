@@ -254,9 +254,10 @@ where
 #[component]
 fn NotFound() -> impl IntoView {
     view! {
-        <section class="card">
+        <section class="card recovery-state">
             <h1>"ไม่พบหน้านี้"</h1>
-            <A href="/">"กลับหน้าแรก"</A>
+            <p>"ลิงก์นี้ไม่มีอยู่ หรือหน้านี้ถูกย้ายไปแล้ว"</p>
+            <A attr:class="button secondary" href="/">"กลับหน้าแรก"</A>
         </section>
     }
 }

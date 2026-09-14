@@ -595,7 +595,7 @@ pub fn PlanHubPage() -> impl IntoView {
         <Suspense fallback=move || view! { <p>"กำลังอ่านฤดูกาล…"</p> }>
             {move || record.get().map(|result| match result {
                 Ok(Some(record)) => view! { <PlanHub record/> }.into_any(),
-                _ => view! { <section class="card"><h1>"ไม่พบฤดูกาลนี้"</h1><A href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
+                _ => view! { <section class="card recovery-state"><h1>"ไม่พบฤดูกาลนี้"</h1><A attr:class="button secondary" href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
             })}
         </Suspense>
     }
@@ -1030,7 +1030,7 @@ fn decimal_input(value: Option<rust_decimal::Decimal>) -> String {
 }
 
 fn not_found_view() -> AnyView {
-    view! { <section class="card"><h1>"ไม่พบฤดูกาลนี้"</h1><A href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any()
+    view! { <section class="card recovery-state"><h1>"ไม่พบฤดูกาลนี้"</h1><A attr:class="button secondary" href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any()
 }
 
 #[component]
@@ -1209,7 +1209,7 @@ pub fn QuickPlanRoute() -> impl IntoView {
                         view! { <QuickResultView record/> }.into_any(),
                     Ok(Some(record)) if matches!(step.as_str(), "production" | "price" | "cost") =>
                         view! { <QuickQuestionView record step/> }.into_any(),
-                    _ => view! { <section class="card"><h1>"ไม่พบขั้นตอนนี้"</h1><A href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
+                    _ => view! { <section class="card recovery-state"><h1>"ไม่พบขั้นตอนนี้"</h1><A attr:class="button secondary" href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
                 }
             })}
         </Suspense>
@@ -1454,7 +1454,7 @@ pub fn PlanSectionRoute() -> impl IntoView {
                         view! { <PlanAnalysisView record/> }.into_any(),
                     Ok(Some(record)) if EDITABLE_SECTIONS.iter().any(|(slug, _, _)| *slug == section) =>
                         view! { <PlanSectionView record section/> }.into_any(),
-                    _ => view! { <section class="card"><h1>"ไม่พบส่วนนี้"</h1><A href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
+                    _ => view! { <section class="card recovery-state"><h1>"ไม่พบส่วนนี้"</h1><A attr:class="button secondary" href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
                 }
             })}
         </Suspense>

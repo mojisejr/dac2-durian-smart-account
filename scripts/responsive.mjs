@@ -410,6 +410,33 @@ async function signIn(browser) {
   await page.click('button[type="submit"]');
   await page.waitForTimeout(1200);
 
+  // Before any season exists, the season list and the history are empty
+  // states; measure them at every width now, because the matrix at the end
+  // runs with seasons in place.
+  {
+    const cookiesNow = await context.cookies();
+    for (const size of WIDTHS) {
+      const emptyContext = await browser.newContext({
+        viewport: { width: size.width, height: size.height },
+        isMobile: true,
+        hasTouch: true,
+        deviceScaleFactor: 2,
+      });
+      await emptyContext.addCookies(cookiesNow);
+      for (const [name, url] of [['plans-empty', `${BASE}/plans`], ['history-empty', `${BASE}/history`]]) {
+        const emptyPage = await emptyContext.newPage();
+        try {
+          await gotoOrDiagnose(emptyPage, url, cookiesNow);
+          await emptyPage.waitForTimeout(250);
+          assess(`${size.name}px ${name}`, await inspect(emptyPage, size.width), size.width);
+        } finally {
+          await emptyPage.close();
+        }
+      }
+      await emptyContext.close();
+    }
+  }
+
   // The workbook sample is a browser-only sandbox. Editing and leaving it must
   // not create a season row.
   await navigateOrDiagnose(page, `${BASE}/demo`, null, () => page.goto(`${BASE}/demo`));
@@ -522,9 +549,9 @@ async function signIn(browser) {
   const production = `${BASE}/plans/${detailedPlanId}/production`;
   await navigateOrDiagnose(page, production, null, () => page.goto(production));
   await page.locator('#production-trees').waitFor({ state: 'visible', timeout: 10000 });
-  if (!(await page.isChecked('input[name="yield-source"][value="derived"]'))) {
-    throw new Error('a new detailed plan does not start on the derived yield branch');
-  }
+  // The selection is bound as a property, so it appears only once hydration
+  // has run; wait for it rather than reading the server markup's blank.
+  await waitForHydratedValue(page, 'input[name="yield-source"][value="derived"]', (v) => v === true, 'a new detailed plan does not start on the derived yield branch');
   await page.fill('#production-trees', '200');
   await page.fill('#production-fruits-per-tree', '35');
   await page.fill('#production-fruit-weight', '3');
@@ -950,6 +977,17 @@ try {
     ['targets-advanced', `${BASE}/plans/${detailedPlanId}/targets`],
     ['assets-closed', `${BASE}/plans/${detailedPlanId}/assets`],
     ['assets-open', `${BASE}/plans/${assetOpenPlanId}/assets`],
+    // Error, empty, and unknown-route states an owner can land on.
+    ['unknown-route', `${BASE}/no-such-page`],
+    ['season-not-found', `${BASE}/plans/999999999`],
+    ['section-not-found', `${BASE}/plans/${detailedPlanId}/no-such-section`],
+    ['comparison-before-close', `${BASE}/plans/${assetOpenPlanId}/comparison`],
+    ['review-without-draft', `${BASE}/plans/${detailedPlanId}/close/review`],
+    ['entry-after-close', `${BASE}/plans/${comparisonPlanId}/close`],
+    ['review-after-close', `${BASE}/plans/${comparisonPlanId}/close/review`],
+    // The loading state: a client-side navigation whose data is held back,
+    // so the Suspense fallback is on screen when it is measured.
+    ['hub-loading', `${BASE}/plans`],
   ];
 
   for (const size of WIDTHS) {
@@ -966,6 +1004,35 @@ try {
       // long matrix from retaining old hydrated runtimes in one renderer.
       const page = await context.newPage();
       try {
+        if (routeName === 'hub-loading') {
+          await page.route('**/api/load_plan*', async (route) => {
+            await new Promise((resolve) => setTimeout(resolve, 2500));
+            await route.continue();
+          });
+          // The fallback shows only on a client-side navigation, which needs
+          // hydration first. The wasm may come from the context's cache, so
+          // its network response is not a reliable signal; give hydration a
+          // moment and retry the click once if the navigation was a full load.
+          let shown = false;
+          for (let attempt = 0; attempt < 2 && !shown; attempt += 1) {
+            await gotoOrDiagnose(page, url, cookies);
+            await Promise.race([
+              page.waitForResponse((response) => response.url().endsWith('.wasm'), { timeout: 8000 }).catch(() => {}),
+              page.waitForTimeout(8000),
+            ]);
+            await page.waitForTimeout(1000);
+            await page.locator(`a[href="/plans/${detailedPlanId}"]`).first().click();
+            shown = await page
+              .getByText('กำลังอ่านฤดูกาล…')
+              .waitFor({ state: 'visible', timeout: 4000 })
+              .then(() => true)
+              .catch(() => false);
+          }
+          if (!shown) throw new Error(`${size.name}px ${routeName}: the loading fallback never appeared`);
+          assess(`${size.name}px ${routeName}`, await inspect(page, size.width), size.width);
+          await page.unroute('**/api/load_plan*');
+          continue;
+        }
         await gotoOrDiagnose(page, url, cookies);
         await page.waitForTimeout(250);
         assess(`${size.name}px ${routeName}`, await inspect(page, size.width), size.width);

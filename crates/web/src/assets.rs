@@ -199,7 +199,7 @@ pub fn AssetPage() -> impl IntoView {
         <Transition fallback=move || view! { <p>"กำลังอ่านสินทรัพย์…"</p> }>
             {move || data.get().map(|result| match result {
                 Ok(Some(data)) => view! { <AssetPageView data refresh/> }.into_any(),
-                _ => view! { <section class="card"><h1>"ไม่พบฤดูกาลนี้"</h1><A href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
+                _ => view! { <section class="card recovery-state"><h1>"ไม่พบฤดูกาลนี้"</h1><A attr:class="button secondary" href="/plans">"กลับไปฤดูกาลของฉัน"</A></section> }.into_any(),
             })}
         </Transition>
     }
