@@ -946,9 +946,8 @@ fn classification_asks_familiar_questions_and_the_expense_lands_intact() {
     assert_eq!(form.fixed_costs[0].cash_kind, calc::CashKind::Cash);
 }
 
-#[test]
-fn fixed_costs_say_included_asset_depreciation_is_already_counted() {
-    let plan = calc::Plan {
+fn plan_with_revenue() -> calc::Plan {
+    calc::Plan {
         production: calc::ProductionPlan {
             yield_source: calc::YieldSource::Direct,
             sellable_yield_kg: Some(20_000.into()),
@@ -958,33 +957,128 @@ fn fixed_costs_say_included_asset_depreciation_is_already_counted() {
         },
         variable_cost_state: calc::CostSectionState::ConfirmedNone,
         ..Default::default()
-    };
-    let form = PlanForm::from_plan(&plan);
+    }
+}
 
-    let without = render("fixed-costs", false, form.clone());
-    assert!(!without.contains("asset-depreciation-note"));
-    assert!(without.contains("แม้ไม่มีทุเรียนขาย ปีนี้ยังมีอะไรต้องจ่ายไหม"));
-    assert!(without.contains("ยังคำนวณกำไรสุทธิไม่ได้"));
+fn rent_row() -> web::plan_form::FixedCostForm {
+    web::plan_form::FixedCostForm {
+        name: "ค่าเช่าที่".into(),
+        cash_kind: calc::CashKind::Cash,
+        amount_per_year: "36000".into(),
+        investment_base: String::new(),
+    }
+}
+
+fn between<'a>(html: &'a str, from: &str, to: &str) -> &'a str {
+    let start = html.find(from).unwrap_or_else(|| panic!("missing {from}"));
+    let rest = &html[start..];
+    let end = rest
+        .find(to)
+        .unwrap_or_else(|| panic!("missing {to} after {from}"));
+    &rest[..end]
+}
+
+#[test]
+fn fixed_costs_list_manual_rows_and_included_asset_depreciation_as_two_groups() {
+    let mut form = PlanForm::from_plan(&plan_with_revenue());
+    form.fixed_costs.push(rent_row());
 
     let with = render_with_assets("fixed-costs", false, form.clone(), vec![included_asset()]);
-    assert!(with.contains("asset-depreciation-note"));
-    assert!(with.contains("เฉลี่ยลงมาเป็นค่าใช้จ่ายประจำแล้ว 20,000.00 บาท/ปี (ค่าเสื่อม)"));
-    assert!(with.contains("ไม่ต้องกรอกซ้ำที่นี่"));
-    assert!(with.contains("href=\"/plans/42/assets\""));
-    assert!(with.contains("นอกจากค่าเสื่อมของที่เลือกไว้ ปีนี้ยังมีอะไรต้องจ่ายแม้ไม่มีทุเรียนขายไหม"));
-    assert!(with.contains("ระบบจะนับเฉพาะค่าเสื่อมของที่เลือกไว้"));
     assert!(
-        with.contains("ยังคำนวณกำไรสุทธิไม่ได้"),
+        !with.contains("asset-depreciation-note"),
+        "the counted note is replaced by the list"
+    );
+    let manual = between(&with, "cost-group-manual", "cost-group-assets");
+    assert!(manual.contains("กรอกเอง"));
+    assert!(manual.contains("ค่าเช่าที่"));
+    assert!(manual.contains("+ เพิ่มค่าใช้จ่ายประจำ"));
+    let assets = between(&with, "cost-group-assets", "fixed-cost-total");
+    assert!(assets.contains("ของที่ใช้หลายปี · ค่าเสื่อม"));
+    assert!(assets.contains("ต้นทุนไม่ใช่เงินสด"));
+    assert!(assets.contains("ระบบน้ำ"));
+    assert!(assets.contains("20,000.00 บาท/ปี"));
+    assert!(assets.contains("href=\"/plans/42/assets\""));
+    assert!(assets.contains("ไม่ต้องกรอกซ้ำที่นี่"));
+    assert!(!assets.contains("<input"), "asset rows are read-only");
+
+    let without = render("fixed-costs", false, form);
+    let assets = between(&without, "cost-group-assets", "fixed-cost-total");
+    assert!(assets.contains("ยังไม่มีของที่ใช้หลายปีที่รวมในฤดูนี้"));
+    assert!(assets.contains("href=\"/plans/42/assets\""));
+}
+
+#[test]
+fn fixed_costs_total_equals_the_dashboard_fixed_cost() {
+    let mut form = PlanForm::from_plan(&plan_with_revenue());
+    form.fixed_costs.push(rent_row());
+    let plan = form.to_plan().unwrap();
+    let dashboard = calc::analyze_with_assets(&plan, &[included_asset()], None)
+        .cost
+        .fixed_cost
+        .unwrap();
+    assert_eq!(dashboard, 56_000.into());
+
+    let html = render_with_assets("fixed-costs", false, form.clone(), vec![included_asset()]);
+    let total = between(&html, "fixed-cost-total", "</div>");
+    assert!(total.contains("รวมค่าใช้จ่ายประจำฤดูนี้"));
+    assert!(total.contains("ต้นทุนคงที่รวม"));
+    assert!(total.contains("56,000.00 บาท/ปี"), "{total}");
+
+    let html = render("fixed-costs", false, form);
+    let total = between(&html, "fixed-cost-total", "</div>");
+    assert!(total.contains("36,000.00 บาท/ปี"), "{total}");
+}
+
+#[test]
+fn fixed_costs_question_belongs_to_the_manual_group_and_confirming_makes_asset_only_cost_known() {
+    let form = PlanForm::from_plan(&plan_with_revenue());
+
+    let unknown = render_with_assets("fixed-costs", false, form.clone(), vec![included_asset()]);
+    let manual = between(&unknown, "cost-group-manual", "cost-group-assets");
+    assert!(
+        manual.contains("fixed-cost-state"),
+        "the question sits in the manual group"
+    );
+    assert!(manual.contains("นอกจากค่าเสื่อมของที่เลือกไว้ ปีนี้ยังมีอะไรต้องจ่ายแม้ไม่มีทุเรียนขายไหม"));
+    assert!(manual.contains("ระบบจะนับเฉพาะค่าเสื่อมของที่เลือกไว้"));
+    let assets = between(&unknown, "cost-group-assets", "fixed-cost-total");
+    assert!(!assets.contains("fixed-cost-state"));
+    let total = between(&unknown, "fixed-cost-total", "</div>");
+    assert!(total.contains("ยังไม่รู้"), "{total}");
+    assert!(total.contains("ค่าเสื่อม 20,000.00 บาท/ปี รวมอยู่แล้ว แต่ยอดรวมยังไม่รู้"));
+    assert!(
+        unknown.contains("ยังคำนวณกำไรสุทธิไม่ได้"),
         "depreciation alone does not make the unknown section known"
     );
 
-    let mut confirmed = form;
+    let mut confirmed = form.clone();
     confirmed.fixed_cost_state = calc::CostSectionState::ConfirmedNone;
     let html = render_with_assets("fixed-costs", false, confirmed, vec![included_asset()]);
+    let total = between(&html, "fixed-cost-total", "</div>");
+    assert!(total.contains("20,000.00 บาท/ปี"), "{total}");
+    assert!(!total.contains("ยังไม่รู้"));
     assert!(
         html.contains("กำไรสุทธิโดยประมาณ 1,580,000.00 บาท"),
         "the live figure on the page counts the included asset: {html}"
     );
+
+    let mut entered = form;
+    entered.fixed_costs.push(rent_row());
+    let html = render_with_assets("fixed-costs", false, entered, vec![included_asset()]);
+    assert!(
+        !html.contains("fixed-cost-state"),
+        "rows answer the question"
+    );
+
+    let bare = render(
+        "fixed-costs",
+        false,
+        PlanForm::from_plan(&plan_with_revenue()),
+    );
+    assert!(bare.contains("แม้ไม่มีทุเรียนขาย ปีนี้ยังมีอะไรต้องจ่ายไหม"));
+    let total = between(&bare, "fixed-cost-total", "</div>");
+    assert!(total.contains("ยังไม่รู้"));
+    assert!(!total.contains("รวมอยู่แล้ว"));
 }
 
 #[test]

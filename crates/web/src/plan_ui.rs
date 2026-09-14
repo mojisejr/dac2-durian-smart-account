@@ -1388,7 +1388,6 @@ pub fn PlanSectionView(record: PlanRecord, section: String) -> impl IntoView {
     let closed = record.closed;
     let assets = StoredValue::new(record.asset_allocations);
     let starting_capital = record.starting_capital;
-    let asset_depreciation = assets.with_value(|assets| included_asset_depreciation(assets));
     let season_label = format!(
         "{} · {}",
         season_year_label(record.season_year),
@@ -1416,7 +1415,7 @@ pub fn PlanSectionView(record: PlanRecord, section: String) -> impl IntoView {
                 <input type="hidden" name="id" value=id/>
                 <input type="hidden" name="section" value=section/>
                 <input type="hidden" name="form_json" value=move || serde_json::to_string(&form.get()).unwrap_or_default()/>
-                <SectionFields section=section_for_fields form closed plan_id=id asset_depreciation/>
+                <SectionFields section=section_for_fields form closed plan_id=id assets/>
                 <ValidationSummary form section=section_for_validation/>
                 <Show when=move || !closed>
                     <button class="primary save-button" type="submit" disabled=move || section_for_button.with_value(|section| !form.get().section_errors(section).is_empty())>"บันทึกส่วนนี้"</button>
@@ -1435,16 +1434,14 @@ fn SectionFields(
     form: RwSignal<PlanForm>,
     closed: bool,
     plan_id: i64,
-    asset_depreciation: Option<rust_decimal::Decimal>,
+    assets: StoredValue<Vec<calc::AssetAllocation>>,
 ) -> impl IntoView {
     match section.as_str() {
         "market" => view! { <MarketFields form closed/> }.into_any(),
         "production" => view! { <ProductionFields form closed/> }.into_any(),
         "expenses" => view! { <ExpenseFields form closed/> }.into_any(),
         "variable-costs" => view! { <VariableCostFields form closed/> }.into_any(),
-        "fixed-costs" => {
-            view! { <FixedCostFields form closed plan_id asset_depreciation/> }.into_any()
-        }
+        "fixed-costs" => view! { <FixedCostFields form closed plan_id assets/> }.into_any(),
         "targets" => view! { <TargetFields form closed/> }.into_any(),
         "health" => view! { <HealthFields form closed/> }.into_any(),
         _ => view! { <p>"ไม่พบข้อมูลส่วนนี้"</p> }.into_any(),
@@ -1691,31 +1688,78 @@ fn FixedCostFields(
     form: RwSignal<PlanForm>,
     closed: bool,
     plan_id: i64,
-    asset_depreciation: Option<rust_decimal::Decimal>,
+    assets: StoredValue<Vec<calc::AssetAllocation>>,
 ) -> impl IntoView {
     let fixed_rows = Memo::new(move |_| form.with(|f| f.fixed_costs.len()));
+    let asset_depreciation = assets.with_value(|assets| included_asset_depreciation(assets));
+    let asset_rows = assets.with_value(|assets| {
+        assets
+            .iter()
+            .map(|asset| (asset.facts.name.clone(), asset.annual_depreciation))
+            .collect::<Vec<_>>()
+    });
+    // The same arithmetic the dashboard uses, so the total here cannot drift
+    // from the fixed cost shown there.
+    let total = move || {
+        form.get().to_plan().ok().and_then(|plan| {
+            assets.with_value(|assets| {
+                calc::analyze_with_assets(&plan, assets, None)
+                    .cost
+                    .fixed_cost
+            })
+        })
+    };
     view! { <section class="card field-stack">
         <div class="section-title"><div><h2>"แม้ปีนี้ไม่มีทุเรียนขาย ยังต้องจ่ายอะไรอยู่"</h2><small class="formal-term">"ต้นทุนคงที่"</small><p>"เช่น ค่าเช่าที่ เงินเดือนคนงานประจำ ดอกเบี้ย ค่าเสื่อมของที่ใช้หลายปี"</p></div></div>
         <details class="explanation"><summary>"ⓘ จ่ายเงินจริง กับ เฉลี่ยจากของหลายปี ต่างกันอย่างไร"</summary><h3>"คืออะไร"</h3><p>"ค่าเสื่อมระบบน้ำและค่าเสื่อมรถ เป็นต้นทุนที่ลงบัญชีแต่ปีนี้ไม่ได้ควักเงินจ่าย ส่วนค่าเช่า ดอกเบี้ย และค่าแรงประจำ จ่ายจริงทุกปี"</p><h3>"ใช้ยังไง"</h3><p>"ตอบให้ตรงตอนกรอกแต่ละรายการ"</p><h3>"ทำไมต้องมี"</h3><p>"เป็นสิ่งเดียวที่ทำให้กระแสเงินสดกับกำไรสุทธิต่างกันได้"</p><h3>"ไม่ใส่ได้ไหม"</h3><p>"ตอบผิดได้ แต่เงินสดที่เหลือจะผิดตาม"</p></details>
-        {asset_depreciation.map(|depreciation| view! {
-            <p class="branch-note asset-depreciation-note" aria-live="polite">
-                {format!("ของที่ใช้หลายปีที่เลือกไว้ในฤดูนี้ เฉลี่ยลงมาเป็นค่าใช้จ่ายประจำแล้ว {} บาท/ปี (ค่าเสื่อม) ระบบรวมให้เอง ไม่ต้องกรอกซ้ำที่นี่ ส่วนนี้ถามเฉพาะค่าใช้จ่ายประจำอื่นที่ยังไม่ได้บันทึก", money(depreciation))}
-            </p>
-            <A attr:class="text-button" href=format!("/plans/{plan_id}/assets")>"ดูของที่เลือกไว้"</A>
-        })}
-        <Show when=move || form.get().fixed_costs.is_empty()><SectionStateChoice form fixed=true closed asset_depreciation=asset_depreciation.unwrap_or_default()/></Show>
-        {move || (0..fixed_rows.get()).map(|index| {
-            let cash = Signal::derive(move || if form.get().fixed_costs.get(index).is_some_and(|l| l.cash_kind == CashKind::NonCash) { "non_cash" } else { "cash" });
-            view! {
-            <div class="repeat-row">
-                <PlanField label="ค่าอะไร" example="เช่น ค่าเช่าที่ เงินเดือนคนงาน" value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.name.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.name = v })) closed/>
-                <BranchChoice legend="ปีนี้ต้องจ่ายเงินจริงไหม" name="" options=[("cash", "จ่ายเงินจริงปีนี้", "ค่าเช่า เงินเดือน ดอกเบี้ย · ต้นทุนเงินสด"), ("non_cash", "เป็นค่าใช้ของหลายปีที่เฉลี่ยลงฤดูนี้", "ค่าเสื่อมระบบน้ำ รถ โรงเรือน · ต้นทุนไม่ใช่เงินสด")] selected=cash on_select=Callback::new(move |v: String| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.cash_kind = if v == "non_cash" { CashKind::NonCash } else { CashKind::Cash } })) closed/>
-                <PlanField label="ปีละเท่าไร" formal_term="จำนวนต่อปี" unit="บาท" numeric=true value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.amount_per_year.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.amount_per_year = v })) closed/>
-                <PlanField label="เงินก้อนที่ลงไปกับรายการนี้ (ถ้ามี)" formal_term="เงินลงทุน" unit="บาท" numeric=true hint="ค่าใช้จ่ายประจำที่ไม่มีเงินก้อนเริ่มต้น เว้นช่องนี้ได้ ของที่ใช้หลายปี บันทึกที่หน้าของที่ใช้หลายปีจะคิดค่าเสื่อมให้เอง" value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.investment_base.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.investment_base = v })) closed/>
-                <Show when=move || !closed><button class="text-button bad-text" type="button" on:click=move |_| form.update(|f| { if index < f.fixed_costs.len() { f.fixed_costs.remove(index); } })>"ลบรายการ"</button></Show>
-            </div>
-        }}).collect_view()}
-        <Show when=move || !closed><button class="secondary" type="button" on:click=move |_| form.update(|f| f.fixed_costs.push(FixedCostForm::default()))>"+ เพิ่มค่าใช้จ่ายประจำ"</button></Show>
+
+        <div class="cost-group cost-group-manual">
+            <div class="cost-group-title"><h3>"กรอกเอง"</h3><small class="formal-term">"ค่าใช้จ่ายประจำที่บันทึกที่หน้านี้"</small></div>
+            <Show when=move || form.get().fixed_costs.is_empty()><SectionStateChoice form fixed=true closed asset_depreciation=asset_depreciation.unwrap_or_default()/></Show>
+            {move || (0..fixed_rows.get()).map(|index| {
+                let cash = Signal::derive(move || if form.get().fixed_costs.get(index).is_some_and(|l| l.cash_kind == CashKind::NonCash) { "non_cash" } else { "cash" });
+                view! {
+                <div class="repeat-row">
+                    <PlanField label="ค่าอะไร" example="เช่น ค่าเช่าที่ เงินเดือนคนงาน" value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.name.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.name = v })) closed/>
+                    <BranchChoice legend="ปีนี้ต้องจ่ายเงินจริงไหม" name="" options=[("cash", "จ่ายเงินจริงปีนี้", "ค่าเช่า เงินเดือน ดอกเบี้ย · ต้นทุนเงินสด"), ("non_cash", "เป็นค่าใช้ของหลายปีที่เฉลี่ยลงฤดูนี้", "ค่าเสื่อมระบบน้ำ รถ โรงเรือน · ต้นทุนไม่ใช่เงินสด")] selected=cash on_select=Callback::new(move |v: String| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.cash_kind = if v == "non_cash" { CashKind::NonCash } else { CashKind::Cash } })) closed/>
+                    <PlanField label="ปีละเท่าไร" formal_term="จำนวนต่อปี" unit="บาท" numeric=true value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.amount_per_year.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.amount_per_year = v })) closed/>
+                    <PlanField label="เงินก้อนที่ลงไปกับรายการนี้ (ถ้ามี)" formal_term="เงินลงทุน" unit="บาท" numeric=true hint="ค่าใช้จ่ายประจำที่ไม่มีเงินก้อนเริ่มต้น เว้นช่องนี้ได้ ของที่ใช้หลายปี บันทึกที่หน้าของที่ใช้หลายปีจะคิดค่าเสื่อมให้เอง" value=Signal::derive(move || form.get().fixed_costs.get(index).map(|l| l.investment_base.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.fixed_costs.get_mut(index) { l.investment_base = v })) closed/>
+                    <Show when=move || !closed><button class="text-button bad-text" type="button" on:click=move |_| form.update(|f| { if index < f.fixed_costs.len() { f.fixed_costs.remove(index); } })>"ลบรายการ"</button></Show>
+                </div>
+            }}).collect_view()}
+            <Show when=move || !closed><button class="secondary" type="button" on:click=move |_| form.update(|f| f.fixed_costs.push(FixedCostForm::default()))>"+ เพิ่มค่าใช้จ่ายประจำ"</button></Show>
+        </div>
+
+        <div class="cost-group cost-group-assets">
+            <div class="cost-group-title"><h3>"ของที่ใช้หลายปี · ค่าเสื่อม"</h3><small class="formal-term">"ต้นทุนไม่ใช่เงินสด · เฉลี่ยจากของที่รวมในฤดูนี้"</small></div>
+            {if asset_rows.is_empty() {
+                view! {
+                    <p class="muted">"ยังไม่มีของที่ใช้หลายปีที่รวมในฤดูนี้"</p>
+                    <A attr:class="text-button" href=format!("/plans/{plan_id}/assets")>"เลือกของที่ใช้หลายปี"</A>
+                }.into_any()
+            } else {
+                view! {
+                    <ul class="asset-cost-list">
+                        {asset_rows.into_iter().map(|(name, depreciation)| view! {
+                            <li class="asset-cost-row">
+                                <span class="asset-cost-name">{name}</span>
+                                <span class="asset-cost-amount">{format!("{} บาท/ปี", money(depreciation))}</span>
+                                <A attr:class="text-button" href=format!("/plans/{plan_id}/assets")>"ดูที่หน้าของที่ใช้หลายปี"</A>
+                            </li>
+                        }).collect_view()}
+                    </ul>
+                    <p class="caption">"ระบบรวมให้เองจากของที่เลือกไว้ ไม่ต้องกรอกซ้ำที่นี่ แก้ไขหรือเอาออกได้ที่หน้าของที่ใช้หลายปี"</p>
+                }.into_any()
+            }}
+        </div>
+
+        <div class="cost-total fixed-cost-total" aria-live="polite">
+            <span class="cost-total-label">"รวมค่าใช้จ่ายประจำฤดูนี้"<small class="formal-term">"ต้นทุนคงที่รวม"</small></span>
+            <strong class="cost-total-amount">{move || total().map_or_else(|| "ยังไม่รู้".to_string(), |total| format!("{} บาท/ปี", money(total)))}</strong>
+            {move || (total().is_none() && asset_depreciation.is_some()).then(|| view! {
+                <small class="cost-total-note">{format!("ค่าเสื่อม {} บาท/ปี รวมอยู่แล้ว แต่ยอดรวมยังไม่รู้ จนกว่าจะกรอกหรือยืนยันส่วนที่กรอกเอง", money(asset_depreciation.unwrap_or_default()))}</small>
+            })}
+        </div>
     </section> }
 }
 

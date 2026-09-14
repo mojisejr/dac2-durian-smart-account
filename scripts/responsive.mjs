@@ -762,11 +762,32 @@ async function signIn(browser) {
   }
 
   // Including an asset must be visible where the owner would look for its
-  // cost: the fixed-costs page says the depreciation is already counted and
-  // asks only about other regular costs, and the hub names it too.
+  // cost: the fixed-costs page lists it as a read-only row in its own group
+  // under the rows the owner types, with one total, and the hub names it too.
   await page.goto(`${BASE}/plans/${detailedPlanId}/fixed-costs`);
-  await page.getByText('เฉลี่ยลงมาเป็นค่าใช้จ่ายประจำแล้ว 20,000.00 บาท/ปี (ค่าเสื่อม)').waitFor({ timeout: 10000 });
-  await page.getByText('ไม่ต้องกรอกซ้ำที่นี่').waitFor({ timeout: 5000 });
+  const manualGroup = page.locator('.cost-group-manual');
+  const assetGroup = page.locator('.cost-group-assets');
+  const fixedTotal = page.locator('.fixed-cost-total');
+  await manualGroup.getByText('กรอกเอง', { exact: true }).waitFor({ timeout: 10000 });
+  await assetGroup.getByText('ของที่ใช้หลายปี · ค่าเสื่อม', { exact: true }).waitFor({ timeout: 5000 });
+  await assetGroup.locator('.asset-cost-row', { hasText: 'ระบบน้ำกลางสวน' }).getByText('20,000.00 บาท/ปี').waitFor({ timeout: 5000 });
+  await assetGroup.locator('a[href$="/assets"]').first().waitFor({ state: 'visible' });
+  // The unknown / confirmed-none question belongs to the manual group only.
+  // The manual group was confirmed empty earlier, so asset-only fixed cost is
+  // a known figure; answering "ยังไม่รู้" makes the total unknown again even
+  // though the depreciation stays listed, and confirming brings it back.
+  await manualGroup.locator('input[name="fixed-cost-state"]').first().waitFor({ state: 'attached' });
+  if (await assetGroup.locator('input[name="fixed-cost-state"]').count()) {
+    throw new Error('the section-state question leaked into the asset group');
+  }
+  await fixedTotal.locator('.cost-total-amount', { hasText: '20,000.00 บาท/ปี' }).waitFor({ timeout: 5000 });
+  await page.locator('label:has(input[name="fixed-cost-state"][value="unknown"])').click();
+  await fixedTotal.locator('.cost-total-amount', { hasText: 'ยังไม่รู้' }).waitFor({ timeout: 5000 });
+  await fixedTotal.locator('.cost-total-note', { hasText: 'รวมอยู่แล้ว แต่ยอดรวมยังไม่รู้' }).waitFor({ timeout: 5000 });
+  await page.getByText('ยังคำนวณกำไรสุทธิไม่ได้', { exact: true }).waitFor({ timeout: 5000 });
+  await page.locator('label:has(input[name="fixed-cost-state"][value="confirmed_none"])').click();
+  await fixedTotal.locator('.cost-total-amount', { hasText: '20,000.00 บาท/ปี' }).waitFor({ timeout: 5000 });
+  await page.getByText('กำไรสุทธิโดยประมาณ', { exact: false }).waitFor({ timeout: 5000 });
   await page.goto(`${BASE}/plans/${detailedPlanId}`);
   await page.getByText(/ค่าเสื่อมของที่เลือกไว้รวมแล้ว|ยืนยันแล้วว่ามีเฉพาะค่าเสื่อมของที่เลือกไว้|พอคำนวณค่าใช้จ่ายประจำแล้ว/).first().waitFor({ timeout: 10000 });
 
