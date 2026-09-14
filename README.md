@@ -4,6 +4,14 @@ A local-first Thai durian-orchard business planning calculator. The application
 is a Rust workspace: a pure calculation crate, a PostgreSQL store, and one
 Leptos SSR plus hydration web crate.
 
+## License
+
+Copyright (C) 2026 mojisejr. DAC2 is free software under the
+[GNU Affero General Public License, version 3](LICENSE) or any later version.
+You may use, study, change, and share it; if you change it and let people use
+it over a network, you must offer them your changed source under the same
+license. A contribution to this repository is offered under the same license.
+
 This repository is being built in owner-reviewed slices. Slices 1–3 proved the
 stack, calculation engine, and PostgreSQL persistence. Slice 4 adds local
 account registration and recovery. Slice 5 added the initial plan workspace;
