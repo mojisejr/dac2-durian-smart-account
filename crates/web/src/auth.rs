@@ -33,9 +33,9 @@ pub async fn register(email: String, password: String) -> Result<String, ServerF
     match store::users::register(pool, &email, &password).await {
         Ok(user) => {
             if let Ok(token) = store::verification_tokens::issue(pool, user.id).await {
-                let _ = crate::mail::Mailer::from_env()
-                    .send_verification(&user.email, token.expose())
-                    .await;
+                if let Ok(mailer) = crate::mail::Mailer::from_env() {
+                    let _ = mailer.send_verification(&user.email, token.expose()).await;
+                }
             }
             Ok(REGISTRATION_ACCEPTED.into())
         }
@@ -89,9 +89,9 @@ pub async fn resend_verification(email: String) -> Result<String, ServerFnError>
     match store::users::find_by_email(pool, &email).await {
         Ok(Some(user)) if !user.email_verified => {
             if let Ok(token) = store::verification_tokens::issue(pool, user.id).await {
-                let _ = crate::mail::Mailer::from_env()
-                    .send_verification(&user.email, token.expose())
-                    .await;
+                if let Ok(mailer) = crate::mail::Mailer::from_env() {
+                    let _ = mailer.send_verification(&user.email, token.expose()).await;
+                }
             }
         }
         Ok(_) | Err(_) => {}
@@ -132,9 +132,11 @@ pub async fn request_password_reset(email: String) -> Result<String, ServerFnErr
     match store::users::find_by_email(pool, &email).await {
         Ok(Some(user)) if user.email_verified => {
             if let Ok(token) = store::reset_tokens::issue(pool, user.id).await {
-                let _ = crate::mail::Mailer::from_env()
-                    .send_password_reset(&user.email, token.expose())
-                    .await;
+                if let Ok(mailer) = crate::mail::Mailer::from_env() {
+                    let _ = mailer
+                        .send_password_reset(&user.email, token.expose())
+                        .await;
+                }
             }
         }
         Ok(_) | Err(_) => {}

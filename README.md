@@ -275,9 +275,55 @@ cargo leptos serve
 
 Open the application at <http://127.0.0.1:3000>. After registration, open the
 message in Mailpit and follow its verification link before logging in. The
-cookie is intentionally non-Secure only for this localhost workflow. A network
-deployment requires the deferred rate limiting, real SMTP, HTTPS, and Secure
-cookie gate first.
+cookie is non-Secure by default because this localhost workflow has no TLS to
+carry it; `COOKIE_SECURE=true` turns it on. A network deployment still requires
+the deferred rate limiting, a real SMTP relay, and HTTPS first.
+
+## Run the container locally
+
+The `Dockerfile` builds the application inside the image and leaves a runtime
+image holding the binary, the site directory, and a CA bundle. It needs no
+Rust on the machine that runs it; the machine that builds it needs Docker and
+about ten minutes on the first build (the wasm and server builds both run;
+later builds reuse the cache mounts). The image built on an Apple-silicon
+machine is `linux/arm64`; a hosting platform on `linux/amd64` builds its own
+from the same file.
+
+```bash
+docker build -t dac2:local .
+docker compose up -d --wait
+docker run --rm -p 3000:3000 \
+  -e DATABASE_URL=postgres://postgres@host.docker.internal:54329/dac2 \
+  -e SESSION_KEY="$SESSION_KEY" \
+  -e SMTP_HOST=host.docker.internal \
+  -e APP_BASE_URL=http://127.0.0.1:3000 \
+  dac2:local
+```
+
+Migrations run when the process starts, so the container needs only a
+reachable database. The application reads its Leptos configuration from
+`LEPTOS_SITE_ADDR`, `LEPTOS_SITE_ROOT`, `LEPTOS_SITE_PKG_DIR`, and
+`LEPTOS_OUTPUT_NAME` when `crates/web/Cargo.toml` is absent, as it is in the
+image; the image sets them, and a host that injects `PORT` overrides the port
+alone. For a relay on the network set `SMTP_TLS=starttls` with `SMTP_USERNAME`
+and `SMTP_PASSWORD`; the server refuses to start on any other `SMTP_TLS`
+value or on a missing login, and prints the relay host, port, and mode, never
+the credentials. The container runs as an unprivileged user and the Tokio
+runtime keeps its single worker thread, so the stall mitigation recorded in
+`crates/web/src/main.rs` applies unchanged.
+
+The container is the only place the release binary runs; `cargo leptos serve`
+is a debug build, and the two have differed once already: the release binary
+overflowed the default 2 MiB worker stack on the dashboard and analysis pages,
+so the runtime now reserves 32 MiB for its single worker (measured and
+explained in `crates/web/src/main.rs`). The container proof builds the image,
+runs it against the compose services, and points the layout proof and the
+stall probe at it:
+
+```bash
+./scripts/check-container.sh
+SKIP_BUILD=1 IMAGE=dac2:local ./scripts/check-container.sh   # reuse an image
+```
 
 ## Plan workspace proof
 

@@ -20,6 +20,9 @@ pub mod plan_ui;
 #[cfg(feature = "ssr")]
 pub mod mail;
 
+#[cfg(feature = "ssr")]
+pub mod settings;
+
 #[cfg(feature = "hydrate")]
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub fn hydrate() {

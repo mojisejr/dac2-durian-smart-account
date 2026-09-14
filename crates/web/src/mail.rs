@@ -1,38 +1,69 @@
 use std::{env, fmt};
 
-use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
+use lettre::{
+    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
+    transport::smtp::authentication::Credentials,
+};
+
+/// How the SMTP connection is secured. `Plain` is the local Mailpit path;
+/// a relay on the network needs `StartTls`, which also carries a login.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SmtpSecurity {
+    Plain,
+    StartTls { username: String, password: String },
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MailConfig {
     pub smtp_host: String,
     pub smtp_port: u16,
+    pub security: SmtpSecurity,
     pub from: String,
     pub base_url: String,
 }
 
 impl MailConfig {
-    pub fn from_env() -> Self {
-        Self {
-            smtp_host: nonempty_env("SMTP_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
-            smtp_port: nonempty_env("SMTP_PORT")
-                .ok()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(1025),
-            from: nonempty_env("MAIL_FROM").unwrap_or_else(|_| "DAC2 <no-reply@dac2.local>".into()),
-            base_url: nonempty_env("APP_BASE_URL")
-                .unwrap_or_else(|_| "http://127.0.0.1:3000".into()),
-        }
+    /// Reads the mail configuration. `SMTP_TLS` unset or `off` keeps the
+    /// plaintext Mailpit path; `starttls` requires `SMTP_USERNAME` and
+    /// `SMTP_PASSWORD`. Any other value is refused so a typo cannot silently
+    /// send credentials in the clear.
+    pub fn try_from_env() -> Result<Self, MailError> {
+        Self::from_lookup(|name| env::var(name).ok())
     }
-}
 
-fn nonempty_env(name: &str) -> Result<String, env::VarError> {
-    env::var(name).and_then(|value| {
-        if value.trim().is_empty() {
-            Err(env::VarError::NotPresent)
-        } else {
-            Ok(value)
-        }
-    })
+    /// The same reading over any source of variables, so the rules can be
+    /// tested without touching the process environment.
+    pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Result<Self, MailError> {
+        let read = |name: &str| lookup(name).filter(|value| !value.trim().is_empty());
+        let security = match read("SMTP_TLS").as_deref() {
+            None | Some("off") => SmtpSecurity::Plain,
+            Some("starttls") => SmtpSecurity::StartTls {
+                username: read("SMTP_USERNAME")
+                    .ok_or_else(|| MailError("SMTP_TLS=starttls requires SMTP_USERNAME".into()))?,
+                password: read("SMTP_PASSWORD")
+                    .ok_or_else(|| MailError("SMTP_TLS=starttls requires SMTP_PASSWORD".into()))?,
+            },
+            Some(_) => return Err(MailError("SMTP_TLS must be off or starttls".into())),
+        };
+        let default_port = match security {
+            SmtpSecurity::Plain => 1025,
+            SmtpSecurity::StartTls { .. } => 587,
+        };
+        let smtp_port = match read("SMTP_PORT") {
+            None => default_port,
+            Some(value) => value
+                .trim()
+                .parse()
+                .map_err(|_| MailError("SMTP_PORT must be a port number".into()))?,
+        };
+        Ok(Self {
+            smtp_host: read("SMTP_HOST").unwrap_or_else(|| "127.0.0.1".into()),
+            smtp_port,
+            security,
+            from: read("MAIL_FROM").unwrap_or_else(|| "DAC2 <no-reply@dac2.local>".into()),
+            base_url: read("APP_BASE_URL").unwrap_or_else(|| "http://127.0.0.1:3000".into()),
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -53,16 +84,26 @@ pub struct Mailer {
 }
 
 impl Mailer {
-    pub fn new(config: MailConfig) -> Self {
-        let transport =
-            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(config.smtp_host.clone())
-                .port(config.smtp_port)
-                .build();
-        Self { config, transport }
+    pub fn new(config: MailConfig) -> Result<Self, MailError> {
+        let transport = match &config.security {
+            SmtpSecurity::Plain => {
+                AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(config.smtp_host.clone())
+                    .port(config.smtp_port)
+                    .build()
+            }
+            SmtpSecurity::StartTls { username, password } => {
+                AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&config.smtp_host)
+                    .map_err(|error| MailError(format!("SMTP relay is not usable: {error}")))?
+                    .port(config.smtp_port)
+                    .credentials(Credentials::new(username.clone(), password.clone()))
+                    .build()
+            }
+        };
+        Ok(Self { config, transport })
     }
 
-    pub fn from_env() -> Self {
-        Self::new(MailConfig::from_env())
+    pub fn from_env() -> Result<Self, MailError> {
+        MailConfig::try_from_env().and_then(Self::new)
     }
 
     pub async fn send_verification(&self, recipient: &str, token: &str) -> Result<(), MailError> {
@@ -134,12 +175,82 @@ mod tests {
         let mailer = Mailer::new(MailConfig {
             smtp_host: "127.0.0.1".into(),
             smtp_port: 1025,
+            security: SmtpSecurity::Plain,
             from: "DAC2 <no-reply@dac2.local>".into(),
             base_url: "http://127.0.0.1:3000/".into(),
-        });
+        })
+        .expect("a plaintext transport needs no relay lookup");
         assert_eq!(
             mailer.link("auth/verify-email", "secret-token"),
             "http://127.0.0.1:3000/auth/verify-email?token=secret-token"
         );
+    }
+
+    fn lookup(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let pairs: Vec<(String, String)> = pairs
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+        move |name| {
+            pairs
+                .iter()
+                .find(|(candidate, _)| candidate == name)
+                .map(|(_, value)| value.clone())
+        }
+    }
+
+    #[test]
+    fn unset_mail_variables_keep_the_local_plaintext_path() {
+        let config = MailConfig::from_lookup(lookup(&[])).expect("defaults are valid");
+        assert_eq!(config.smtp_host, "127.0.0.1");
+        assert_eq!(config.smtp_port, 1025);
+        assert_eq!(config.security, SmtpSecurity::Plain);
+        assert_eq!(config.base_url, "http://127.0.0.1:3000");
+    }
+
+    #[test]
+    fn starttls_carries_the_login_and_defaults_to_submission_port() {
+        let config = MailConfig::from_lookup(lookup(&[
+            ("SMTP_TLS", "starttls"),
+            ("SMTP_HOST", "smtp-relay.example"),
+            ("SMTP_USERNAME", "login"),
+            ("SMTP_PASSWORD", "secret"),
+        ]))
+        .expect("a complete STARTTLS configuration is valid");
+        assert_eq!(config.smtp_port, 587);
+        assert_eq!(
+            config.security,
+            SmtpSecurity::StartTls {
+                username: "login".into(),
+                password: "secret".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn starttls_without_a_login_is_refused_by_name() {
+        let error = MailConfig::from_lookup(lookup(&[
+            ("SMTP_TLS", "starttls"),
+            ("SMTP_USERNAME", "login"),
+        ]))
+        .expect_err("a missing password is a configuration error");
+        assert_eq!(
+            error.to_string(),
+            "SMTP_TLS=starttls requires SMTP_PASSWORD"
+        );
+    }
+
+    #[test]
+    fn an_unknown_tls_mode_is_refused_rather_than_sent_in_the_clear() {
+        let error = MailConfig::from_lookup(lookup(&[("SMTP_TLS", "tls")]))
+            .expect_err("only off and starttls are modes");
+        assert_eq!(error.to_string(), "SMTP_TLS must be off or starttls");
+    }
+
+    #[test]
+    fn a_port_that_is_not_a_number_is_refused() {
+        let error = MailConfig::from_lookup(lookup(&[("SMTP_PORT", "five")]))
+            .expect_err("a port must parse");
+        assert_eq!(error.to_string(), "SMTP_PORT must be a port number");
     }
 }

@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use web::mail::{MailConfig, Mailer};
+use web::mail::{MailConfig, Mailer, SmtpSecurity};
 
 fn mailpit_get(path: &str) -> std::io::Result<String> {
     let mut stream = TcpStream::connect("127.0.0.1:8025")?;
@@ -75,9 +75,11 @@ async fn verification_and_reset_messages_reach_local_mailpit() {
     let mailer = Mailer::new(MailConfig {
         smtp_host: "127.0.0.1".into(),
         smtp_port: 1025,
+        security: SmtpSecurity::Plain,
         from: "DAC2 <no-reply@dac2.local>".into(),
         base_url: "http://127.0.0.1:3000".into(),
-    });
+    })
+    .expect("a plaintext transport needs no relay lookup");
 
     mailer
         .send_verification(&marker, "verification-marker")
