@@ -840,6 +840,59 @@ async fn finalization_is_atomic_snapshots_the_forecast_and_is_idempotent(
 }
 
 #[sqlx::test(migrations = "../../migrations")]
+async fn closing_on_an_incomplete_forecast_freezes_unknown_as_unknown_and_confirmed_none_as_zero(
+    pool: PgPool,
+) -> Result<(), StoreError> {
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let mut plan = calc::Plan {
+        production: calc::ProductionPlan {
+            yield_source: YieldSource::Direct,
+            sellable_yield_kg: Some(Decimal::from(20_000)),
+            price_source: PriceSource::Average,
+            average_price_per_kg: Some(Decimal::from(80)),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    // Costs never answered: the close succeeds, and the frozen forecast keeps
+    // every cost-dependent figure unknown rather than writing a zero.
+    let unknown = plans::create(&pool, owner.id, 2569, "", &plan).await?;
+    let closed =
+        plans::finalize_with_actual(&pool, owner.id, unknown.id, &actual_outcome()).await?;
+    assert!(closed.closed);
+    let snapshot = closed.actual_outcome.expect("finalized");
+    assert!(snapshot.finalized);
+    assert_eq!(snapshot.forecast_mode, Some(ForecastMode::Detailed));
+    let forecast = snapshot.forecast.expect("forecast is frozen at close");
+    assert_eq!(forecast.sellable_yield_kg, Some(Decimal::from(20_000)));
+    assert_eq!(forecast.revenue, Some(Decimal::from(1_600_000)));
+    assert_eq!(forecast.total_cost, None);
+    assert_eq!(forecast.profit, None);
+    assert_eq!(forecast.cost_per_kg, None);
+    let comparisons = calc::compare(&forecast, &actual_outcome());
+    assert_eq!(
+        comparisons.iter().filter(|row| row.delta.is_none()).count(),
+        3
+    );
+
+    // Both sections confirmed empty: a known zero, frozen as such.
+    plan.variable_cost_state = CostSectionState::ConfirmedNone;
+    plan.fixed_cost_state = CostSectionState::ConfirmedNone;
+    let none = plans::create(&pool, owner.id, 2570, "", &plan).await?;
+    let closed = plans::finalize_with_actual(&pool, owner.id, none.id, &actual_outcome()).await?;
+    let forecast = closed
+        .actual_outcome
+        .expect("finalized")
+        .forecast
+        .expect("forecast is frozen at close");
+    assert_eq!(forecast.total_cost, Some(Decimal::ZERO));
+    assert_eq!(forecast.profit, Some(Decimal::from(1_600_000)));
+    assert_eq!(forecast.cost_per_kg, Some(Decimal::ZERO));
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
 async fn failed_snapshot_write_does_not_close_the_plan(pool: PgPool) -> Result<(), StoreError> {
     let owner = users::create(&pool, "owner@example.test").await?;
     let created = plans::create_quick(&pool, owner.id, 2569, "", &calc::Plan::default()).await?;

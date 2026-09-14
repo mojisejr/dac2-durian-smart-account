@@ -732,7 +732,7 @@ async function signIn(browser) {
 
   await navigateOrDiagnose(page, `${BASE}/history`, null, () => page.goto(`${BASE}/history`));
   await page
-    .getByText('ผลผลิตที่ขายได้ สูงกว่าฤดูกาลก่อน 12.50%', { exact: true })
+    .getByText('กิโลที่ขายได้ สูงกว่าฤดูกาลก่อน 12.50%', { exact: true })
     .waitFor({ state: 'visible', timeout: 10000 });
   await page
     .getByText('มีปีที่ข้ามระหว่างสองผลจริง ระบบเทียบเฉพาะปีที่แสดงและไม่ประมาณค่าปีที่หายไป', { exact: true })

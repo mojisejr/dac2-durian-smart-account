@@ -337,7 +337,7 @@ fn TrendCue(
     current_year: Option<i32>,
     previous_year: Option<i32>,
 ) -> impl IntoView {
-    let (label, unit) = comparison_metric_label(trend.metric);
+    let (label, _, unit) = comparison_metric_label(trend.metric);
     let years = format!(
         "ฤดูกาล {} → {}",
         previous_year.map_or_else(|| "ก่อนหน้า".into(), |year| year.to_string()),
@@ -376,7 +376,7 @@ fn HistoryMetricRow(
     trends: Vec<calc::MetricTrend>,
     baseline: bool,
 ) -> impl IntoView {
-    let (label, unit) = comparison_metric_label(metric);
+    let (label, formal, unit) = comparison_metric_label(metric);
     let actual_value = history_metric_value(&actual, metric);
     let forecast_delta = forecast
         .iter()
@@ -399,12 +399,12 @@ fn HistoryMetricRow(
                 direction_word(delta, "ฤดูก่อน"),
                 money(delta.abs())
             ),
-            _ => "ยังเปรียบเทียบไม่ได้".into(),
+            _ => "เทียบไม่ได้ ไม่มีตัวเลขฤดูก่อน".into(),
         }
     } else {
-        "ยังเปรียบเทียบไม่ได้".into()
+        "เทียบไม่ได้ ไม่มีตัวเลขฤดูก่อน".into()
     };
-    view! { <tr><th scope="row">{label}</th><td>{actual_metric(actual_value, unit)}</td><td>{forecast_text}</td><td>{trend_text}</td></tr> }
+    view! { <tr><th scope="row">{label}<small class="formal-term">{formal}</small></th><td>{actual_metric(actual_value, unit)}</td><td>{forecast_text}</td><td>{trend_text}</td></tr> }
 }
 
 fn history_metric_value(
@@ -423,7 +423,7 @@ fn history_metric_value(
 
 fn delta_text(delta: Option<rust_decimal::Decimal>, unit: &str, comparison: &str) -> String {
     delta.map_or_else(
-        || "ยังเปรียบเทียบไม่ได้".into(),
+        || "เทียบไม่ได้ ตอนปิดยังไม่มีประมาณการตัวนี้".into(),
         |delta| {
             format!(
                 "{} {} {unit}",
@@ -730,8 +730,9 @@ pub fn ActualCloseView(record: PlanRecord) -> impl IntoView {
                 <div><p class="eyebrow">{season}</p><h1>"บันทึกผลจริง"</h1></div>
                 <A attr:class="icon-button" href=format!("/plans/{id}") attr:aria-label="ยกเลิกและกลับหน้าฤดูกาล">"×"</A>
             </header>
+            <ComparisonPreview record=record.clone()/>
             <section class="card actual-entry-card">
-                <p>"กรอกยอดรวมเมื่อจบฤดู ระบบจะให้ตรวจทานอีกครั้งก่อนปิดถาวร"</p>
+                <p>"กรอกยอดรวมเมื่อจบฤดู ระบบจะให้ตรวจทานอีกครั้งก่อนปิดถาวร ตัวเลขจริงสามตัวนี้พอสำหรับปิดฤดู ประมาณการที่ยังไม่ครบไม่ขวางการปิด"</p>
                 <ActionForm action=save>
                     <input type="hidden" name="id" value=id/>
                     <label><span>"ขายได้จริงทั้งหมดเท่าไร"</span><small class="formal-term">"ผลผลิตที่ขายได้จริง"</small><span class="input-with-unit"><input id="actual-yield" type="text" name="sellable_yield_kg" inputmode="decimal" value=decimal_input(draft.sellable_yield_kg) aria-describedby="actual-yield-help" required autofocus/><span class="unit">"กก."</span></span><small id="actual-yield-help" class="field-hint">"ดูจากยอดส่งขายหรือสรุปน้ำหนักหลังหักผลเสีย ใช้คำนวณราคาขายจริงต่อกิโลกรัม"</small></label>
@@ -800,13 +801,14 @@ pub fn ActualReviewView(record: PlanRecord) -> impl IntoView {
             <section class="card">
                 <h2>"ข้อมูลที่กำลังจะล็อก"</h2>
                 <dl class="season-metadata">
-                    <div><dt>"ผลผลิตที่ขายได้จริง"</dt><dd>{format!("{} กก.", money(actual.sellable_yield_kg.expect("complete actual yield")))}</dd></div>
-                    <div><dt>"รายได้จริง"</dt><dd>{format!("{} บาท", money(actual.revenue.expect("complete actual revenue")))}</dd></div>
-                    <div><dt>"ต้นทุนรวมจริง"</dt><dd>{format!("{} บาท", money(actual.total_cost.expect("complete actual cost")))}</dd></div>
-                    <div><dt>"กำไรหรือขาดทุนจริง"</dt><dd>{format!("{} บาท", money(analysis.metrics.profit.expect("complete actual profit")))}</dd></div>
+                    <div><dt>"ขายได้จริงกี่กิโล"<small class="formal-term">"ผลผลิตที่ขายได้จริง"</small></dt><dd>{format!("{} กก.", money(actual.sellable_yield_kg.expect("complete actual yield")))}</dd></div>
+                    <div><dt>"รับเงินจริงเท่าไร"<small class="formal-term">"รายได้จริง"</small></dt><dd>{format!("{} บาท", money(actual.revenue.expect("complete actual revenue")))}</dd></div>
+                    <div><dt>"จ่ายจริงทั้งหมดเท่าไร"<small class="formal-term">"ต้นทุนรวมจริง"</small></dt><dd>{format!("{} บาท", money(actual.total_cost.expect("complete actual cost")))}</dd></div>
+                    <div><dt>"เหลือหรือขาดจริงเท่าไร"<small class="formal-term">"กำไรหรือขาดทุนจริง"</small></dt><dd>{format!("{} บาท", money(analysis.metrics.profit.expect("complete actual profit")))}</dd></div>
                     <div><dt>"บันทึก"</dt><dd>{if actual.note.is_empty() { "—".into() } else { actual.note.clone() }}</dd></div>
                 </dl>
             </section>
+            <ComparisonPreview record=record.clone()/>
             <section class="card confirm-box">
                 <h2>"ยืนยันครั้งสุดท้าย"</h2>
                 <p>"เมื่อยืนยันแล้ว ผลจริงและประมาณการ ณ ตอนนี้จะถูกเก็บเป็นภาพนิ่ง ฤดูกาลนี้จะแก้ไขไม่ได้"</p>
@@ -864,14 +866,14 @@ pub fn ActualComparisonView(record: PlanRecord) -> impl IntoView {
             <header class="page-heading compact-heading"><div><p class="eyebrow">{season}</p><h1>"ผลจริงเทียบประมาณการ"</h1></div><A attr:class="icon-button" href=format!("/plans/{id}") attr:aria-label="กลับหน้าฤดูกาล">"×"</A></header>
             <section class="card actual-result-card">
                 <p class="eyebrow">"ผลจริง"</p>
-                <p class="result-label">{if actual_metrics.profit.is_some_and(|value| value >= rust_decimal::Decimal::ZERO) { "กำไรจริง" } else { "ขาดทุนจริง" }}</p>
+                <p class="result-label">{if actual_metrics.profit.is_some_and(|value| value >= rust_decimal::Decimal::ZERO) { "เหลือจริงหลังหักค่าใช้จ่าย" } else { "ขาดจริงหลังหักค่าใช้จ่าย" }}<small class="formal-term">{if actual_metrics.profit.is_some_and(|value| value >= rust_decimal::Decimal::ZERO) { "กำไรจริง" } else { "ขาดทุนจริง" }}</small></p>
                 <strong class="hero-value">{format!("{} บาท", money(actual_metrics.profit.unwrap_or_default().abs()))}</strong>
                 <dl class="season-metadata">
-                    <div><dt>"ผลผลิตที่ขายได้"</dt><dd>{actual_metric(actual_metrics.sellable_yield_kg, "กก.")}</dd></div>
-                    <div><dt>"รายได้"</dt><dd>{actual_metric(actual_metrics.revenue, "บาท")}</dd></div>
-                    <div><dt>"ต้นทุนรวม"</dt><dd>{actual_metric(actual_metrics.total_cost, "บาท")}</dd></div>
-                    <div><dt>"ราคาขายเฉลี่ย"</dt><dd>{actual_metric(actual_metrics.average_price_per_kg, "บาท/กก.")}</dd></div>
-                    <div><dt>"ต้นทุนต่อกิโลกรัม"</dt><dd>{actual_metric(actual_metrics.cost_per_kg, "บาท/กก.")}</dd></div>
+                    <div><dt>"กิโลที่ขายได้"<small class="formal-term">"ผลผลิตที่ขายได้"</small></dt><dd>{actual_metric(actual_metrics.sellable_yield_kg, "กก.")}</dd></div>
+                    <div><dt>"เงินที่ขายได้"<small class="formal-term">"รายได้"</small></dt><dd>{actual_metric(actual_metrics.revenue, "บาท")}</dd></div>
+                    <div><dt>"เงินที่จ่ายไปทั้งหมด"<small class="formal-term">"ต้นทุนรวม"</small></dt><dd>{actual_metric(actual_metrics.total_cost, "บาท")}</dd></div>
+                    <div><dt>"ราคาเฉลี่ยต่อกิโล"<small class="formal-term">"ราคาขายเฉลี่ย"</small></dt><dd>{actual_metric(actual_metrics.average_price_per_kg, "บาท/กก.")}</dd></div>
+                    <div><dt>"ที่จ่ายต่อ 1 กก. ที่ขาย"<small class="formal-term">"ต้นทุนต่อกิโลกรัม"</small></dt><dd>{actual_metric(actual_metrics.cost_per_kg, "บาท/กก.")}</dd></div>
                 </dl>
                 <p class="caption">{if actual.note.is_empty() { "ไม่มีบันทึกผลจริง".into() } else { actual.note.clone() }}</p>
             </section>
@@ -894,9 +896,9 @@ fn legacy_actual_unavailable(id: i64, season: String) -> AnyView {
 }
 
 fn comparison_card(row: calc::MetricComparison) -> impl IntoView {
-    let (label, unit) = comparison_metric_label(row.metric);
+    let (label, formal, unit) = comparison_metric_label(row.metric);
     let result = row.delta.map_or_else(
-        || "ยังเปรียบเทียบไม่ได้".into(),
+        || "เทียบไม่ได้ ตอนปิดยังไม่มีประมาณการตัวนี้".into(),
         |delta| {
             let direction = if delta > rust_decimal::Decimal::ZERO {
                 "สูงกว่าประมาณการ"
@@ -910,9 +912,9 @@ fn comparison_card(row: calc::MetricComparison) -> impl IntoView {
     );
     view! {
         <article class="card comparison-card">
-            <h3>{label}</h3><strong>{result}</strong>
+            <h3>{label}</h3><small class="formal-term">{formal}</small><strong>{result}</strong>
             <dl class="comparison-values">
-                <div><dt>"ประมาณการ"</dt><dd>{actual_metric(row.forecast, unit)}</dd></div>
+                <div><dt>"ประมาณการ"</dt><dd>{forecast_metric(row.forecast, unit)}</dd></div>
                 <div><dt>"ผลจริง"</dt><dd>{actual_metric(row.actual, unit)}</dd></div>
             </dl>
             <p class="caption">"ผลต่าง = ผลจริง - ประมาณการ"</p>
@@ -920,14 +922,90 @@ fn comparison_card(row: calc::MetricComparison) -> impl IntoView {
     }
 }
 
-fn comparison_metric_label(metric: ComparisonMetric) -> (&'static str, &'static str) {
+/// The owner's words for a compared figure, its formal name, and its unit.
+fn comparison_metric_label(metric: ComparisonMetric) -> (&'static str, &'static str, &'static str) {
     match metric {
-        ComparisonMetric::SellableYieldKg => ("ผลผลิตที่ขายได้", "กก."),
-        ComparisonMetric::Revenue => ("รายได้", "บาท"),
-        ComparisonMetric::TotalCost => ("ต้นทุนรวม", "บาท"),
-        ComparisonMetric::Profit => ("กำไรหรือขาดทุน", "บาท"),
-        ComparisonMetric::AveragePricePerKg => ("ราคาขายเฉลี่ย", "บาท/กก."),
-        ComparisonMetric::CostPerKg => ("ต้นทุนต่อกิโลกรัม", "บาท/กก."),
+        ComparisonMetric::SellableYieldKg => ("กิโลที่ขายได้", "ผลผลิตที่ขายได้", "กก."),
+        ComparisonMetric::Revenue => ("เงินที่ขายได้", "รายได้", "บาท"),
+        ComparisonMetric::TotalCost => ("เงินที่จ่ายไปทั้งหมด", "ต้นทุนรวม", "บาท"),
+        ComparisonMetric::Profit => ("ที่เหลือหลังหักค่าใช้จ่าย", "กำไรหรือขาดทุน", "บาท"),
+        ComparisonMetric::AveragePricePerKg => ("ราคาเฉลี่ยต่อกิโล", "ราคาขายเฉลี่ย", "บาท/กก."),
+        ComparisonMetric::CostPerKg => ("ที่จ่ายต่อ 1 กก. ที่ขาย", "ต้นทุนต่อกิโลกรัม", "บาท/กก."),
+    }
+}
+
+/// A frozen forecast figure, or the fact that none existed when the season
+/// closed. Never a zero.
+fn forecast_metric(value: Option<rust_decimal::Decimal>, unit: &str) -> String {
+    value.map_or_else(
+        || "ไม่มีตอนปิด".into(),
+        |value| format!("{} {unit}", money(value)),
+    )
+}
+
+/// Which of the six comparisons a close would freeze with a figure, from the
+/// same forecast snapshot the close writes. Shown before the owner closes,
+/// so an incomplete forecast is a known consequence, never a lock.
+#[component]
+fn ComparisonPreview(record: PlanRecord) -> impl IntoView {
+    let id = record.id;
+    let plan = record.form.to_plan().ok();
+    let forecast = plan.as_ref().map(|plan| {
+        calc::forecast_metrics_with_assets(
+            record.forecast_mode,
+            &record.quick_estimate,
+            plan,
+            &record.asset_allocations,
+            record.starting_capital,
+        )
+    });
+    let gap = match record.forecast_mode {
+        calc::ForecastMode::Detailed => record
+            .form
+            .decision_readiness(&record.asset_allocations, record.starting_capital)
+            .into_iter()
+            .find(|readiness| readiness.decision == crate::plan_form::Decision::FirstEstimate)
+            .and_then(|readiness| match readiness.state {
+                DecisionState::Missing { question, section } => Some((question, section)),
+                _ => None,
+            }),
+        calc::ForecastMode::Quick => None,
+    };
+    let rows = ComparisonMetric::ALL
+        .into_iter()
+        .map(|metric| {
+            let (plain, formal, _) = comparison_metric_label(metric);
+            let available = forecast
+                .as_ref()
+                .is_some_and(|forecast| history_metric_value(forecast, metric).is_some());
+            (plain, formal, available)
+        })
+        .collect::<Vec<_>>();
+    let unavailable = rows.iter().filter(|(_, _, available)| !available).count();
+    view! {
+        <section class="card comparison-preview">
+            <h2>"หลังปิด จะเทียบอะไรกับที่วางไว้ได้บ้าง"</h2><small class="formal-term">"ผลจริงเทียบประมาณการ"</small>
+            <p>{if unavailable == 0 {
+                "ประมาณการครบ ทุกข้อจะเทียบได้ ระบบจะเก็บประมาณการ ณ ตอนนี้ไว้เป็นภาพนิ่ง".to_owned()
+            } else {
+                format!("ปิดได้เลย ไม่ต้องกรอกประมาณการให้ครบ แต่ {unavailable} ข้อจะเทียบไม่ได้ เพราะยังไม่มีประมาณการ และหลังปิดจะเติมไม่ได้")
+            }}</p>
+            <ul class="comparison-preview-rows">
+                {rows.into_iter().map(|(plain, formal, available)| view! {
+                    <li class="comparison-preview-row">
+                        <span class="decision-question"><strong>{plain}</strong><small class="formal-term">{formal}</small></span>
+                        {if available {
+                            view! { <span class="status good">"จะเทียบได้"</span> }.into_any()
+                        } else {
+                            view! { <span class="status muted">"จะเทียบไม่ได้"</span> }.into_any()
+                        }}
+                    </li>
+                }).collect_view()}
+            </ul>
+            {gap.filter(|_| unavailable > 0).map(|(question, section)| view! {
+                <A attr:class="text-button" href=format!("/plans/{id}/{section}")>{format!("ยังขาด: {question} · กลับไปตอบก่อนก็ได้")}</A>
+            })}
+        </section>
     }
 }
 

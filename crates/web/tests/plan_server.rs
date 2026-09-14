@@ -329,6 +329,78 @@ async fn plan_flow(auth_session: store::AuthSession) -> StatusCode {
     {
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
+
+    // A second season closes on an incomplete forecast: kilograms and a price
+    // are known, the cost sections were never answered. The close must go
+    // through, and the frozen forecast must keep cost, profit, and cost per
+    // kilogram unknown rather than zero.
+    let incomplete =
+        match web::plans::create_empty_for_owner(pool, user.id, 2575, "ฤดูที่ปิดทั้งที่ประมาณการไม่ครบ", "")
+            .await
+        {
+            Ok(record) => record,
+            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+        };
+    if web::plans::set_forecast_mode_for_owner(
+        pool,
+        user.id,
+        incomplete.id,
+        calc::ForecastMode::Detailed,
+    )
+    .await
+    .is_err()
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    let partial = PlanForm::from_plan(&calc::Plan {
+        production: calc::ProductionPlan {
+            yield_source: calc::YieldSource::Direct,
+            sellable_yield_kg: Some(Decimal::from(20_000)),
+            price_source: calc::PriceSource::Average,
+            average_price_per_kg: Some(Decimal::from(80)),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    if web::plans::save_section_for_owner(pool, user.id, incomplete.id, "production", &partial)
+        .await
+        .is_err()
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    if web::plans::save_actual_draft_for_owner(pool, user.id, incomplete.id, &actual)
+        .await
+        .is_err()
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    let closed = match web::plans::finalize_actual_for_owner(pool, user.id, incomplete.id).await {
+        Ok(record) => record,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    let Some(frozen) = closed
+        .actual_outcome
+        .as_ref()
+        .filter(|outcome| outcome.finalized)
+        .and_then(|outcome| outcome.forecast.as_ref())
+    else {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    };
+    if !closed.closed
+        || frozen.revenue != Some(Decimal::from(1_600_000))
+        || frozen.total_cost.is_some()
+        || frozen.profit.is_some()
+        || frozen.cost_per_kg.is_some()
+    {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
+    let history = match web::plans::history_for_owner(pool, user.id).await {
+        Ok(history) => history,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    if history.len() != 2 {
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    }
     StatusCode::NO_CONTENT
 }
 

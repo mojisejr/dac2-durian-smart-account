@@ -447,8 +447,10 @@ fn season_history_labels_legacy_baseline_skipped_year_and_fixed_cues() {
     assert!(html.contains("ไม่เติมศูนย์หรือสร้างแนวโน้มแทน"));
     assert!(html.contains("ปีฐานและยังไม่สรุปว่าเป็นแนวโน้ม"));
     assert!(html.contains("มีปีที่ข้ามระหว่างสองผลจริง"));
-    assert!(html.contains("ต้นทุนรวม สูงกว่าฤดูกาลก่อน 10.00%"));
-    assert!(html.contains("ผลผลิตที่ขายได้ ต่ำกว่าฤดูกาลก่อน 10.00%"));
+    assert!(html.contains("เงินที่จ่ายไปทั้งหมด สูงกว่าฤดูกาลก่อน 10.00%"));
+    assert!(html.contains("กิโลที่ขายได้ ต่ำกว่าฤดูกาลก่อน 10.00%"));
+    // The formal term sits under the plain words in the table's row headings.
+    assert!(html.contains("กิโลที่ขายได้<small class=\"formal-term\">ผลผลิตที่ขายได้</small>"));
     assert!(html.contains("สูตร: ((ผลจริงปีนี้ - ผลจริงปีก่อน) ÷ |ผลจริงปีก่อน|) × 100"));
     assert!(html.contains("<table"));
     assert!(html.contains("scope=\"col\""));
@@ -1106,4 +1108,103 @@ fn hub_names_counted_depreciation_beside_the_missing_fixed_answer() {
             .label,
         "ยืนยันแล้วว่ามีเฉพาะค่าเสื่อมของที่เลือกไว้"
     );
+}
+
+/// A detailed season whose cost sections are still unknown, with a complete
+/// actual draft: the honest case for closing on an incomplete forecast.
+fn detailed_record_with_unknown_costs(finalized: bool) -> PlanRecord {
+    let plan = calc::Plan {
+        production: calc::ProductionPlan {
+            yield_source: calc::YieldSource::Direct,
+            sellable_yield_kg: Some(20_000.into()),
+            price_source: calc::PriceSource::Average,
+            average_price_per_kg: Some(80.into()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let outcome = calc::ActualOutcome {
+        sellable_yield_kg: Some(rust_decimal::Decimal::from(18_000)),
+        revenue: Some(rust_decimal::Decimal::from(1_530_000)),
+        total_cost: Some(rust_decimal::Decimal::from(990_000)),
+        note: String::new(),
+    };
+    let forecast = finalized.then(|| {
+        calc::forecast_metrics_with_assets(
+            calc::ForecastMode::Detailed,
+            &calc::QuickEstimate::default(),
+            &plan,
+            &[],
+            None,
+        )
+    });
+    PlanRecord {
+        id: 42,
+        season_year: Some(2569),
+        note: String::new(),
+        closed: finalized,
+        forecast_mode: calc::ForecastMode::Detailed,
+        quick_estimate: calc::QuickEstimate::default(),
+        starting_capital: None,
+        asset_allocations: Vec::new(),
+        actual_outcome: Some(ActualOutcomeRecord {
+            outcome,
+            finalized,
+            forecast_mode: finalized.then_some(calc::ForecastMode::Detailed),
+            forecast,
+        }),
+        form: PlanForm::from_plan(&plan),
+    }
+}
+
+#[test]
+fn an_incomplete_forecast_never_blocks_the_close_and_names_what_will_not_compare() {
+    let entry = render_actual("entry", detailed_record_with_unknown_costs(false));
+    assert!(entry.contains("หลังปิด จะเทียบอะไรกับที่วางไว้ได้บ้าง"));
+    assert!(entry.contains("ปิดได้เลย ไม่ต้องกรอกประมาณการให้ครบ แต่ 3 ข้อจะเทียบไม่ได้"));
+    assert!(entry.contains("บันทึกและตรวจทาน"));
+    assert!(entry.contains("ยังขาด: ค่าใช้จ่ายที่เพิ่มตามการผลิต หรือยืนยันว่าไม่มี"));
+    assert!(entry.contains("href=\"/plans/42/variable-costs\""));
+
+    let review = render_actual("review", detailed_record_with_unknown_costs(false));
+    let preview = &review[review.find("comparison-preview-rows").expect("preview")..];
+    assert_eq!(
+        preview.matches("จะเทียบได้<").count(),
+        3,
+        "kilograms, revenue, price"
+    );
+    assert_eq!(
+        preview.matches("จะเทียบไม่ได้<").count(),
+        3,
+        "cost, profit, cost per kg"
+    );
+    assert!(
+        review.contains("ยืนยันผลจริงและปิดฤดูกาล"),
+        "the close stays available"
+    );
+    assert!(review.contains("ขายได้จริงกี่กิโล"));
+    assert!(review.contains("เหลือหรือขาดจริงเท่าไร"));
+
+    let complete = render_actual("review", actual_record(false));
+    assert!(complete.contains("ประมาณการครบ ทุกข้อจะเทียบได้"));
+}
+
+#[test]
+fn a_season_closed_with_unknown_costs_compares_what_it_froze_and_never_invents_a_zero() {
+    let html = render_actual("comparison", detailed_record_with_unknown_costs(true));
+    assert!(html.contains("แหล่งประมาณการ: แผนละเอียด"));
+    assert!(html.contains("ต่ำกว่าประมาณการ 2,000.00 กก."));
+    assert!(
+        html.contains("ต่ำกว่าประมาณการ 70,000.00 บาท"),
+        "revenue compares"
+    );
+    assert_eq!(
+        html.matches("เทียบไม่ได้ ตอนปิดยังไม่มีประมาณการตัวนี้").count(),
+        3,
+        "cost, profit, and cost per kg have no frozen forecast"
+    );
+    assert_eq!(html.matches("ไม่มีตอนปิด").count(), 3);
+    assert!(!html.contains("ประมาณการ</dt><dd>0.00"));
+    assert!(html.contains("เงินที่จ่ายไปทั้งหมด"));
+    assert!(html.contains("<small class=\"formal-term\">ต้นทุนรวม</small>"));
 }
