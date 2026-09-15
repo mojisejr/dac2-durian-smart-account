@@ -1,6 +1,6 @@
 # DAC2 — Design
 
-**Status:** draft, revision 0.8
+**Status:** draft, revision 0.9
 **Home:** this file moves to the application repository root in slice 1. There is
 one copy of it, never two.
 
@@ -245,6 +245,159 @@ worst way to say no.
 dismiss. Preferred over a full navigation for anything short.
 
 **Tab bar.** Four items, fixed at the bottom, labels always visible.
+
+## Identity and the entry screen
+
+Added in revision 0.9. The application has a name of its own and one screen
+that a stranger meets first. Everything after that screen is unchanged by this
+section; the number remains the interface there.
+
+### The name
+
+| Form | Text | Where it is used |
+|---|---|---|
+| wordmark | **ตาไก๊** | the entry screen, the site header, anywhere the name stands alone on a screen |
+| full name | **บัญชีตาไก๊** | the tab title, the mail sender name, the mail subjects, the README title — anywhere the name reaches someone who is not looking at the application |
+| English | **Takai** | the tab title's second half, URLs, and identifiers that must be ASCII |
+
+The wordmark is set in Sarabun 700 at `title` size on the entry screen and at
+`body` weight 700 in the header. It is text, never an image, so it scales,
+selects, and reads to a screen reader.
+
+ตาไก๊ is the mascot: a grower in a straw hat and glasses, drawn from the owner.
+The name was chosen because it is what Thai farmers are called — easy to say,
+easy to remember — and because the owner's test for the whole exercise was a
+sentence a grower would say to another: *"เออ มึงไปดูแอพนี้ เค้ามีคำนวณได้
+กำไรขาดทุน จะได้รู้"*. The name is not the cohort's. Durian Academy cohort 2
+built the application and is named in a byline so a later cohort or a teacher
+can adopt it as their own.
+
+"DAC2" stays as the working identifier of the repository, the image, the
+hosting service, and this document's file history. No user sees it.
+
+### The mascot
+
+- `public/takai-bust.webp` with `public/takai-bust.png` as the fallback: the
+  256-pixel transparent bust, at most 50 KB together. The 1024-pixel source
+  with its solid background is not in the repository; it is 3 MB and a phone
+  in an orchard does not fetch it.
+- On the entry screen the bust sits in a **112-pixel circle** (96 at 320
+  wide), filled with `surface`, with the standard 1px `border`. The bust is
+  scaled to fit the circle with its hat brim touching the top edge and is
+  centred; the flat bottom of the crop is hidden by the circle.
+- In dark mode the circle is `surface` on `bg`, which is lighter, so the
+  bust's dark line art still reads. The image carries alpha with no matte
+  colour, so it shows no halo on either theme.
+- The mascot appears on the entry screen only. It does not enter a working
+  screen, a sheet, or an empty state; those belong to the figure.
+
+### The mark
+
+A face is a blur at sixteen pixels. The favicon is therefore the **straw hat
+in silhouette**: the brim and crown of ตาไก๊'s hat as one filled shape,
+`public/takai-mark.svg`, painted `#0F5C3A` on transparent. It is the same hat
+the mascot wears, so the tab and the screen say the same thing. A 180-pixel
+PNG for a phone's home screen is generated from the SVG. The mark also sits
+at 24 pixels before the wordmark in the site header.
+
+If the hat does not read at sixteen pixels when drawn, the fallback is the
+letter ต in Sarabun 700 on a `#0F5C3A` disc. Decided when the mark is drawn,
+not now.
+
+### The entry screen — `/`
+
+A signed-out visitor to `/` sees this screen. A signed-in visitor to `/` is
+sent to `/plans` and never sees the form; every banking application does
+this, and so does this one. `/login` renders the same screen, so old links
+keep working. `/register`, `/forgot-password`, and the rest are unchanged.
+
+Top to bottom, one column, 16 side padding, capped at 480 and centred on a
+wide screen, exactly as every other screen:
+
+```
+                    ┌───────────┐
+                    │  (ตาไก๊)  │   112px circle, surface fill, 1px border
+                    └───────────┘
+                       ตาไก๊             title 24/600, primary
+     คิดกำไรขาดทุนสวนทุเรียน ให้รู้ก่อนขาย   body 16, text-muted
+
+  ┌──────────────────────────────────────────┐
+  │ อีเมล                                     │  label
+  │ [                                        ] │  56 high
+  │ รหัสผ่าน                                  │
+  │ [                                        ] │
+  │ [           เข้าสู่ระบบ                  ] │  primary, 48+ high
+  │ ลืมรหัสผ่าน                               │  link, 48 target
+  │ ยังไม่มีบัญชี? สมัครใช้งาน                  │
+  └──────────────────────────────────────────┘
+   สำเนาทดลอง · ข้อมูลที่กรอกใช้เพื่อการศึกษาและอาจถูกลบ   caption, warn text
+   จากชาว Durian Academy รุ่นที่ 2                        caption, text-muted
+```
+
+Strings, verbatim:
+
+| Element | Text |
+|---|---|
+| wordmark | `ตาไก๊` |
+| tagline | `คิดกำไรขาดทุนสวนทุเรียน ให้รู้ก่อนขาย` |
+| email label | `อีเมล` |
+| password label | `รหัสผ่าน` |
+| primary button | `เข้าสู่ระบบ` |
+| forgot link | `ลืมรหัสผ่าน` |
+| register line | `ยังไม่มีบัญชี? ` + link `สมัครใช้งาน` |
+| after verification (`?verified=1`) | `ยืนยันอีเมลเรียบร้อยแล้ว เข้าสู่ระบบได้เลย` (unchanged) |
+| pilot line | `สำเนาทดลอง · ข้อมูลที่กรอกใช้เพื่อการศึกษาและอาจถูกลบ` |
+| byline | `จากชาว Durian Academy รุ่นที่ 2` |
+| tab title | `บัญชีตาไก๊ · Takai` |
+| header | mark + `ตาไก๊`, linking to `/` |
+
+Rules this screen follows and what they mean here:
+
+- **The tagline is the one line.** It says what the application does in the
+  words a grower uses (`กำไรขาดทุน`, `ก่อนขาย`), and it is the only prose on
+  the screen. No second paragraph, no feature list.
+- **No hint under a field a phone-fluent person already understands.** The
+  two hints on the old login page (`ใช้อีเมลเดียวกับที่สมัครบัญชี`,
+  `รหัสผ่านที่ตั้งไว้ตอนสมัคร`) are removed. Field errors stay, associated with
+  their control, as rule 9 requires.
+- **The pilot notice is one caption line under the card**, not a strip above
+  the header. It keeps the whole fact — a trial copy, data for study, may be
+  deleted — in `warn` text on `bg`, which clears 6:1 in both themes. The
+  strip above the header stays on every other screen; only the entry screen
+  places it here, and only because a first impression should open with the
+  mascot and the name, not a warning. The `(pilot)` term is dropped from
+  this line; the Thai already says it.
+- **The byline is the cohort's mark.** `caption` in `text-muted`, last thing
+  on the screen, no link.
+- **Nothing moves.** The mascot does not animate, wave, or fade in.
+- **Icons in fields are not added.** The mockup drew an envelope and a
+  padlock inside the inputs; they cost horizontal room at 320 and add
+  nothing a label does not say.
+- **Contrast**, computed: `primary` on `bg` 7.43:1 (wordmark), `text-muted`
+  on `bg` 7.84:1 (tagline, byline), `warn` on `bg` 6.07:1 (pilot line);
+  dark theme 10.96:1, 8.36:1, 8.74:1.
+
+Removed with this screen: the landing card at `/` (eyebrow `DAC2`, the
+heading `เห็นรายได้ ต้นทุน และกำไรของสวนในฤดูกาลเดียว`, and its three
+buttons). The `ลองดูตัวอย่างโดยไม่บันทึก` link goes with it. The `/demo`
+route itself stays reachable by URL for teaching, and the signed-in empty
+state's `ดูตัวอย่างการใช้งาน` in **User flow** is unchanged.
+
+### Mail
+
+The sender name becomes `บัญชีตาไก๊`; the subjects become
+`ยืนยันอีเมล บัญชีตาไก๊` and `ตั้งรหัสผ่านใหม่ บัญชีตาไก๊`. The body stays
+what it is: one instruction line, the link, plain text.
+
+The plan for this revision said the mascot would head each mail. Writing
+this section found that the mails are plain text today, and putting an image
+in them means switching to HTML mail. A plain-text mail with one link is the
+shape most likely to reach an inbox from a sender without a domain; an HTML
+mail with an embedded image is the shape most likely to be filtered, and one
+tester's reset mail already went missing on 2026-09-15. **This section
+proposes no image in mail** and the owner decides on the pull request. If the
+owner wants the mascot there, it becomes a separate, later change with its
+own deliverability check, not part of the entry-screen change.
 
 ## Screens
 
@@ -1014,7 +1167,14 @@ reachable from both.
 - Whether one owner ever compares two seasons side by side, which would change
   the dashboard from a single plan to a comparison. Closing a season and
   duplicating it makes this more likely, not less.
-- Icon set is not chosen.
+- Icon set is not chosen for the working screens. The entry screen's mark
+  and mascot are chosen in **Identity and the entry screen**; whether the
+  hat silhouette reads at sixteen pixels is decided when it is drawn.
+- Whether the mascot should appear in mail, which would mean HTML mail;
+  see **Mail** under **Identity and the entry screen**.
+
+Resolved since revision 0.8: the application's name and entry screen;
+see **Identity and the entry screen**.
 
 Resolved since revision 0.1: the grade mix is an add-and-remove list rather than
 a split control, because a year may carry ten grades.
