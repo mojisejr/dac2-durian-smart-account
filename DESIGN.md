@@ -278,7 +278,8 @@ hosting service, and this document's file history. No user sees it.
 ### The mascot
 
 - `public/takai-bust.webp` with `public/takai-bust.png` as the fallback: the
-  256-pixel transparent bust, at most 50 KB together. The 1024-pixel source
+  256-pixel transparent bust, each file at most 50 KB (14 KB and 40 KB as
+  shipped). A phone fetches one of them, never both. The 1024-pixel source
   with its solid background is not in the repository; it is 3 MB and a phone
   in an orchard does not fetch it.
 - On the entry screen the bust sits in a **112-pixel circle** (96 at 320
@@ -295,14 +296,17 @@ hosting service, and this document's file history. No user sees it.
 
 A face is a blur at sixteen pixels. The favicon is therefore the **straw hat
 in silhouette**: the brim and crown of ตาไก๊'s hat as one filled shape,
-`public/takai-mark.svg`, painted `#0F5C3A` on transparent. It is the same hat
-the mascot wears, so the tab and the screen say the same thing. A 180-pixel
-PNG for a phone's home screen is generated from the SVG. The mark also sits
-at 24 pixels before the wordmark in the site header.
+`public/takai-mark.svg`, painted `#0F5C3A` on a `#F7F6F2` disc. The disc is
+there because a browser's tab bar may be dark and does not theme a favicon;
+on it the dark green alone was faint. It is the same hat the mascot wears, so
+the tab and the screen say the same thing. A 180-pixel PNG for a phone's home
+screen is generated from the SVG. In the site header the same hat is drawn
+inline at 24 pixels in the current text colour, so it follows `primary` in
+both themes, with no disc.
 
-If the hat does not read at sixteen pixels when drawn, the fallback is the
-letter ต in Sarabun 700 on a `#0F5C3A` disc. Decided when the mark is drawn,
-not now.
+Drawn and checked at 16, 32 and 64 pixels on a light and a dark tab bar: it
+reads as a hat. The letter fallback (ต in Sarabun 700 on a green disc) was
+not needed and is not shipped.
 
 ### The entry screen — `/`
 
@@ -1168,8 +1172,7 @@ reachable from both.
   the dashboard from a single plan to a comparison. Closing a season and
   duplicating it makes this more likely, not less.
 - Icon set is not chosen for the working screens. The entry screen's mark
-  and mascot are chosen in **Identity and the entry screen**; whether the
-  hat silhouette reads at sixteen pixels is decided when it is drawn.
+  and mascot are chosen in **Identity and the entry screen**.
 - Whether the mascot should appear in mail, which would mean HTML mail;
   see **Mail** under **Identity and the entry screen**.
 
