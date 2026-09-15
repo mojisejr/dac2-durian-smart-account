@@ -60,7 +60,7 @@ fn mailer(url: &str) -> Mailer {
             delivery: Delivery::BrevoApi {
                 api_key: "xkeysib-stand-in".into(),
             },
-            from: "DAC2 <no-reply@dac2.local>".into(),
+            from: "บัญชีตาไก๊ <no-reply@dac2.local>".into(),
             base_url: "https://dac2-pilot.example".into(),
         },
         url,
@@ -80,9 +80,9 @@ async fn a_verification_mail_reaches_the_api_with_key_sender_recipient_and_link(
     assert_eq!(seen.api_key.as_deref(), Some("xkeysib-stand-in"));
     let body = seen.body.expect("a JSON body was posted");
     assert_eq!(body["sender"]["email"], "no-reply@dac2.local");
-    assert_eq!(body["sender"]["name"], "DAC2");
+    assert_eq!(body["sender"]["name"], "บัญชีตาไก๊");
     assert_eq!(body["to"][0]["email"], "owner@example.test");
-    assert_eq!(body["subject"], "ยืนยันอีเมล DAC2");
+    assert_eq!(body["subject"], "ยืนยันอีเมล บัญชีตาไก๊");
     let text = body["textContent"].as_str().expect("text content");
     assert!(
         text.contains("https://dac2-pilot.example/auth/verify-email?token=tok3n"),

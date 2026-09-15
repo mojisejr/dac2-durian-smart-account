@@ -61,7 +61,27 @@ html[data-pilot="true"] .pilot-notice { background: color-mix(in srgb, var(--war
 .pilot-notice-term { color: var(--muted); }
 
 .site-header { margin-bottom: 1.25rem; }
-.site-header a { align-items: center; color: var(--primary); display: inline-flex; font-weight: 700; min-height: 48px; text-decoration: none; }
+.site-header a { align-items: center; color: var(--primary); display: inline-flex; font-weight: 700; gap: 0.4rem; min-height: 48px; text-decoration: none; }
+.hat-mark { display: block; height: 24px; width: 24px; }
+
+/* The entry screen - the login form at "/" - carries the identity itself:
+   the mascot, the wordmark, its own one-line pilot notice. The shared strip
+   and header step aside there, and only there. DESIGN.md, "Identity and the
+   entry screen". */
+main.entry-screen .pilot-notice, main.entry-screen .site-header { display: none; }
+.entry-card { margin-top: 1.5rem; text-align: center; }
+.entry-card form, .entry-card label { text-align: left; }
+.mascot { background: var(--surface); border: 1px solid var(--border); border-radius: 999px; height: 112px; margin: 0 auto 0.75rem; overflow: hidden; width: 112px; }
+/* The bust is cropped with air around it; scaling it up inside the circle
+   brings the hat brim to the top edge, as DESIGN.md draws it. */
+.mascot img { display: block; height: 100%; object-fit: cover; object-position: center top; transform: scale(1.45) translateY(9%); width: 100%; }
+@media (max-width: 359px) { .mascot { height: 96px; width: 96px; } }
+.wordmark { color: var(--primary); font-size: 1.5rem; font-weight: 700; line-height: 1.3; margin-bottom: 0.25rem; }
+.tagline { color: var(--muted); margin-bottom: 1rem; }
+.entry-card .alternate { text-align: center; }
+.entry-pilot, .byline { font-size: 0.82rem; line-height: 1.55; margin: 0.75rem 0 0; text-align: center; }
+.entry-pilot { color: var(--warn); }
+.byline { color: var(--muted); }
 
 h1, h2, p { margin-top: 0; }
 h1 { font-size: clamp(1.65rem, 7vw, 2.15rem); line-height: 1.3; margin-bottom: 0.5rem; overflow-wrap: anywhere; }

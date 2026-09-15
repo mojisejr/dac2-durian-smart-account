@@ -608,8 +608,9 @@ async function signIn(browser) {
     { timeout: 10000 },
   );
   await page.click('button:has-text("บันทึกส่วนนี้")');
-  if (!(await marketSave).ok()) {
-    throw new Error('saving the market section returned a failing HTTP status');
+  const marketResponse = await marketSave;
+  if (!marketResponse.ok()) {
+    throw new Error(`saving the market section returned HTTP ${marketResponse.status()} from ${marketResponse.url()}`);
   }
   await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
   await navigateOrDiagnose(page, production, null, () => page.goto(production));
@@ -649,7 +650,8 @@ async function signIn(browser) {
   await page.getByText('ยังมี 1 รายการที่ยังไม่ได้บอกว่าเป็นแบบไหน จึงยังไม่ถูกนับ').waitFor({ timeout: 5000 });
   const captureSave = page.waitForResponse((r) => r.request().method() === 'POST', { timeout: 10000 });
   await page.click('button:has-text("บันทึกส่วนนี้")');
-  if (!(await captureSave).ok()) throw new Error('saving a captured expense returned a failing HTTP status');
+  const captureResponse = await captureSave;
+  if (!captureResponse.ok()) throw new Error(`saving a captured expense returned HTTP ${captureResponse.status()} from ${captureResponse.url()}`);
   await page.locator('.form-message:not(:empty)').first().waitFor({ timeout: 10000 });
   await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}`));
   await page.getByText('มี 1 รายการยังไม่ได้บอกว่าเป็นแบบไหน').waitFor({ timeout: 10000 });
@@ -947,9 +949,11 @@ const browser = await chromium.launch({ channel: 'chrome' });
 try {
   const { cookies, planId, detailedPlanId, comparisonPlanId, assetOpenPlanId } = await signIn(browser);
   const routes = [
-    ['home', `${BASE}/`],
+    // The entry screen is for a visitor who is not signed in; a signed-in
+    // visit to either address is sent to /plans and would measure that page.
+    ['home', `${BASE}/`, { signedOut: true }],
     ['register', `${BASE}/register`],
-    ['login', `${BASE}/login`],
+    ['login', `${BASE}/login`, { signedOut: true }],
     ['verify-recovery', `${BASE}/verify-email?invalid=1`],
     ['forgot-password', `${BASE}/forgot-password`],
     ['reset-recovery', `${BASE}/reset-password?token=invalid`],
@@ -998,11 +1002,17 @@ try {
       deviceScaleFactor: 2,
     });
     await context.addCookies(cookies);
+    const signedOut = await browser.newContext({
+      viewport: { width: size.width, height: size.height },
+      isMobile: true,
+      hasTouch: true,
+      deviceScaleFactor: 2,
+    });
 
-    for (const [routeName, url] of routes) {
+    for (const [routeName, url, options = {}] of routes) {
       // A fresh page makes every route measurement independent and prevents a
       // long matrix from retaining old hydrated runtimes in one renderer.
-      const page = await context.newPage();
+      const page = await (options.signedOut ? signedOut : context).newPage();
       try {
         if (routeName === 'hub-loading') {
           await page.route('**/api/load_plan*', async (route) => {
@@ -1066,6 +1076,7 @@ try {
     }
     console.log(`Responsive proof measured ${routes.length} routes at ${size.name}px`);
     await context.close();
+    await signedOut.close();
   }
 } finally {
   await browser.close();

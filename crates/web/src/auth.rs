@@ -193,6 +193,12 @@ pub async fn require_login(
 ) -> axum::response::Response {
     use axum::response::{IntoResponse, Redirect};
 
+    // The entry screen is for someone who is not signed in. A signed-in
+    // owner who opens the address goes to their seasons, as every banking
+    // application does, and never sees the form.
+    if crate::app::entry_path(request.uri().path()) && auth_session.user.is_some() {
+        return Redirect::to("/plans").into_response();
+    }
     if !protected_account_path(request.uri().path()) {
         return next.run(request).await;
     }
@@ -250,5 +256,15 @@ mod tests {
         assert!(protected_account_path("/history"));
         assert!(!protected_account_path("/login"));
         assert!(!protected_account_path("/"));
+    }
+
+    #[test]
+    fn the_entry_screen_is_the_root_and_the_old_login_address() {
+        assert!(crate::app::entry_path("/"));
+        assert!(crate::app::entry_path("/login"));
+        assert!(crate::app::entry_path("/login/"));
+        assert!(!crate::app::entry_path("/register"));
+        assert!(!crate::app::entry_path("/plans"));
+        assert!(!crate::app::entry_path("/loginx"));
     }
 }

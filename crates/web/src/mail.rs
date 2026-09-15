@@ -93,7 +93,7 @@ impl MailConfig {
         };
         Ok(Self {
             delivery,
-            from: read("MAIL_FROM").unwrap_or_else(|| "DAC2 <no-reply@dac2.local>".into()),
+            from: read("MAIL_FROM").unwrap_or_else(|| "บัญชีตาไก๊ <no-reply@dac2.local>".into()),
             base_url: read("APP_BASE_URL").unwrap_or_else(|| "http://127.0.0.1:3000".into()),
         })
     }
@@ -206,7 +206,7 @@ impl Mailer {
     pub async fn send_verification(&self, recipient: &str, token: &str) -> Result<(), MailError> {
         self.send(
             recipient,
-            "ยืนยันอีเมล DAC2",
+            "ยืนยันอีเมล บัญชีตาไก๊",
             "auth/verify-email",
             token,
             "กดลิงก์นี้เพื่อยืนยันอีเมล",
@@ -217,7 +217,7 @@ impl Mailer {
     pub async fn send_password_reset(&self, recipient: &str, token: &str) -> Result<(), MailError> {
         self.send(
             recipient,
-            "ตั้งรหัสผ่าน DAC2 ใหม่",
+            "ตั้งรหัสผ่านใหม่ บัญชีตาไก๊",
             "reset-password",
             token,
             "กดลิงก์นี้เพื่อตั้งรหัสผ่านใหม่",
@@ -330,7 +330,7 @@ mod tests {
     fn links_use_the_configured_local_base_without_logging() {
         let mailer = Mailer::new(MailConfig {
             delivery: local_smtp(),
-            from: "DAC2 <no-reply@dac2.local>".into(),
+            from: "บัญชีตาไก๊ <no-reply@dac2.local>".into(),
             base_url: "http://127.0.0.1:3000/".into(),
         })
         .expect("a plaintext transport needs no relay lookup");
@@ -453,20 +453,20 @@ mod tests {
 
     #[test]
     fn the_brevo_request_carries_sender_name_recipient_subject_and_text() {
-        let sender: Mailbox = "DAC2 <no-reply@dac2.local>".parse().unwrap();
+        let sender: Mailbox = "บัญชีตาไก๊ <no-reply@dac2.local>".parse().unwrap();
         let recipient: Mailbox = "owner@example.test".parse().unwrap();
         let request = brevo_request(
             &sender,
             &recipient,
-            "ยืนยันอีเมล DAC2",
+            "ยืนยันอีเมล บัญชีตาไก๊",
             "กดลิงก์นี้\n\nhttps://x/y?token=t\n",
         );
         assert_eq!(
             request,
             serde_json::json!({
-                "sender": { "name": "DAC2", "email": "no-reply@dac2.local" },
+                "sender": { "name": "บัญชีตาไก๊", "email": "no-reply@dac2.local" },
                 "to": [{ "email": "owner@example.test" }],
-                "subject": "ยืนยันอีเมล DAC2",
+                "subject": "ยืนยันอีเมล บัญชีตาไก๊",
                 "textContent": "กดลิงก์นี้\n\nhttps://x/y?token=t\n",
             })
         );
