@@ -93,14 +93,21 @@ fn RegisterPage() -> impl IntoView {
             <p>"กรอกอีเมลและตั้งรหัสผ่าน จากนั้นเปิดลิงก์ยืนยันที่ส่งไปทางอีเมล"</p>
             <ActionForm action=register>
                 <FormField id="register-email" label="อีเมล" name="email" input_type="email" autocomplete="email" hint="ใช้รับลิงก์ยืนยันและกู้รหัสผ่าน"/>
-                <FormField
+                <PasswordField
                     id="register-password"
                     label="รหัสผ่าน"
                     name="password"
-                    input_type="password"
                     autocomplete="new-password"
-                    minlength="15"
-                    hint="ใช้อย่างน้อย 15 ตัวอักษร"
+                    minlength="6"
+                    hint="ใช้อย่างน้อย 6 ตัวอักษร"
+                />
+                <PasswordField
+                    id="register-password-confirm"
+                    label="ยืนยันรหัสผ่าน"
+                    name="password_confirm"
+                    autocomplete="new-password"
+                    minlength="6"
+                    hint="พิมพ์รหัสผ่านเดิมอีกครั้ง"
                 />
                 <button class="primary" type="submit">"สมัครใช้งาน"</button>
             </ActionForm>
@@ -140,11 +147,10 @@ fn EntryPage() -> impl IntoView {
             </Show>
             <ActionForm action=action>
                 <FormField id="login-email" label="อีเมล" name="email" input_type="email" autocomplete="email"/>
-                <FormField
+                <PasswordField
                     id="login-password"
                     label="รหัสผ่าน"
                     name="password"
-                    input_type="password"
                     autocomplete="current-password"
                 />
                 <button class="primary" type="submit">"เข้าสู่ระบบ"</button>
@@ -213,14 +219,21 @@ fn ResetPasswordPage() -> impl IntoView {
             <h1>"ตั้งรหัสผ่านใหม่"</h1>
             <ActionForm action=action>
                 <input type="hidden" name="token" value=token/>
-                <FormField
+                <PasswordField
                     id="reset-password"
                     label="รหัสผ่านใหม่"
                     name="new_password"
-                    input_type="password"
                     autocomplete="new-password"
-                    minlength="15"
-                    hint="ใช้อย่างน้อย 15 ตัวอักษร แล้วเข้าสู่ระบบด้วยรหัสใหม่นี้"
+                    minlength="6"
+                    hint="ใช้อย่างน้อย 6 ตัวอักษร แล้วเข้าสู่ระบบด้วยรหัสใหม่นี้"
+                />
+                <PasswordField
+                    id="reset-password-confirm"
+                    label="ยืนยันรหัสผ่านใหม่"
+                    name="new_password_confirm"
+                    autocomplete="new-password"
+                    minlength="6"
+                    hint="พิมพ์รหัสผ่านใหม่อีกครั้ง"
                 />
                 <button class="primary" type="submit">"บันทึกรหัสผ่านใหม่"</button>
             </ActionForm>
@@ -260,6 +273,86 @@ fn FormField(
             />
             {hint.map(|hint| view! { <small id=help_id class="field-hint">{hint}</small> })}
         </label>
+    }
+}
+
+/// A password field with a show/hide button beside it. The button is a
+/// control of its own, 56 square to match the input and never a glyph inside
+/// it, and it says
+/// its state through `aria-pressed` and a Thai label rather than colour.
+/// It works once the page hydrates; before that it is inert and the form
+/// still submits with the password hidden.
+#[component]
+fn PasswordField(
+    id: &'static str,
+    label: &'static str,
+    name: &'static str,
+    autocomplete: &'static str,
+    #[prop(optional)] hint: Option<&'static str>,
+    #[prop(default = "1")] minlength: &'static str,
+) -> impl IntoView {
+    let help_id = hint.map(|_| format!("{id}-help"));
+    let shown = RwSignal::new(false);
+    let input_type = move || if shown.get() { "text" } else { "password" };
+    let button_label = move || {
+        if shown.get() {
+            "ซ่อนรหัสผ่าน"
+        } else {
+            "แสดงรหัสผ่าน"
+        }
+    };
+    view! {
+        <div class="password-field">
+            <label for=id>{label}</label>
+            <div class="password-row">
+                <input
+                    id=id
+                    type=input_type
+                    name=name
+                    autocomplete=autocomplete
+                    minlength=minlength
+                    maxlength="1024"
+                    aria-describedby=help_id.clone()
+                    required
+                />
+                <button
+                    class="icon-button reveal"
+                    type="button"
+                    aria-pressed=move || shown.get().to_string()
+                    aria-label=button_label
+                    title=button_label
+                    on:click=move |_| shown.update(|value| *value = !*value)
+                >
+                    <Show when=move || shown.get() fallback=EyeOpen>
+                        <EyeClosed/>
+                    </Show>
+                </button>
+            </div>
+            {hint.map(|hint| view! { <small id=help_id class="field-hint">{hint}</small> })}
+        </div>
+    }
+}
+
+/// The eye, drawn in the same hand as the hat mark: one stroke, no fill.
+#[component]
+fn EyeOpen() -> impl IntoView {
+    view! {
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/>
+            <circle cx="12" cy="12" r="3"/>
+        </svg>
+    }
+}
+
+/// The same eye with a stroke across it.
+#[component]
+fn EyeClosed() -> impl IntoView {
+    view! {
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/>
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M4 4l16 16"/>
+        </svg>
     }
 }
 

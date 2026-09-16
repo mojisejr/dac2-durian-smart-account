@@ -398,6 +398,7 @@ async function signIn(browser) {
   await navigateOrDiagnose(page, `${BASE}/register`, null, () => page.goto(`${BASE}/register`));
   await page.fill('input[name="email"]', email);
   await page.fill('input[name="password"]', password);
+  await page.fill('input[name="password_confirm"]', password);
   await page.click('button[type="submit"]');
   await page.waitForTimeout(1500);
 

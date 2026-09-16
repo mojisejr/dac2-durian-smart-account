@@ -10,7 +10,9 @@ use crate::StoreError;
 
 pub type UserId = i64;
 
-const MIN_PASSWORD_CHARS: usize = 15;
+// Six is the owner's choice for a narrow pilot (dac2-auth-form-001); there is
+// no composition rule, and Unicode is counted by character, not by byte.
+const MIN_PASSWORD_CHARS: usize = 6;
 const MAX_PASSWORD_CHARS: usize = 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -247,9 +249,11 @@ mod tests {
 
     #[test]
     fn password_policy_counts_unicode_characters_and_has_no_composition_rule() {
-        assert!(validate_password("ยาวสิบห้าตัวพอดี").is_ok());
+        assert!(validate_password("กำไรดี").is_ok());
+        assert!(validate_password("123456").is_ok());
         assert!(validate_password("correct horse battery staple").is_ok());
-        assert!(validate_password("aaaaaaaaaaaaaa").is_err());
+        assert!(validate_password("12345").is_err());
+        assert!(validate_password("ตาไก๊").is_err());
         assert!(validate_password(&"a".repeat(64)).is_ok());
         assert!(validate_password(&"a".repeat(MAX_PASSWORD_CHARS + 1)).is_err());
     }

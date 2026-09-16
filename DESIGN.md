@@ -1,6 +1,6 @@
 # DAC2 — Design
 
-**Status:** draft, revision 0.10
+**Status:** draft, revision 0.11
 **Home:** this file moves to the application repository root in slice 1. There is
 one copy of it, never two.
 
@@ -329,7 +329,7 @@ wide screen, exactly as every other screen:
   │ อีเมล                                     │  label
   │ [                                        ] │  56 high
   │ รหัสผ่าน                                  │
-  │ [                                        ] │
+  │ [                              ] [ 👁 ]   │  56 high; the eye is a 56×56 button
   │ [           เข้าสู่ระบบ                  ] │  primary, 48+ high
   │ ลืมรหัสผ่าน                               │  link, 48 target
   │ ยังไม่มีบัญชี? สมัครใช้งาน                  │
@@ -376,7 +376,9 @@ Rules this screen follows and what they mean here:
 - **Nothing moves.** The mascot does not animate, wave, or fade in.
 - **Icons in fields are not added.** The mockup drew an envelope and a
   padlock inside the inputs; they cost horizontal room at 320 and add
-  nothing a label does not say.
+  nothing a label does not say. The show/hide eye beside the password field
+  (revision 0.11) is not one of these: it is a button with a job, outside
+  the input, and **Sign-in, registration, password reset** lays it out.
 - **Contrast**, computed: `primary` on `bg` 7.43:1 (wordmark), `text-muted`
   on `bg` 7.84:1 (tagline, byline), `warn` on `bg` 6.07:1 (pilot line);
   dark theme 10.96:1, 8.36:1, 8.74:1.
@@ -887,6 +889,63 @@ The advanced area uses `การวางแผนขั้นสูง (ไม
 Three plain screens. One field per row, one primary button, and the reset link
 under the password field. No illustration, no marketing copy, no social buttons.
 
+#### Password fields — revision 0.11
+
+The owner used the pilot on a phone and named the one certain change: a
+password typed blind on a phone keyboard is mistyped, and a mistyped password
+at registration locks the account before it exists. Three things change, and
+nothing else on these screens.
+
+**Every password field has a show/hide button beside it.** Sign-in included.
+The row is the input and a 56-by-56 button, 8 apart, the button matching the
+input's height so the row reads as one control. The button is `type="button"`,
+carries `aria-pressed` (`false` hidden, `true` shown), a Thai `aria-label`
+and `title`, and an eye drawn in one stroke like the hat mark: open when the
+password is hidden (press to see), crossed when shown (press to hide). The
+pressed state changes the icon, the label and the border colour together;
+never the colour alone (rule 3). Before the page hydrates the button does
+nothing and the form still submits, hidden.
+
+```
+  รหัสผ่าน                                    label
+  [                              ] [ 👁 ]     input 56 high · button 56×56
+  ใช้อย่างน้อย 6 ตัวอักษร                      field-hint (registration only)
+```
+
+**The two screens that set a password ask for it twice.** Registration and
+reset each gain a second field under the first, same row, same eye. The
+server compares the two before it touches anything and refuses a mismatch;
+the browser does not compare on its own, so the refusal sentence is the one
+place the rule is stated. Sign-in asks once.
+
+**Six characters is enough.** The floor drops from fifteen to six, counted by
+character so Thai counts as it reads; no mixture of cases, digits or symbols
+is required, and the ceiling stays at 1024. Six digits are accepted. This is
+the owner's choice for a narrow pilot whose data may be deleted, recorded in
+`dac2-auth-form-001`; if the pilot ever holds real records the floor is a
+decision to revisit, not a constant to edit.
+
+Strings, verbatim:
+
+| Element | Text |
+|---|---|
+| password label (sign-in, registration) | `รหัสผ่าน` |
+| confirm label (registration) | `ยืนยันรหัสผ่าน` |
+| new-password label (reset) | `รหัสผ่านใหม่` |
+| confirm label (reset) | `ยืนยันรหัสผ่านใหม่` |
+| hint under the password (registration) | `ใช้อย่างน้อย 6 ตัวอักษร` |
+| hint under the confirm (registration) | `พิมพ์รหัสผ่านเดิมอีกครั้ง` |
+| hint under the new password (reset) | `ใช้อย่างน้อย 6 ตัวอักษร แล้วเข้าสู่ระบบด้วยรหัสใหม่นี้` |
+| hint under the confirm (reset) | `พิมพ์รหัสผ่านใหม่อีกครั้ง` |
+| eye button, password hidden | `แสดงรหัสผ่าน` |
+| eye button, password shown | `ซ่อนรหัสผ่าน` |
+| too short | `รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร` |
+| the two fields differ | `รหัสผ่านทั้งสองช่องไม่ตรงกัน` |
+
+The sign-in field keeps no hint, as the entry screen rules. Sign-in failure
+wording, the reset request screen, mail, and the entry screen's layout above
+the field row are unchanged.
+
 ## User flow
 
 ### Entering
@@ -1288,6 +1347,10 @@ reachable from both.
   that is enough.
 - Whether the mascot should appear in mail, which would mean HTML mail;
   see **Mail** under **Identity and the entry screen**.
+
+Resolved since revision 0.10: a password can be shown while typing, is typed
+twice where it is set, and is six characters or more; see **Password fields**
+under **Sign-in, registration, password reset**.
 
 Resolved since revision 0.9: tax deductions are the owner's own lines per
 season, never a constant; see **ลดหย่อนภาษี**.

@@ -114,6 +114,13 @@ input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible
 .input-with-unit { display: grid; position: relative; }
 .input-with-unit input { padding-right: 5.25rem; }
 .unit { align-self: center; color: var(--muted); font-size: 0.88rem; padding-right: 0.8rem; pointer-events: none; position: absolute; right: 0; }
+/* A password field is a label, a row, and a hint - the same grid as a plain
+   label wrapping its input. The show/hide button sits beside the input as a
+   56-tall target to match it, never inside it (DESIGN.md, entry screen). */
+.password-field { display: grid; gap: 0.35rem; }
+.password-row { align-items: stretch; display: grid; gap: 0.5rem; grid-template-columns: minmax(0, 1fr) 56px; }
+.password-row .reveal { background: var(--surface); min-height: 56px; min-width: 56px; }
+.password-row .reveal[aria-pressed="true"] { border-color: var(--primary); color: var(--primary); }
 
 /* DESIGN.md rule 1 used to hang on this class list, so any interactive element
    that forgot a class opted out of a non-negotiable rule in silence. The floor
