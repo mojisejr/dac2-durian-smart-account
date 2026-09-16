@@ -303,7 +303,12 @@ async function waitForHydratedValue(page, selector, accept, what) {
         .locator(selector)
         .evaluateAll((elements) => elements.map((element) => (element.type === 'radio' || element.type === 'checkbox' ? element.checked : element.value)))
         .catch(() => '(missing)');
-      throw new Error(`${what} (saw ${JSON.stringify(seen)} at ${page.url()})`);
+      const messages = await page
+        .locator('.form-message, .validation-summary, .field-error')
+        .allTextContents()
+        .then((texts) => texts.map((text) => text.trim()).filter(Boolean))
+        .catch(() => []);
+      throw new Error(`${what} (saw ${JSON.stringify(seen)} at ${page.url()}; page says ${JSON.stringify(messages)})`);
     });
 }
 
@@ -977,6 +982,7 @@ try {
     ['expenses', `${BASE}/plans/${detailedPlanId}/expenses`],
     ['variable-costs', `${BASE}/plans/${detailedPlanId}/variable-costs`],
     ['fixed-costs', `${BASE}/plans/${detailedPlanId}/fixed-costs`],
+    ['tax-deductions', `${BASE}/plans/${detailedPlanId}/tax-deductions`],
     ['health', `${BASE}/plans/${detailedPlanId}/health`],
     ['targets-advanced', `${BASE}/plans/${detailedPlanId}/targets`],
     ['assets-closed', `${BASE}/plans/${detailedPlanId}/assets`],

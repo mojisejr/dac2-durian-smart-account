@@ -20,8 +20,23 @@ pub struct Plan {
     /// calculation.
     #[serde(default)]
     pub unclassified_expenses: Vec<UnclassifiedExpense>,
+    /// What the owner deducts from taxable income this season, one line
+    /// each. Never pre-filled: an empty list means nothing has been entered
+    /// and the tax estimate deducts nothing. There is no "confirmed none"
+    /// for deductions, so the two states are read from the rows alone.
+    #[serde(default)]
+    pub tax_deductions: Vec<TaxDeductionLine>,
     pub health_answers: Vec<HealthAnswer>,
     pub targets: KpiTargets,
+}
+
+/// One deduction the owner claims for the season: what it is called and how
+/// much. The application checks no ceiling and knows no categories; the name
+/// is the owner's.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TaxDeductionLine {
+    pub name: String,
+    pub amount: Decimal,
 }
 
 /// What is known about a cost section that may have no rows.
@@ -45,6 +60,13 @@ impl Plan {
 
     pub fn effective_fixed_cost_state(&self) -> CostSectionState {
         effective_state(self.fixed_cost_state, self.fixed_costs.is_empty())
+    }
+
+    /// The sum of every deduction line. Zero when none is entered, which is
+    /// the honest upper bound for the tax estimate, not a claim of no
+    /// deduction.
+    pub fn tax_deduction_total(&self) -> Decimal {
+        self.tax_deductions.iter().map(|line| line.amount).sum()
     }
 }
 

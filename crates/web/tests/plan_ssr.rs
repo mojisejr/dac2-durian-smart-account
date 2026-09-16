@@ -1208,3 +1208,67 @@ fn a_season_closed_with_unknown_costs_compares_what_it_froze_and_never_invents_a
     assert!(html.contains("เงินที่จ่ายไปทั้งหมด"));
     assert!(html.contains("<small class=\"formal-term\">ต้นทุนรวม</small>"));
 }
+
+// The deductions section: nothing pre-filled, suggestions offered for the
+// name only, every string from DESIGN.md, and a closed season renders the
+// lines as text with no controls.
+#[test]
+fn the_deductions_section_offers_names_prefills_nothing_and_locks_when_closed() {
+    let mut none = calc::workbook_sample();
+    none.tax_deductions.clear();
+    let html = render("tax-deductions", false, PlanForm::from_plan(&none));
+    for expected in [
+        "ปีนี้มีอะไรลดหย่อนภาษีได้บ้าง",
+        "ระบบไม่ใส่ให้เอง แม้แต่ค่าลดหย่อนส่วนตัว",
+        "กรอกแล้วได้อะไร ภาษีโดยประมาณจะหักรายการเหล่านี้ออกก่อนคิด",
+        "+ เพิ่มรายการลดหย่อน",
+        "<datalist id=\"deduction-names\">",
+        "<option value=\"ค่าลดหย่อนส่วนตัว\"",
+        "<option value=\"เงินบริจาค\"",
+        "ดูภาษีโดยประมาณ",
+    ] {
+        assert!(html.contains(expected), "missing {expected} in {html}");
+    }
+    assert!(!html.contains("60,000"), "nothing is pre-filled: {html}");
+    assert!(
+        !html.contains("รวมลดหย่อน"),
+        "no total without a line: {html}"
+    );
+
+    let open = render(
+        "tax-deductions",
+        false,
+        PlanForm::from_plan(&calc::workbook_sample()),
+    );
+    for expected in [
+        "ลดหย่อนจากอะไร",
+        "list=\"deduction-names\"",
+        "จำนวนเงินที่ลดหย่อนได้ปีนี้",
+        "กรอกตามที่คุณมีสิทธิ์จริง เช่น ค่าลดหย่อนส่วนตัว 60,000",
+        "ระบบไม่ตรวจเพดานให้",
+        "ลบรายการนี้",
+        "รวมลดหย่อน",
+        "60,000.00 บาท",
+    ] {
+        assert!(open.contains(expected), "missing {expected} in {open}");
+    }
+
+    let closed = render(
+        "tax-deductions",
+        true,
+        PlanForm::from_plan(&calc::workbook_sample()),
+    );
+    assert!(closed.contains("ค่าลดหย่อนส่วนตัว"), "{closed}");
+    assert!(!closed.contains("+ เพิ่มรายการลดหย่อน"), "{closed}");
+    assert!(!closed.contains("ลบรายการนี้"), "{closed}");
+    assert!(
+        !closed.contains("type=\"text\""),
+        "a closed season has no controls: {closed}"
+    );
+
+    let closed_empty = render("tax-deductions", true, PlanForm::from_plan(&none));
+    assert!(
+        closed_empty.contains("ไม่ได้กรอกรายการลดหย่อนไว้ ภาษีของฤดูนี้จึงคิดโดยยังไม่หักลดหย่อน"),
+        "{closed_empty}"
+    );
+}

@@ -2,8 +2,8 @@ use std::str::FromStr;
 
 use calc::{
     CashKind, CostSectionState, FixedCostLine, Grade, HealthAnswer, HealthQuestion, InputIssueKind,
-    KpiTargets, MarketPlan, Plan, PriceSource, ProductionPlan, UnclassifiedExpense,
-    VariableCostKind, VariableCostLine, YieldSource,
+    KpiTargets, MarketPlan, Plan, PriceSource, ProductionPlan, TaxDeductionLine,
+    UnclassifiedExpense, VariableCostKind, VariableCostLine, YieldSource,
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -26,6 +26,10 @@ pub struct PlanForm {
     pub fixed_costs: Vec<FixedCostForm>,
     #[serde(default)]
     pub unclassified: Vec<UnclassifiedExpenseForm>,
+    /// Deductions the owner claims for the season, one row each. Never
+    /// pre-filled; an empty list is "not yet entered".
+    #[serde(default)]
+    pub tax_deductions: Vec<TaxDeductionForm>,
     pub targets: TargetsForm,
     pub health_scores: Vec<String>,
 }
@@ -113,6 +117,12 @@ pub struct UnclassifiedExpenseForm {
     pub note: String,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TaxDeductionForm {
+    pub name: String,
+    pub amount: String,
+}
+
 /// How a remembered expense is filed once the owner answers the familiar
 /// questions. Variable lines take the amount as a total; fixed lines take it
 /// as the amount per year.
@@ -167,9 +177,9 @@ pub enum ReadinessTone {
     Optional,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SectionReadiness {
-    pub label: &'static str,
+    pub label: std::borrow::Cow<'static, str>,
     pub tone: ReadinessTone,
 }
 
@@ -325,6 +335,14 @@ impl PlanForm {
                     cash_kind: line.cash_kind,
                     amount_per_year: decimal(line.amount_per_year),
                     investment_base: decimal(line.investment_base),
+                })
+                .collect(),
+            tax_deductions: plan
+                .tax_deductions
+                .iter()
+                .map(|line| TaxDeductionForm {
+                    name: line.name.clone(),
+                    amount: decimal(Some(line.amount)),
                 })
                 .collect(),
             targets: TargetsForm {
@@ -595,6 +613,50 @@ impl PlanForm {
                 note: expense.note.trim().to_owned(),
             })
             .collect();
+        // A deduction row needs both a name and an amount; a row the owner
+        // added and left blank is dropped rather than saved as a zero, and a
+        // half-filled row is an error on the field that is missing.
+        let tax_deductions = self
+            .tax_deductions
+            .iter()
+            .enumerate()
+            .filter(|(_, line)| !(line.name.trim().is_empty() && line.amount.trim().is_empty()))
+            .filter_map(|(index, line)| {
+                let name = line.name.trim().to_owned();
+                if name.is_empty() {
+                    errors.push(FormError {
+                        field: format!("tax_deductions[{index}].name"),
+                        message: "กรุณาใส่ชื่อรายการลดหย่อน".into(),
+                    });
+                }
+                let amount = match parse_decimal(
+                    &line.amount,
+                    &format!("tax_deductions[{index}].amount"),
+                    &mut errors,
+                ) {
+                    Some(amount) if amount < Decimal::ZERO => {
+                        errors.push(FormError {
+                            field: format!("tax_deductions[{index}].amount"),
+                            message: "จำนวนเงินต้องไม่ติดลบ".into(),
+                        });
+                        None
+                    }
+                    Some(amount) => Some(amount),
+                    None => {
+                        if line.amount.trim().is_empty() {
+                            errors.push(FormError {
+                                field: format!("tax_deductions[{index}].amount"),
+                                message: "กรุณาใส่จำนวนเงินที่ลดหย่อนได้".into(),
+                            });
+                        }
+                        None
+                    }
+                };
+                (!name.is_empty())
+                    .then(|| amount.map(|amount| TaxDeductionLine { name, amount }))
+                    .flatten()
+            })
+            .collect();
         let plan = Plan {
             name: self.name.trim().to_owned(),
             market,
@@ -603,6 +665,7 @@ impl PlanForm {
             variable_costs,
             fixed_cost_state: self.fixed_cost_state,
             fixed_costs,
+            tax_deductions,
             unclassified_expenses,
             health_answers,
             targets,
@@ -657,7 +720,7 @@ impl PlanForm {
                     && self.fixed_cost_state != CostSectionState::ConfirmedNone =>
             {
                 SectionReadiness {
-                    label: "ค่าเสื่อมของที่เลือกไว้รวมแล้ว ยังต้องกรอกหรือยืนยันว่าไม่มีค่าใช้จ่ายประจำอื่น",
+                    label: "ค่าเสื่อมของที่เลือกไว้รวมแล้ว ยังต้องกรอกหรือยืนยันว่าไม่มีค่าใช้จ่ายประจำอื่น".into(),
                     tone: ReadinessTone::Missing,
                 }
             }
@@ -665,7 +728,7 @@ impl PlanForm {
                 if self.fixed_cost_state == CostSectionState::ConfirmedNone =>
             {
                 SectionReadiness {
-                    label: "ยืนยันแล้วว่ามีเฉพาะค่าเสื่อมของที่เลือกไว้",
+                    label: "ยืนยันแล้วว่ามีเฉพาะค่าเสื่อมของที่เลือกไว้".into(),
                     tone: ReadinessTone::Ready,
                 }
             }
@@ -786,38 +849,38 @@ impl PlanForm {
     pub fn section_readiness(&self, section: &str) -> SectionReadiness {
         let Ok(plan) = self.to_plan() else {
             return SectionReadiness {
-                label: "มีข้อมูลที่ต้องตรวจในส่วนนี้",
+                label: "มีข้อมูลที่ต้องตรวจในส่วนนี้".into(),
                 tone: ReadinessTone::Missing,
             };
         };
         let analysis = calc::analyze(&plan);
         match section {
             "market" if plan.market.buyer_committed_kg.is_none() => SectionReadiness {
-                label: "เพิ่มได้ ถ้ามียอดที่ผู้ซื้ออยากได้",
+                label: "เพิ่มได้ ถ้ามียอดที่ผู้ซื้ออยากได้".into(),
                 tone: ReadinessTone::Optional,
             },
             "market" if analysis.revenue.sellable_yield_kg.is_none() => SectionReadiness {
-                label: "ยังขาดผลผลิตขายได้เพื่อเทียบยอดผู้ซื้อ",
+                label: "ยังขาดผลผลิตขายได้เพื่อเทียบยอดผู้ซื้อ".into(),
                 tone: ReadinessTone::Missing,
             },
             "market" if analysis.revenue.market_fulfillment.is_some() => SectionReadiness {
-                label: "พร้อมเทียบยอดผู้ซื้อกับผลผลิต",
+                label: "พร้อมเทียบยอดผู้ซื้อกับผลผลิต".into(),
                 tone: ReadinessTone::Ready,
             },
             "market" => SectionReadiness {
-                label: "ตรวจยอดที่ผู้ซื้ออยากได้",
+                label: "ตรวจยอดที่ผู้ซื้ออยากได้".into(),
                 tone: ReadinessTone::Missing,
             },
             "production" if analysis.revenue.sellable_yield_kg.is_none() => SectionReadiness {
-                label: "ยังขาดผลผลิตที่ขายได้",
+                label: "ยังขาดผลผลิตที่ขายได้".into(),
                 tone: ReadinessTone::Missing,
             },
             "production" if analysis.revenue.weighted_price_per_kg.is_none() => SectionReadiness {
-                label: "ยังขาดราคาขายเฉลี่ย",
+                label: "ยังขาดราคาขายเฉลี่ย".into(),
                 tone: ReadinessTone::Missing,
             },
             "production" => SectionReadiness {
-                label: "พอคำนวณรายได้แล้ว",
+                label: "พอคำนวณรายได้แล้ว".into(),
                 tone: ReadinessTone::Ready,
             },
             "expenses" if !plan.unclassified_expenses.is_empty() => SectionReadiness {
@@ -826,59 +889,68 @@ impl PlanForm {
                     2 => "มี 2 รายการยังไม่ได้บอกว่าเป็นแบบไหน",
                     3 => "มี 3 รายการยังไม่ได้บอกว่าเป็นแบบไหน",
                     _ => "มีหลายรายการยังไม่ได้บอกว่าเป็นแบบไหน",
-                },
+                }
+                .into(),
                 tone: ReadinessTone::Missing,
             },
             "expenses" => SectionReadiness {
-                label: "เพิ่มได้เมื่อจำค่าใช้จ่ายได้แต่ยังไม่รู้ประเภท",
+                label: "เพิ่มได้เมื่อจำค่าใช้จ่ายได้แต่ยังไม่รู้ประเภท".into(),
                 tone: ReadinessTone::Optional,
             },
             "variable-costs" => match plan.effective_variable_cost_state() {
                 CostSectionState::ConfirmedNone => SectionReadiness {
-                    label: "ยืนยันแล้วว่าไม่มีค่าใช้จ่ายส่วนนี้",
+                    label: "ยืนยันแล้วว่าไม่มีค่าใช้จ่ายส่วนนี้".into(),
                     tone: ReadinessTone::Ready,
                 },
                 CostSectionState::EnteredItems if analysis.cost.variable_cost.is_some() => {
                     SectionReadiness {
-                        label: "พอคำนวณค่าใช้จ่ายตามการผลิตแล้ว",
+                        label: "พอคำนวณค่าใช้จ่ายตามการผลิตแล้ว".into(),
                         tone: ReadinessTone::Ready,
                     }
                 }
                 CostSectionState::EnteredItems => SectionReadiness {
-                    label: "มีรายการที่ยังกรอกไม่ครบ",
+                    label: "มีรายการที่ยังกรอกไม่ครบ".into(),
                     tone: ReadinessTone::Missing,
                 },
                 CostSectionState::Unknown => SectionReadiness {
-                    label: "ยังขาดค่าใช้จ่ายตามการผลิต หรือยืนยันว่าไม่มี",
+                    label: "ยังขาดค่าใช้จ่ายตามการผลิต หรือยืนยันว่าไม่มี".into(),
                     tone: ReadinessTone::Missing,
                 },
             },
             "fixed-costs" => match plan.effective_fixed_cost_state() {
                 CostSectionState::ConfirmedNone => SectionReadiness {
-                    label: "ยืนยันแล้วว่าไม่มีค่าใช้จ่ายส่วนนี้",
+                    label: "ยืนยันแล้วว่าไม่มีค่าใช้จ่ายส่วนนี้".into(),
                     tone: ReadinessTone::Ready,
                 },
                 CostSectionState::EnteredItems if analysis.cost.fixed_cost.is_some() => {
                     SectionReadiness {
-                        label: "พอคำนวณค่าใช้จ่ายประจำแล้ว",
+                        label: "พอคำนวณค่าใช้จ่ายประจำแล้ว".into(),
                         tone: ReadinessTone::Ready,
                     }
                 }
                 CostSectionState::EnteredItems => SectionReadiness {
-                    label: "มีรายการที่ยังกรอกไม่ครบ",
+                    label: "มีรายการที่ยังกรอกไม่ครบ".into(),
                     tone: ReadinessTone::Missing,
                 },
                 CostSectionState::Unknown => SectionReadiness {
-                    label: "ยังขาดค่าใช้จ่ายประจำ หรือยืนยันว่าไม่มี",
+                    label: "ยังขาดค่าใช้จ่ายประจำ หรือยืนยันว่าไม่มี".into(),
                     tone: ReadinessTone::Missing,
                 },
             },
+            "tax-deductions" if plan.tax_deductions.is_empty() => SectionReadiness {
+                label: "ยังไม่ได้กรอก · ภาษีคิดโดยยังไม่หักลดหย่อน".into(),
+                tone: ReadinessTone::Optional,
+            },
+            "tax-deductions" => SectionReadiness {
+                label: deductions_entered_label(&plan).into(),
+                tone: ReadinessTone::Ready,
+            },
             "targets" if self.targets.yield_per_rai.trim().is_empty() => SectionReadiness {
-                label: "เพิ่มได้เมื่ออยากตั้งเป้าหมายเอง",
+                label: "เพิ่มได้เมื่ออยากตั้งเป้าหมายเอง".into(),
                 tone: ReadinessTone::Optional,
             },
             "targets" => SectionReadiness {
-                label: "มีเป้าหมายสำหรับเปรียบเทียบแล้ว",
+                label: "มีเป้าหมายสำหรับเปรียบเทียบแล้ว".into(),
                 tone: ReadinessTone::Ready,
             },
             "health"
@@ -886,16 +958,16 @@ impl PlanForm {
                     && self.health_scores.iter().all(|score| !score.is_empty()) =>
             {
                 SectionReadiness {
-                    label: "พร้อมดูแบบประเมินสวน",
+                    label: "พร้อมดูแบบประเมินสวน".into(),
                     tone: ReadinessTone::Ready,
                 }
             }
             "health" => SectionReadiness {
-                label: "เพิ่มได้เพื่อทบทวนความพร้อมของสวน",
+                label: "เพิ่มได้เพื่อทบทวนความพร้อมของสวน".into(),
                 tone: ReadinessTone::Optional,
             },
             _ => SectionReadiness {
-                label: "ยังไม่มีสถานะ",
+                label: "ยังไม่มีสถานะ".into(),
                 tone: ReadinessTone::Missing,
             },
         }
@@ -934,6 +1006,7 @@ impl PlanForm {
                 self.fixed_costs = submitted.fixed_costs.clone();
                 self.fixed_cost_state = submitted.fixed_cost_state;
             }
+            "tax-deductions" => self.tax_deductions = submitted.tax_deductions.clone(),
             "targets" => self.targets = submitted.targets.clone(),
             "health" => self.health_scores = submitted.health_scores.clone(),
             _ => return false,
@@ -1075,10 +1148,20 @@ fn field_belongs_to_section(field: &str, section: &str) -> bool {
                 || field.starts_with("variable_costs[")
                 || field.starts_with("fixed_costs[")
         }
+        "tax-deductions" => field.starts_with("tax_deductions["),
         "targets" => field.starts_with("targets."),
         "health" => field.starts_with("health_answers"),
         _ => false,
     }
+}
+
+/// The hub row and the tax screen say the same thing about entered lines.
+pub fn deductions_entered_label(plan: &Plan) -> String {
+    format!(
+        "กรอกแล้ว {} รายการ · รวม {} บาท",
+        plan.tax_deductions.len(),
+        crate::plan_ui::money(plan.tax_deduction_total())
+    )
 }
 
 fn optional_text(value: &str) -> Option<String> {
@@ -1223,7 +1306,7 @@ mod tests {
         assert_eq!(
             sample.section_readiness("production"),
             SectionReadiness {
-                label: "พอคำนวณรายได้แล้ว",
+                label: "พอคำนวณรายได้แล้ว".into(),
                 tone: ReadinessTone::Ready,
             }
         );
@@ -1243,7 +1326,7 @@ mod tests {
         assert_eq!(
             partial.section_readiness("production"),
             SectionReadiness {
-                label: "ยังขาดราคาขายเฉลี่ย",
+                label: "ยังขาดราคาขายเฉลี่ย".into(),
                 tone: ReadinessTone::Missing,
             }
         );

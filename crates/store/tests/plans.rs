@@ -3,7 +3,8 @@ use std::path::Path;
 
 use calc::{
     ActualOutcome, CostSectionState, ForecastMode, Grade, PriceSource, QuickEstimate,
-    UnclassifiedExpense, VariableCostKind, VariableCostLine, YieldSource, workbook_sample,
+    TaxDeductionLine, UnclassifiedExpense, VariableCostKind, VariableCostLine, YieldSource,
+    workbook_sample,
 };
 use rust_decimal::Decimal;
 use sqlx::migrate::Migrator;
@@ -930,5 +931,158 @@ async fn a_legacy_closed_season_has_no_invented_actual_outcome(
         .expect("legacy season remains readable");
     assert!(loaded.closed);
     assert!(loaded.actual_outcome.is_none());
+    Ok(())
+}
+
+const DEDUCTIONS_MIGRATION: i64 = 202609160001;
+
+/// Deductions are the owner's own lines per season: they round-trip in
+/// order, an empty list stays empty (nothing is pre-filled), the constraints
+/// refuse a blank name and a negative amount, a duplicate season carries the
+/// lines, and a closed season keeps them.
+#[sqlx::test(migrations = "../../migrations")]
+async fn tax_deduction_lines_round_trip_duplicate_and_freeze(
+    pool: PgPool,
+) -> Result<(), StoreError> {
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let mut plan = workbook_sample();
+    plan.tax_deductions = Vec::new();
+    let created = plans::create(&pool, owner.id, 2569, "", &plan).await?;
+    let loaded = plans::load(&pool, owner.id, created.id).await?.unwrap();
+    assert!(
+        loaded.plan.tax_deductions.is_empty(),
+        "nothing is pre-filled, not even the personal allowance"
+    );
+    assert_eq!(calc::analyze(&loaded.plan).tax.deduction_count, 0);
+
+    let mut entered = loaded.plan.clone();
+    entered.tax_deductions = vec![
+        TaxDeductionLine {
+            name: "ค่าลดหย่อนส่วนตัว".into(),
+            amount: Decimal::from(60_000),
+        },
+        TaxDeductionLine {
+            name: "ประกันสังคม".into(),
+            amount: Decimal::from(9_000),
+        },
+        TaxDeductionLine {
+            name: "เงินบริจาค".into(),
+            amount: Decimal::ZERO,
+        },
+    ];
+    let saved = plans::save(&pool, owner.id, created.id, &entered).await?;
+    assert_eq!(
+        saved.plan.tax_deductions, entered.tax_deductions,
+        "order and zero kept"
+    );
+    assert_eq!(
+        calc::analyze(&saved.plan).tax.deduction_total,
+        Decimal::from(69_000)
+    );
+
+    let mut fewer = saved.plan.clone();
+    fewer.tax_deductions.remove(1);
+    let saved = plans::save(&pool, owner.id, created.id, &fewer).await?;
+    assert_eq!(
+        saved.plan.tax_deductions.len(),
+        2,
+        "a removed line is gone, not orphaned"
+    );
+
+    let duplicate = plans::duplicate(&pool, owner.id, created.id, 2570, "ปีหน้า", "").await?;
+    assert_eq!(duplicate.plan.tax_deductions, fewer.tax_deductions);
+
+    let closed =
+        plans::finalize_with_actual(&pool, owner.id, created.id, &actual_outcome()).await?;
+    assert_eq!(closed.plan.tax_deductions, fewer.tax_deductions);
+    assert!(matches!(
+        plans::save(&pool, owner.id, created.id, &entered).await,
+        Err(StoreError::Closed)
+    ));
+    Ok(())
+}
+
+#[sqlx::test(migrations = "../../migrations")]
+async fn a_blank_name_or_negative_deduction_is_refused_by_the_table(
+    pool: PgPool,
+) -> Result<(), StoreError> {
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let created = plans::create(&pool, owner.id, 2569, "", &workbook_sample()).await?;
+    for (name, amount) in [("   ", "1000"), ("ประกันชีวิต", "-1")] {
+        let result = sqlx::query(
+            "INSERT INTO tax_deduction_lines (plan_id, owner_id, position, name, amount)
+             VALUES ($1, $2, 99, $3, $4::numeric)",
+        )
+        .bind(created.id)
+        .bind(owner.id)
+        .bind(name)
+        .bind(amount)
+        .execute(&pool)
+        .await;
+        assert!(result.is_err(), "{name:?} {amount} must be refused");
+    }
+    Ok(())
+}
+
+/// Seasons written before the deductions migration load with no lines and
+/// deduct nothing; the rollback removes the table and nothing else.
+#[sqlx::test(migrations = false)]
+async fn existing_seasons_survive_the_deductions_migration_and_its_rollback(
+    pool: PgPool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut migrator = Migrator::new(Path::new("../../migrations")).await?;
+    let every_migration = migrator.migrations.to_vec();
+    migrator.migrations = Cow::Owned(
+        every_migration
+            .iter()
+            .filter(|migration| migration.version < DEDUCTIONS_MIGRATION)
+            .cloned()
+            .collect(),
+    );
+    migrator.run(&pool).await?;
+
+    let owner = users::create(&pool, "owner@example.test").await?;
+    let plan_id: i64 = sqlx::query_scalar(
+        "INSERT INTO plans (owner_id, name, season_year) VALUES ($1, 'ปีเก่า', 2568)
+         RETURNING id",
+    )
+    .bind(owner.id)
+    .fetch_one(&pool)
+    .await?;
+    for statement in [
+        "INSERT INTO market_plans (plan_id, owner_id) VALUES ($1, $2)",
+        "INSERT INTO yield_estimates (plan_id, owner_id) VALUES ($1, $2)",
+        "INSERT INTO kpi_targets (plan_id, owner_id) VALUES ($1, $2)",
+    ] {
+        sqlx::query(statement)
+            .bind(plan_id)
+            .bind(owner.id)
+            .execute(&pool)
+            .await?;
+    }
+
+    migrator.migrations = Cow::Owned(every_migration);
+    migrator.run(&pool).await?;
+
+    let loaded = plans::load(&pool, owner.id, plan_id)
+        .await?
+        .expect("the legacy plan loads");
+    assert!(loaded.plan.tax_deductions.is_empty());
+    assert_eq!(calc::analyze(&loaded.plan).tax.deduction_count, 0);
+
+    let rollback =
+        std::fs::read_to_string("../../migrations/rollback/202609160001_tax_deduction_lines.sql")?;
+    sqlx::raw_sql(&rollback).execute(&pool).await?;
+    let remaining: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'tax_deduction_lines'",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(remaining, 0, "rollback removes the table");
+    let still_there: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM plans WHERE id = $1")
+        .bind(plan_id)
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(still_there, 1);
     Ok(())
 }

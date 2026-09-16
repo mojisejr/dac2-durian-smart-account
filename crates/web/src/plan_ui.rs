@@ -7,13 +7,15 @@ use leptos_router::{
     components::A,
     hooks::{use_params_map, use_query_map},
 };
+use std::str::FromStr;
 
 use crate::{
     analysis_ui::{PlanAnalysisView, PlanDashboardView},
     auth::{Logout, current_user_email},
     plan_form::{
         DecisionReadiness, DecisionState, ExpenseClassification, FixedCostForm, GradeEntry,
-        GradeForm, PlanForm, ReadinessTone, UnclassifiedExpenseForm, VariableCostForm,
+        GradeForm, PlanForm, ReadinessTone, TaxDeductionForm, UnclassifiedExpenseForm,
+        VariableCostForm,
     },
     plans::{
         CreateSeason, FinalizeActual, PlanRecord, SaveActualDraft, SavePlan, SaveQuickStep,
@@ -22,7 +24,7 @@ use crate::{
     },
 };
 
-const MAIN_SECTIONS: [(&str, &str, &str); 6] = [
+const MAIN_SECTIONS: [(&str, &str, &str); 7] = [
     ("market", "ขายให้ใครและขายทางไหน", "ข้อมูลตลาด"),
     (
         "production",
@@ -36,15 +38,25 @@ const MAIN_SECTIONS: [(&str, &str, &str); 6] = [
     ),
     ("variable-costs", "ค่าใช้จ่ายที่เพิ่มเมื่อทำหรือขายมากขึ้น", "ต้นทุนผันแปร"),
     ("fixed-costs", "แม้ปีนี้ไม่มีทุเรียนขาย ยังต้องจ่ายอะไรอยู่", "ต้นทุนคงที่"),
+    (
+        "tax-deductions",
+        "ปีนี้มีอะไรลดหย่อนภาษีได้บ้าง",
+        "ค่าลดหย่อน · ภาษีเงินได้บุคคลธรรมดา",
+    ),
     ("health", "ทบทวนความพร้อมของสวน", "สุขภาพสวน"),
 ];
 
-const EDITABLE_SECTIONS: [(&str, &str, &str); 7] = [
+const EDITABLE_SECTIONS: [(&str, &str, &str); 8] = [
     ("market", "ตลาด", "ผู้ซื้อ ยอดที่คุยไว้ และช่องทางขาย"),
     ("production", "ผลผลิตและราคา", "กิโลที่คาดว่าจะขายได้ และราคาขาย"),
     ("expenses", "ค่าใช้จ่ายที่จำได้", "จดไว้ก่อน แล้วค่อยบอกว่าเป็นแบบไหน"),
     ("variable-costs", "ต้นทุนผันแปร", "ค่าใช้จ่ายที่เพิ่มเมื่อทำหรือขายมากขึ้น"),
     ("fixed-costs", "ต้นทุนคงที่", "ค่าใช้จ่ายที่ยังมีแม้ไม่มีทุเรียนขาย"),
+    (
+        "tax-deductions",
+        "ลดหย่อนภาษี",
+        "รายการที่หักออกก่อนคิดภาษี กรอกทีละรายการ",
+    ),
     ("health", "สุขภาพสวน", "12 คำถาม 6 มิติ"),
     (
         "targets",
@@ -1526,6 +1538,7 @@ fn SectionFields(
         "expenses" => view! { <ExpenseFields form closed/> }.into_any(),
         "variable-costs" => view! { <VariableCostFields form closed/> }.into_any(),
         "fixed-costs" => view! { <FixedCostFields form closed plan_id assets/> }.into_any(),
+        "tax-deductions" => view! { <TaxDeductionFields form closed plan_id/> }.into_any(),
         "targets" => view! { <TargetFields form closed/> }.into_any(),
         "health" => view! { <HealthFields form closed/> }.into_any(),
         _ => view! { <p>"ไม่พบข้อมูลส่วนนี้"</p> }.into_any(),
@@ -1767,6 +1780,60 @@ fn VariableCostFields(form: RwSignal<PlanForm>, closed: bool) -> impl IntoView {
     </section> }
 }
 
+/// Names a deduction is usually called, offered as suggestions and never as
+/// rules. The owner edits this list in DESIGN.md; the application checks no
+/// ceiling and knows no category behind a name.
+pub const DEDUCTION_SUGGESTIONS: [&str; 12] = [
+    "ค่าลดหย่อนส่วนตัว",
+    "คู่สมรส",
+    "บุตร",
+    "บิดามารดา",
+    "ประกันสังคม",
+    "ประกันชีวิต",
+    "ประกันสุขภาพ",
+    "กองทุน RMF",
+    "กองทุน SSF",
+    "กองทุนสำรองเลี้ยงชีพ",
+    "ดอกเบี้ยเงินกู้ที่อยู่อาศัย",
+    "เงินบริจาค",
+];
+
+#[component]
+fn TaxDeductionFields(form: RwSignal<PlanForm>, closed: bool, plan_id: i64) -> impl IntoView {
+    let rows = move || form.get().tax_deductions.len();
+    let total = move || {
+        form.with(|f| {
+            f.tax_deductions
+                .iter()
+                .filter_map(|line| {
+                    rust_decimal::Decimal::from_str(&line.amount.trim().replace(',', "")).ok()
+                })
+                .sum::<rust_decimal::Decimal>()
+        })
+    };
+    view! { <section class="card field-stack">
+        <div class="section-title"><div><h2>"ปีนี้มีอะไรลดหย่อนภาษีได้บ้าง"</h2><small class="formal-term">"ค่าลดหย่อน · ภาษีเงินได้บุคคลธรรมดา"</small>
+            <p>"กรอกทีละรายการ ชื่อกับจำนวนเงิน ระบบไม่ใส่ให้เอง แม้แต่ค่าลดหย่อนส่วนตัว เพราะจำนวนขึ้นกับคุณและปีที่ยื่น"</p>
+            <p class="field-effect">"กรอกแล้วได้อะไร ภาษีโดยประมาณจะหักรายการเหล่านี้ออกก่อนคิด"</p></div></div>
+        <datalist id="deduction-names">{DEDUCTION_SUGGESTIONS.iter().map(|name| view! { <option value=*name/> }).collect_view()}</datalist>
+        {move || (0..rows()).map(|index| view! {
+            <div class="repeat-row">
+                <PlanField label="ลดหย่อนจากอะไร" hint="เลือกจากรายการหรือพิมพ์เอง" list="deduction-names" value=Signal::derive(move || form.get().tax_deductions.get(index).map(|l| l.name.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.tax_deductions.get_mut(index) { l.name = v })) closed/>
+                <PlanField label="จำนวนเงินที่ลดหย่อนได้ปีนี้" unit="บาท" numeric=true hint="ระบบไม่ตรวจเพดานให้ เพราะเพดานเปลี่ยนตามปีและสถานะของคุณ" example="กรอกตามที่คุณมีสิทธิ์จริง เช่น ค่าลดหย่อนส่วนตัว 60,000" value=Signal::derive(move || form.get().tax_deductions.get(index).map(|l| l.amount.clone()).unwrap_or_default()) on_value=Callback::new(move |v| form.update(|f| if let Some(l) = f.tax_deductions.get_mut(index) { l.amount = v })) closed/>
+                <Show when=move || !closed>
+                    <button class="text-button bad-text" type="button" on:click=move |_| form.update(|f| { if index < f.tax_deductions.len() { f.tax_deductions.remove(index); } })>"ลบรายการนี้"</button>
+                </Show>
+            </div>
+        }).collect_view()}
+        <Show when=move || closed && form.get().tax_deductions.is_empty()><p class="readonly-value">"ไม่ได้กรอกรายการลดหย่อนไว้ ภาษีของฤดูนี้จึงคิดโดยยังไม่หักลดหย่อน"</p></Show>
+        <Show when=move || !closed><button class="secondary" type="button" on:click=move |_| form.update(|f| f.tax_deductions.push(TaxDeductionForm::default()))>"+ เพิ่มรายการลดหย่อน"</button></Show>
+        <Show when=move || !form.get().tax_deductions.is_empty()>
+            <div class="cost-total"><span>"รวมลดหย่อน"</span><strong class="cost-total-amount">{move || format!("{} บาท", money(total()))}</strong></div>
+        </Show>
+        <A attr:class="button secondary" href=format!("/plans/{plan_id}/analysis")>"ดูภาษีโดยประมาณ"</A>
+    </section> }
+}
+
 #[component]
 fn FixedCostFields(
     form: RwSignal<PlanForm>,
@@ -1946,6 +2013,10 @@ pub fn PlanField(
     #[prop(optional)] hint: Option<&'static str>,
     #[prop(optional)] example: Option<&'static str>,
     #[prop(optional)] outcome: Option<&'static str>,
+    /// The id of a `<datalist>` whose options are offered as the owner types;
+    /// choosing one fills this field only.
+    #[prop(optional)]
+    list: Option<&'static str>,
     #[prop(default = false)] numeric: bool,
 ) -> impl IntoView {
     let help_id = field_id.map(|id| format!("{id}-help"));
@@ -1969,7 +2040,7 @@ pub fn PlanField(
     view! { <label class="guided-field"><span>{label}</span>{formal_term.map(|term| view! { <small class="formal-term">{term}</small> })}{if closed {
         view! { <p class="readonly-value">{move || { let value = value.get(); if value.is_empty() { "—".into() } else if let Some(unit) = unit { format!("{value} {unit}") } else { value } }}</p> }.into_any()
     } else {
-        view! { <><span class="input-with-unit"><input id=field_id type="text" inputmode=if numeric { "decimal" } else { "text" } aria-describedby=described_by aria-invalid=move || (numeric && numeric_input_invalid(&value.get())).then_some("true") prop:value=move || value.get() on:input=move |event| on_value.run(event_target_value(&event)) on:blur=move |event| { if numeric { on_value.run(format_numeric_input(&event_target_value(&event))); } }/>{unit.map(|unit| view! { <span class="unit">{unit}</span> })}</span><Show when=move || has_guidance><span id=help_id.clone() class="guided-help">{hint.map(|text| view! { <small class="field-hint">{text}</small> })}{example.map(|text| view! { <small class="field-example">{text}</small> })}{outcome.map(|text| view! { <small class="field-effect">{text}</small> })}</span></Show><Show when=move || numeric && numeric_input_invalid(&value.get())><small id=error_id.clone() class="field-error">"กรุณากรอกเป็นตัวเลข"</small></Show></> }.into_any()
+        view! { <><span class="input-with-unit"><input id=field_id type="text" list=list inputmode=if numeric { "decimal" } else { "text" } aria-describedby=described_by aria-invalid=move || (numeric && numeric_input_invalid(&value.get())).then_some("true") prop:value=move || value.get() on:input=move |event| on_value.run(event_target_value(&event)) on:blur=move |event| { if numeric { on_value.run(format_numeric_input(&event_target_value(&event))); } }/>{unit.map(|unit| view! { <span class="unit">{unit}</span> })}</span><Show when=move || has_guidance><span id=help_id.clone() class="guided-help">{hint.map(|text| view! { <small class="field-hint">{text}</small> })}{example.map(|text| view! { <small class="field-example">{text}</small> })}{outcome.map(|text| view! { <small class="field-effect">{text}</small> })}</span></Show><Show when=move || numeric && numeric_input_invalid(&value.get())><small id=error_id.clone() class="field-error">"กรุณากรอกเป็นตัวเลข"</small></Show></> }.into_any()
     }}</label> }
 }
 

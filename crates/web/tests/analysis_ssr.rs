@@ -569,3 +569,66 @@ fn excerpt(html: &str, phrase: &str) -> String {
         .chars()
         .collect()
 }
+
+// The tax screen reads the owner's deduction lines. With none entered it
+// deducts nothing and says so in the same breath as the figure, with the way
+// to the section; with lines it says how many and how much; when the lines
+// exceed income after expense the zero is explained, never graded.
+#[test]
+fn the_tax_screen_states_the_deduction_state_beside_the_figures() {
+    let mut none = workbook_sample();
+    none.tax_deductions.clear();
+    let html = analysis(PlanForm::from_plan(&none));
+    assert!(
+        html.contains("ยังไม่ได้หักลดหย่อน ตัวเลขนี้จึงสูงกว่าภาษีจริง"),
+        "{html}"
+    );
+    assert!(html.contains("href=\"/plans/42/tax-deductions\""), "{html}");
+    assert!(html.contains(">กรอกลดหย่อน<"), "{html}");
+    assert!(html.contains("หักลดหย่อนอีก"), "{html}");
+    assert!(!html.contains("หักส่วนตัวอีก"), "{html}");
+    // 1,645,875 − 811,275 with nothing deducted.
+    assert!(html.contains(&money(Decimal::from(834_600))), "{html}");
+    assert!(!html.contains("ลดหย่อนมากกว่าเงินได้"), "{html}");
+
+    let with_lines = analysis(sample_form());
+    assert!(
+        with_lines.contains("หักลดหย่อนแล้ว 1 รายการ รวม 60,000.00 บาท"),
+        "{with_lines}"
+    );
+    assert!(with_lines.contains(">ดูหรือแก้<"), "{with_lines}");
+    assert!(
+        with_lines.contains(&money(Decimal::from(774_600))),
+        "{with_lines}"
+    );
+
+    let mut exceeding = workbook_sample();
+    exceeding.tax_deductions = vec![calc::TaxDeductionLine {
+        name: "รวมทุกอย่าง".into(),
+        amount: Decimal::from(900_000),
+    }];
+    let html = analysis(PlanForm::from_plan(&exceeding));
+    assert!(
+        html.contains("ลดหย่อนมากกว่าเงินได้หลังหักค่าใช้จ่าย จึงไม่มีภาษี"),
+        "{html}"
+    );
+    assert!(
+        html.contains("หักลดหย่อนแล้ว 1 รายการ รวม 900,000.00 บาท"),
+        "{html}"
+    );
+}
+
+#[test]
+fn the_hub_row_for_deductions_names_its_state_and_never_blocks_readiness() {
+    let mut none = workbook_sample();
+    none.tax_deductions.clear();
+    let html = render_hub(PlanForm::from_plan(&none));
+    assert!(html.contains("ปีนี้มีอะไรลดหย่อนภาษีได้บ้าง"), "{html}");
+    assert!(html.contains("ยังไม่ได้กรอก · ภาษีคิดโดยยังไม่หักลดหย่อน"), "{html}");
+
+    let html = render_hub(sample_form());
+    assert!(
+        html.contains("กรอกแล้ว 1 รายการ · รวม 60,000.00 บาท"),
+        "{html}"
+    );
+}
