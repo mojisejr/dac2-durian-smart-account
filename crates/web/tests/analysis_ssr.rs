@@ -99,6 +99,25 @@ fn sample_analysis() -> Analysis {
     calc::analyze(&workbook_sample())
 }
 
+/// An amount of money as the page shows it since revision 0.12: whole baht.
+fn whole(value: Decimal) -> String {
+    let plain = format!(
+        "{:.0}",
+        value.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
+    );
+    let (sign, digits) = plain
+        .strip_prefix('-')
+        .map_or(("", plain.as_str()), |digits| ("-", digits));
+    let mut grouped = String::new();
+    for (index, character) in digits.chars().rev().enumerate() {
+        if index > 0 && index % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(character);
+    }
+    format!("{sign}{}", grouped.chars().rev().collect::<String>())
+}
+
 fn money(value: Decimal) -> String {
     let plain = format!("{value:.2}");
     let (integer, fraction) = plain.split_once('.').unwrap_or((&plain, "00"));
@@ -146,7 +165,7 @@ fn the_dashboard_renders_every_business_figure_the_workbook_caches() {
             "{label} is missing from the dashboard"
         );
         assert!(
-            html.contains(&money(value)),
+            html.contains(&money(value)) || html.contains(&format!("{} บาท<", whole(value))),
             "{label} does not show {}",
             money(value)
         );
@@ -198,7 +217,7 @@ fn an_empty_plan_names_the_missing_question_instead_of_showing_a_figure() {
     assert!(!html.contains("ยังไม่ครบ"));
     assert!(!html.contains("ยังคำนวณไม่ได้"));
     // No figure row shows a number for an absent input.
-    assert!(!html.contains("0.00 บาท"));
+    assert!(!html.contains("0 บาท"));
 }
 
 /// The six decisions, in the order the list renders them, as one string per
@@ -248,7 +267,20 @@ fn readiness_is_named_by_decision_and_agrees_across_hub_dashboard_and_analysis()
     let rows = decision_rows(&dashboard);
     assert_eq!(rows.len(), 6, "{rows:?}");
     assert_eq!(rows, decision_rows(&hub));
-    assert_eq!(rows, decision_rows(&analysis));
+    // The analysis page says the same thing in one line that links to the
+    // hub: how many can be answered, and what is still missing, once.
+    assert!(!analysis.contains("decision-rows"), "{analysis}");
+    assert!(analysis.contains("ตอบได้ 1 จาก 6 คำถาม"), "{analysis}");
+    assert!(
+        analysis.contains("ยังขาด: ค่าใช้จ่ายที่เพิ่มตามการผลิต หรือยืนยันว่าไม่มี<"),
+        "{analysis}"
+    );
+    assert_eq!(analysis.matches("ยังขาด:").count(), 1, "named once");
+    let summary = analysis.find("decision-summary").expect("one-line summary");
+    assert!(
+        analysis[..summary].rfind("<a href=\"/plans/42\"").is_some(),
+        "links to the hub: {analysis}"
+    );
 
     assert!(rows[0].contains("ปีนี้จะเหลือกำไรเท่าไร"));
     assert!(rows[0].contains("กำไรสุทธิ"));
@@ -266,9 +298,12 @@ fn readiness_is_named_by_decision_and_agrees_across_hub_dashboard_and_analysis()
         assert!(page.contains("href=\"/plans/42/variable-costs\""));
     }
 
+    // With a complete first estimate the dashboard drops the list for the
+    // one line too; the hub is the only page that keeps all six rows.
     let ready = dashboard_for(&workbook_sample());
-    let rows = decision_rows(&ready);
-    assert!(rows.iter().all(|row| row.contains("ดูได้แล้ว")), "{rows:?}");
+    assert!(!ready.contains("decision-rows"), "{ready}");
+    assert!(ready.contains("ตอบได้ 6 จาก 6 คำถาม"), "{ready}");
+    assert!(!ready.contains("ยังขาด:"), "{ready}");
 }
 
 /// A formal term may appear only as the secondary label under the owner's
@@ -461,12 +496,12 @@ fn both_tax_methods_render_after_a_prominent_non_recommendation_disclaimer() {
 
     let actual = tax.actual_expense.estimated_tax.expect("actual method");
     let flat = tax.flat_sixty_percent.estimated_tax.expect("flat method");
-    assert!(html.contains(&money(actual)));
-    assert!(html.contains(&money(flat)));
+    assert!(html.contains(&whole(actual)));
+    assert!(html.contains(&whole(flat)));
     assert!(!html.contains("เสียน้อยกว่า"));
     assert!(!html.contains("tax-method cheaper"));
     let disclaimer = html.find("ยังไม่ได้ยืนยันแหล่งกฎหมาย").expect("disclaimer");
-    let first_figure = html.find(&money(actual)).expect("first tax figure");
+    let first_figure = html.find(&whole(actual)).expect("first tax figure");
     assert!(
         disclaimer < first_figure,
         "the boundary appears before figures"
@@ -483,9 +518,9 @@ fn all_twenty_five_scenario_cells_are_reachable_in_the_full_table() {
         for cell in row {
             let cell = cell.expect("the workbook sample fills every cell");
             assert!(
-                html.contains(&money(cell)),
+                html.contains(&whole(cell)),
                 "the matrix is missing {}",
-                money(cell)
+                whole(cell)
             );
         }
     }
@@ -500,7 +535,7 @@ fn the_slider_starting_position_is_the_unchanged_centre_of_the_matrix() {
     assert_eq!(scenario.yield_changes[2], Decimal::ZERO);
     assert_eq!(scenario.price_changes[2], Decimal::ZERO);
     assert!(
-        html.contains(&money(centre)),
+        html.contains(&whole(centre)),
         "the slider does not agree with the matrix it reads from"
     );
 }
@@ -588,17 +623,17 @@ fn the_tax_screen_states_the_deduction_state_beside_the_figures() {
     assert!(html.contains("หักลดหย่อนอีก"), "{html}");
     assert!(!html.contains("หักส่วนตัวอีก"), "{html}");
     // 1,645,875 − 811,275 with nothing deducted.
-    assert!(html.contains(&money(Decimal::from(834_600))), "{html}");
+    assert!(html.contains(&whole(Decimal::from(834_600))), "{html}");
     assert!(!html.contains("ลดหย่อนมากกว่าเงินได้"), "{html}");
 
     let with_lines = analysis(sample_form());
     assert!(
-        with_lines.contains("หักลดหย่อนแล้ว 1 รายการ รวม 60,000.00 บาท"),
+        with_lines.contains("หักลดหย่อนแล้ว 1 รายการ รวม 60,000 บาท"),
         "{with_lines}"
     );
     assert!(with_lines.contains(">ดูหรือแก้<"), "{with_lines}");
     assert!(
-        with_lines.contains(&money(Decimal::from(774_600))),
+        with_lines.contains(&whole(Decimal::from(774_600))),
         "{with_lines}"
     );
 
@@ -613,7 +648,7 @@ fn the_tax_screen_states_the_deduction_state_beside_the_figures() {
         "{html}"
     );
     assert!(
-        html.contains("หักลดหย่อนแล้ว 1 รายการ รวม 900,000.00 บาท"),
+        html.contains("หักลดหย่อนแล้ว 1 รายการ รวม 900,000 บาท"),
         "{html}"
     );
 }
@@ -627,8 +662,5 @@ fn the_hub_row_for_deductions_names_its_state_and_never_blocks_readiness() {
     assert!(html.contains("ยังไม่ได้กรอก · ภาษีคิดโดยยังไม่หักลดหย่อน"), "{html}");
 
     let html = render_hub(sample_form());
-    assert!(
-        html.contains("กรอกแล้ว 1 รายการ · รวม 60,000.00 บาท"),
-        "{html}"
-    );
+    assert!(html.contains("กรอกแล้ว 1 รายการ · รวม 60,000 บาท"), "{html}");
 }

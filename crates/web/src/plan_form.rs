@@ -1160,7 +1160,7 @@ pub fn deductions_entered_label(plan: &Plan) -> String {
     format!(
         "กรอกแล้ว {} รายการ · รวม {} บาท",
         plan.tax_deductions.len(),
-        crate::plan_ui::money(plan.tax_deduction_total())
+        crate::plan_ui::baht_amount(plan.tax_deduction_total())
     )
 }
 

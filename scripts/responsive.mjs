@@ -817,13 +817,13 @@ async function signIn(browser) {
   await page.getByText('ระบบจะไม่เดาหรือลบรายการเดิมให้', { exact: false }).waitFor({ state: 'visible' });
   await submitInPlace(page, page.locator('button:has-text("รวมในฤดูนี้")'), 'asset inclusion');
   await page.locator('.asset-row .status', { hasText: 'รวมในฤดูนี้' }).waitFor({ state: 'visible', timeout: 10000 });
-  await page.locator('.asset-totals', { hasText: '20,000.00 บาท/ปี' }).waitFor({ state: 'visible', timeout: 10000 });
+  await page.locator('.asset-totals', { hasText: '20,000 บาท/ปี' }).waitFor({ state: 'visible', timeout: 10000 });
   await page.locator('button:has-text("เอาออกจากฤดูนี้")').waitFor({ state: 'visible' });
   await assertNoReload(page, 'asset inclusion');
 
   await page.fill('input[name="starting_capital"]', '50000');
   await submitInPlace(page, page.locator('button:has-text("บันทึกเงินก้อนตั้งต้น")'), 'starting capital save');
-  await page.locator('.asset-totals', { hasText: '50,000.00' }).waitFor({ state: 'visible', timeout: 10000 });
+  await page.locator('.asset-totals', { hasText: '50,000 บาท' }).waitFor({ state: 'visible', timeout: 10000 });
   await assertNoReload(page, 'starting capital save');
   if (await page.locator('input[name="starting_capital"]').inputValue() !== '50000') {
     throw new Error('starting capital did not persist independently');
@@ -838,7 +838,7 @@ async function signIn(browser) {
   const fixedTotal = page.locator('.fixed-cost-total');
   await manualGroup.getByText('กรอกเอง', { exact: true }).waitFor({ timeout: 10000 });
   await assetGroup.getByText('ของที่ใช้หลายปี · ค่าเสื่อม', { exact: true }).waitFor({ timeout: 5000 });
-  await assetGroup.locator('.asset-cost-row', { hasText: 'ระบบน้ำกลางสวน' }).getByText('20,000.00 บาท/ปี').waitFor({ timeout: 5000 });
+  await assetGroup.locator('.asset-cost-row', { hasText: 'ระบบน้ำกลางสวน' }).getByText('20,000 บาท/ปี').waitFor({ timeout: 5000 });
   await assetGroup.locator('a[href$="/assets"]').first().waitFor({ state: 'visible' });
   // The unknown / confirmed-none question belongs to the manual group only.
   // The manual group was confirmed empty earlier, so asset-only fixed cost is
@@ -848,13 +848,13 @@ async function signIn(browser) {
   if (await assetGroup.locator('input[name="fixed-cost-state"]').count()) {
     throw new Error('the section-state question leaked into the asset group');
   }
-  await fixedTotal.locator('.cost-total-amount', { hasText: '20,000.00 บาท/ปี' }).waitFor({ timeout: 5000 });
+  await fixedTotal.locator('.cost-total-amount', { hasText: '20,000 บาท/ปี' }).waitFor({ timeout: 5000 });
   await page.locator('label:has(input[name="fixed-cost-state"][value="unknown"])').click();
   await fixedTotal.locator('.cost-total-amount', { hasText: 'ยังไม่รู้' }).waitFor({ timeout: 5000 });
   await fixedTotal.locator('.cost-total-note', { hasText: 'รวมอยู่แล้ว แต่ยอดรวมยังไม่รู้' }).waitFor({ timeout: 5000 });
   await page.getByText('ยังคำนวณกำไรสุทธิไม่ได้', { exact: true }).waitFor({ timeout: 5000 });
   await page.locator('label:has(input[name="fixed-cost-state"][value="confirmed_none"])').click();
-  await fixedTotal.locator('.cost-total-amount', { hasText: '20,000.00 บาท/ปี' }).waitFor({ timeout: 5000 });
+  await fixedTotal.locator('.cost-total-amount', { hasText: '20,000 บาท/ปี' }).waitFor({ timeout: 5000 });
   await page.getByText('กำไรสุทธิโดยประมาณ', { exact: false }).waitFor({ timeout: 5000 });
   await navigateOrDiagnose(page, `${BASE}/plans/${detailedPlanId}`, null, () => page.goto(`${BASE}/plans/${detailedPlanId}`));
   await page.getByText(/ค่าเสื่อมของที่เลือกไว้รวมแล้ว|ยืนยันแล้วว่ามีเฉพาะค่าเสื่อมของที่เลือกไว้|พอคำนวณค่าใช้จ่ายประจำแล้ว/).first().waitFor({ timeout: 10000 });

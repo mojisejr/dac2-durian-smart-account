@@ -401,15 +401,15 @@ fn HistoryMetricRow(
     } else if let Some(trend) = trend {
         match (trend.delta, trend.percent_change) {
             (Some(delta), Some(percent)) => format!(
-                "{} {} {unit} ({}%)",
+                "{} {} ({}%)",
                 direction_word(delta, "ฤดูก่อน"),
-                money(delta.abs()),
+                amount_with_unit(delta.abs(), unit),
                 money(percent.abs())
             ),
             (Some(delta), None) => format!(
-                "{} {} {unit} · ไม่มี % เพราะฐานเป็น 0",
+                "{} {} · ไม่มี % เพราะฐานเป็น 0",
                 direction_word(delta, "ฤดูก่อน"),
-                money(delta.abs())
+                amount_with_unit(delta.abs(), unit)
             ),
             _ => "เทียบไม่ได้ ไม่มีตัวเลขฤดูก่อน".into(),
         }
@@ -438,9 +438,9 @@ fn delta_text(delta: Option<rust_decimal::Decimal>, unit: &str, comparison: &str
         || "เทียบไม่ได้ ตอนปิดยังไม่มีประมาณการตัวนี้".into(),
         |delta| {
             format!(
-                "{} {} {unit}",
+                "{} {}",
                 direction_word(delta, comparison),
-                money(delta.abs())
+                amount_with_unit(delta.abs(), unit)
             )
         },
     )
@@ -636,18 +636,20 @@ pub fn PlanHub(record: PlanRecord) -> impl IntoView {
             <Show when=move || closed>
                 <div class="closed-banner" role="status">"ฤดูกาลนี้ปิดแล้ว · แก้ไขไม่ได้"</div>
             </Show>
-            <section class="card season-details">
-                <h2>"รายละเอียดฤดูกาล"</h2>
-                {if closed {
-                    view! {
-                        <dl class="season-metadata">
-                            <div><dt>"ปีฤดูกาล"</dt><dd>{season_year_label(year)}</dd></div>
-                            <div><dt>"ชื่อ"</dt><dd>{name.clone()}</dd></div>
-                            <div><dt>"บันทึก"</dt><dd>{if note.is_empty() { "—".into() } else { note.clone() }}</dd></div>
-                        </dl>
-                    }.into_any()
-                } else {
-                    view! {
+            // Year, name and note are edited once a year, so they are one
+            // row under the heading and the form opens only when asked. A
+            // closed season shows the row with nothing to open.
+            {if closed {
+                view! {
+                    <p class="season-row-static">{format!("{} · {}", name.clone(), season_year_label(year))}{(!note.is_empty()).then(|| format!(" · {note}"))}</p>
+                }.into_any()
+            } else {
+                view! {
+                    <details class="season-row">
+                        <summary>
+                            <span>{format!("{} · {}", name.clone(), season_year_label(year))}</span>
+                            <span class="season-edit">"แก้"</span>
+                        </summary>
                         <ActionForm action=update_metadata>
                             <input type="hidden" name="id" value=id/>
                             <label><span>"ปีฤดูกาล (พ.ศ.)"</span><input type="text" name="season_year" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" value=year.map(|year| year.to_string()).unwrap_or_default() required/></label>
@@ -656,9 +658,9 @@ pub fn PlanHub(record: PlanRecord) -> impl IntoView {
                             <button class="secondary" type="submit">"บันทึกรายละเอียด"</button>
                         </ActionForm>
                         <ServerMessage action=update_metadata/>
-                    }.into_any()
-                }}
-            </section>
+                    </details>
+                }.into_any()
+            }}
             {match forecast_mode {
                 calc::ForecastMode::Quick => view! {
                     <QuickModeHub id estimate=quick_estimate.clone() closed/>
@@ -814,9 +816,9 @@ pub fn ActualReviewView(record: PlanRecord) -> impl IntoView {
                 <h2>"ข้อมูลที่กำลังจะล็อก"</h2>
                 <dl class="season-metadata">
                     <div><dt>"ขายได้จริงกี่กิโล"<small class="formal-term">"ผลผลิตที่ขายได้จริง"</small></dt><dd>{format!("{} กก.", money(actual.sellable_yield_kg.expect("complete actual yield")))}</dd></div>
-                    <div><dt>"รับเงินจริงเท่าไร"<small class="formal-term">"รายได้จริง"</small></dt><dd>{format!("{} บาท", money(actual.revenue.expect("complete actual revenue")))}</dd></div>
-                    <div><dt>"จ่ายจริงทั้งหมดเท่าไร"<small class="formal-term">"ต้นทุนรวมจริง"</small></dt><dd>{format!("{} บาท", money(actual.total_cost.expect("complete actual cost")))}</dd></div>
-                    <div><dt>"เหลือหรือขาดจริงเท่าไร"<small class="formal-term">"กำไรหรือขาดทุนจริง"</small></dt><dd>{format!("{} บาท", money(analysis.metrics.profit.expect("complete actual profit")))}</dd></div>
+                    <div><dt>"รับเงินจริงเท่าไร"<small class="formal-term">"รายได้จริง"</small></dt><dd>{format!("{} บาท", baht_amount(actual.revenue.expect("complete actual revenue")))}</dd></div>
+                    <div><dt>"จ่ายจริงทั้งหมดเท่าไร"<small class="formal-term">"ต้นทุนรวมจริง"</small></dt><dd>{format!("{} บาท", baht_amount(actual.total_cost.expect("complete actual cost")))}</dd></div>
+                    <div><dt>"เหลือหรือขาดจริงเท่าไร"<small class="formal-term">"กำไรหรือขาดทุนจริง"</small></dt><dd>{format!("{} บาท", baht_amount(analysis.metrics.profit.expect("complete actual profit")))}</dd></div>
                     <div><dt>"บันทึก"</dt><dd>{if actual.note.is_empty() { "—".into() } else { actual.note.clone() }}</dd></div>
                 </dl>
             </section>
@@ -879,7 +881,7 @@ pub fn ActualComparisonView(record: PlanRecord) -> impl IntoView {
             <section class="card actual-result-card">
                 <p class="eyebrow">"ผลจริง"</p>
                 <p class="result-label">{if actual_metrics.profit.is_some_and(|value| value >= rust_decimal::Decimal::ZERO) { "เหลือจริงหลังหักค่าใช้จ่าย" } else { "ขาดจริงหลังหักค่าใช้จ่าย" }}<small class="formal-term">{if actual_metrics.profit.is_some_and(|value| value >= rust_decimal::Decimal::ZERO) { "กำไรจริง" } else { "ขาดทุนจริง" }}</small></p>
-                <strong class="hero-value">{format!("{} บาท", money(actual_metrics.profit.unwrap_or_default().abs()))}</strong>
+                <strong class="hero-value">{format!("{} บาท", baht_amount(actual_metrics.profit.unwrap_or_default().abs()))}</strong>
                 <dl class="season-metadata">
                     <div><dt>"กิโลที่ขายได้"<small class="formal-term">"ผลผลิตที่ขายได้"</small></dt><dd>{actual_metric(actual_metrics.sellable_yield_kg, "กก.")}</dd></div>
                     <div><dt>"เงินที่ขายได้"<small class="formal-term">"รายได้"</small></dt><dd>{actual_metric(actual_metrics.revenue, "บาท")}</dd></div>
@@ -919,7 +921,7 @@ fn comparison_card(row: calc::MetricComparison) -> impl IntoView {
             } else {
                 "เท่ากับประมาณการ"
             };
-            format!("{direction} {} {unit}", money(delta.abs()))
+            format!("{direction} {}", amount_with_unit(delta.abs(), unit))
         },
     );
     view! {
@@ -949,10 +951,7 @@ fn comparison_metric_label(metric: ComparisonMetric) -> (&'static str, &'static 
 /// A frozen forecast figure, or the fact that none existed when the season
 /// closed. Never a zero.
 fn forecast_metric(value: Option<rust_decimal::Decimal>, unit: &str) -> String {
-    value.map_or_else(
-        || "ไม่มีตอนปิด".into(),
-        |value| format!("{} {unit}", money(value)),
-    )
+    value.map_or_else(|| "ไม่มีตอนปิด".into(), |value| amount_with_unit(value, unit))
 }
 
 /// Which of the six comparisons a close would freeze with a figure, from the
@@ -1022,10 +1021,7 @@ fn ComparisonPreview(record: PlanRecord) -> impl IntoView {
 }
 
 fn actual_metric(value: Option<rust_decimal::Decimal>, unit: &str) -> String {
-    value.map_or_else(
-        || "ยังไม่มีข้อมูล".into(),
-        |value| format!("{} {unit}", money(value)),
-    )
+    value.map_or_else(|| "ยังไม่มีข้อมูล".into(), |value| amount_with_unit(value, unit))
 }
 
 fn forecast_mode_label(mode: calc::ForecastMode) -> &'static str {
@@ -1149,7 +1145,7 @@ fn DetailedModeHub(
             <A attr:class="button primary" href=guide_href>{guide_action}</A>
             <p class="caption">"คุณยังเปิดดูหรือแก้ส่วนอื่นด้านล่างได้ตลอด ระบบไม่ล็อกลำดับ"</p>
         </section>
-        <DecisionList plan_id=id decisions compact=true/>
+        <DecisionList plan_id=id decisions/>
         <div class="overview-heading">
             <h2>"ดูและแก้ข้อมูลทั้งหมด"</h2>
             <p>"เลือกเฉพาะส่วนที่ต้องการได้ คำสถานะบอกว่าตอนนี้คำนวณอะไรได้แล้ว"</p>
@@ -1327,9 +1323,9 @@ pub fn QuickResultView(record: PlanRecord) -> impl IntoView {
             <section class="card quick-result-card">
                 <p class="eyebrow">"ประมาณการเร็ว"</p>
                 <p class="result-label">{profit_label}</p>
-                <strong class=profit_class>{format!("{} บาท", money(profit.abs()))}</strong>
+                <strong class=profit_class>{format!("{} บาท", baht_amount(profit.abs()))}</strong>
                 <div class="quick-figure-list">
-                    <div><span>"รายได้โดยประมาณ"</span><strong>{format!("{} บาท", money(analysis.revenue.expect("complete revenue")))}</strong></div>
+                    <div><span>"รายได้โดยประมาณ"</span><strong>{format!("{} บาท", baht_amount(analysis.revenue.expect("complete revenue")))}</strong></div>
                     <div><span>"ต้นทุนต่อกิโลกรัม"</span><strong>{format!("{} บาท/กก.", money(analysis.cost_per_kg.expect("complete cost per kg")))}</strong></div>
                     <div><span>"ราคาขายคุ้มทุน"</span><strong>{format!("{} บาท/กก.", money(analysis.break_even_price_per_kg.expect("complete break-even price")))}</strong></div>
                 </div>
@@ -1339,7 +1335,7 @@ pub fn QuickResultView(record: PlanRecord) -> impl IntoView {
                 <dl class="season-metadata">
                     <div><dt>"ผลผลิตที่ขายได้"</dt><dd>{format!("{} กก.", money(estimate.sellable_yield_kg.expect("complete yield")))}</dd></div>
                     <div><dt>"ราคาขายเฉลี่ย"</dt><dd>{format!("{} บาท/กก.", money(estimate.average_price_per_kg.expect("complete price")))}</dd></div>
-                    <div><dt>"ต้นทุนรวม"</dt><dd>{format!("{} บาท", money(estimate.total_cost.expect("complete total cost")))}</dd></div>
+                    <div><dt>"ต้นทุนรวม"</dt><dd>{format!("{} บาท", baht_amount(estimate.total_cost.expect("complete total cost")))}</dd></div>
                 </dl>
                 <p class="caption">"ผลนี้ใช้ประมาณการรวม ยังไม่ใช้เกรด รายการต้นทุน ROI ภาษี หรือคะแนนสุขภาพสวน"</p>
             </section>
@@ -1828,7 +1824,7 @@ fn TaxDeductionFields(form: RwSignal<PlanForm>, closed: bool, plan_id: i64) -> i
         <Show when=move || closed && form.get().tax_deductions.is_empty()><p class="readonly-value">"ไม่ได้กรอกรายการลดหย่อนไว้ ภาษีของฤดูนี้จึงคิดโดยยังไม่หักลดหย่อน"</p></Show>
         <Show when=move || !closed><button class="secondary" type="button" on:click=move |_| form.update(|f| f.tax_deductions.push(TaxDeductionForm::default()))>"+ เพิ่มรายการลดหย่อน"</button></Show>
         <Show when=move || !form.get().tax_deductions.is_empty()>
-            <div class="cost-total"><span>"รวมลดหย่อน"</span><strong class="cost-total-amount">{move || format!("{} บาท", money(total()))}</strong></div>
+            <div class="cost-total"><span>"รวมลดหย่อน"</span><strong class="cost-total-amount">{move || format!("{} บาท", baht_amount(total()))}</strong></div>
         </Show>
         <A attr:class="button secondary" href=format!("/plans/{plan_id}/analysis")>"ดูภาษีโดยประมาณ"</A>
     </section> }
@@ -1894,7 +1890,7 @@ fn FixedCostFields(
                         {asset_rows.into_iter().map(|(name, depreciation)| view! {
                             <li class="asset-cost-row">
                                 <span class="asset-cost-name">{name}</span>
-                                <span class="asset-cost-amount">{format!("{} บาท/ปี", money(depreciation))}</span>
+                                <span class="asset-cost-amount">{format!("{} บาท/ปี", baht_amount(depreciation))}</span>
                                 <A attr:class="text-button" href=format!("/plans/{plan_id}/assets")>"ดูที่หน้าของที่ใช้หลายปี"</A>
                             </li>
                         }).collect_view()}
@@ -1906,9 +1902,9 @@ fn FixedCostFields(
 
         <div class="cost-total fixed-cost-total" aria-live="polite">
             <span class="cost-total-label">"รวมค่าใช้จ่ายประจำฤดูนี้"<small class="formal-term">"ต้นทุนคงที่รวม"</small></span>
-            <strong class="cost-total-amount">{move || total().map_or_else(|| "ยังไม่รู้".to_string(), |total| format!("{} บาท/ปี", money(total)))}</strong>
+            <strong class="cost-total-amount">{move || total().map_or_else(|| "ยังไม่รู้".to_string(), |total| format!("{} บาท/ปี", baht_amount(total)))}</strong>
             {move || (total().is_none() && asset_depreciation.is_some()).then(|| view! {
-                <small class="cost-total-note">{format!("ค่าเสื่อม {} บาท/ปี รวมอยู่แล้ว แต่ยอดรวมยังไม่รู้ จนกว่าจะกรอกหรือยืนยันส่วนที่กรอกเอง", money(asset_depreciation.unwrap_or_default()))}</small>
+                <small class="cost-total-note">{format!("ค่าเสื่อม {} บาท/ปี รวมอยู่แล้ว แต่ยอดรวมยังไม่รู้ จนกว่าจะกรอกหรือยืนยันส่วนที่กรอกเอง", baht_amount(asset_depreciation.unwrap_or_default()))}</small>
             })}
         </div>
     </section> }
@@ -2038,7 +2034,7 @@ pub fn PlanField(
         (!ids.is_empty()).then(|| ids.join(" "))
     };
     view! { <label class="guided-field"><span>{label}</span>{formal_term.map(|term| view! { <small class="formal-term">{term}</small> })}{if closed {
-        view! { <p class="readonly-value">{move || { let value = value.get(); if value.is_empty() { "—".into() } else if let Some(unit) = unit { format!("{value} {unit}") } else { value } }}</p> }.into_any()
+        view! { <p class="readonly-value">{move || { let value = value.get(); let value = if numeric { format_numeric_input(&value) } else { value }; if value.is_empty() { "—".into() } else if let Some(unit) = unit { format!("{value} {unit}") } else { value } }}</p> }.into_any()
     } else {
         view! { <><span class="input-with-unit"><input id=field_id type="text" list=list inputmode=if numeric { "decimal" } else { "text" } aria-describedby=described_by aria-invalid=move || (numeric && numeric_input_invalid(&value.get())).then_some("true") prop:value=move || value.get() on:input=move |event| on_value.run(event_target_value(&event)) on:blur=move |event| { if numeric { on_value.run(format_numeric_input(&event_target_value(&event))); } }/>{unit.map(|unit| view! { <span class="unit">{unit}</span> })}</span><Show when=move || has_guidance><span id=help_id.clone() class="guided-help">{hint.map(|text| view! { <small class="field-hint">{text}</small> })}{example.map(|text| view! { <small class="field-example">{text}</small> })}{outcome.map(|text| view! { <small class="field-effect">{text}</small> })}</span></Show><Show when=move || numeric && numeric_input_invalid(&value.get())><small id=error_id.clone() class="field-error">"กรุณากรอกเป็นตัวเลข"</small></Show></> }.into_any()
     }}</label> }
@@ -2053,7 +2049,7 @@ fn LiveTotal(
     let summary = move || {
         assets
             .with_value(|assets| live_profit_with_assets(&form.get(), assets, starting_capital))
-            .map(|profit| format!("กำไรสุทธิโดยประมาณ {} บาท", money(profit)))
+            .map(|profit| format!("กำไรสุทธิโดยประมาณ {} บาท", baht_amount(profit)))
             .unwrap_or_else(|| "ยังคำนวณกำไรสุทธิไม่ได้".into())
     };
     let waiting = move || {
@@ -2127,17 +2123,52 @@ fn route_plan_id() -> impl Fn() -> Option<i64> + Copy {
     move || params.with(|params| params.get("id").and_then(|id| id.parse().ok()))
 }
 
-/// The same six decisions, in the same words, on the hub, the dashboard, and
-/// the analysis page: what can be answered now, which single fact is still
-/// missing, and which optional fact would add a result.
+/// The same six decisions, in the same words: what can be answered now,
+/// which single fact is still missing, and which optional fact would add a
+/// result. The hub shows the full list; the dashboard and the analysis page
+/// pass `compact` and get one line - how many can be answered and what is
+/// still missing - linking to the hub, so three screens do not open alike.
 #[component]
 pub(crate) fn DecisionList(
     plan_id: i64,
     decisions: Vec<DecisionReadiness>,
     #[prop(optional)] compact: bool,
 ) -> impl IntoView {
+    if compact {
+        let total = decisions.len();
+        let ready = decisions
+            .iter()
+            .filter(|readiness| matches!(readiness.state, DecisionState::Ready))
+            .count();
+        let missing: Vec<String> = decisions
+            .iter()
+            .filter_map(|readiness| match &readiness.state {
+                DecisionState::Missing { question, .. } => Some(question.to_string()),
+                _ => None,
+            })
+            .collect();
+        let missing_line = (!missing.is_empty()).then(|| {
+            let mut unique = Vec::new();
+            for question in missing {
+                if !unique.contains(&question) {
+                    unique.push(question);
+                }
+            }
+            format!("ยังขาด: {}", unique.join(" · "))
+        });
+        return view! {
+            <section class="card decision-list">
+                <A attr:class="decision-summary" href=format!("/plans/{plan_id}")>
+                    <strong>{format!("ตอบได้ {ready} จาก {total} คำถาม")}</strong>
+                    {missing_line.map(|line| view! { <span class="decision-missing">{line}</span> })}
+                    <span class="decision-open">"ดูทั้งหมด"</span>
+                </A>
+            </section>
+        }
+        .into_any();
+    }
     view! {
-        <section class="card decision-list" class:decision-list-compact=compact>
+        <section class="card decision-list">
             <h2>"ตอนนี้ตอบได้ว่า"</h2>
             <ul class="decision-rows">
                 {decisions.into_iter().map(|readiness| {
@@ -2161,6 +2192,7 @@ pub(crate) fn DecisionList(
             </ul>
         </section>
     }
+    .into_any()
 }
 
 pub(crate) fn money(value: rust_decimal::Decimal) -> String {
@@ -2181,6 +2213,37 @@ pub(crate) fn money(value: rust_decimal::Decimal) -> String {
         grouped.chars().rev().collect::<String>(),
         fraction
     )
+}
+
+/// An amount of money is shown in whole baht - `1,422,000` - because that
+/// is how a grower says it; rates (บาท/กก.), percentages, scores and
+/// kilograms keep two places through `money()`. Rounding is presentation
+/// only: the value is rounded here and never fed back into a calculation.
+pub(crate) fn baht_amount(value: rust_decimal::Decimal) -> String {
+    let whole =
+        value.round_dp_with_strategy(0, rust_decimal::RoundingStrategy::MidpointAwayFromZero);
+    let plain = format!("{whole:.0}");
+    let (sign, digits) = plain
+        .strip_prefix('-')
+        .map_or(("", plain.as_str()), |digits| ("-", digits));
+    let mut grouped = String::new();
+    for (index, character) in digits.chars().rev().enumerate() {
+        if index > 0 && index % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(character);
+    }
+    format!("{sign}{}", grouped.chars().rev().collect::<String>())
+}
+
+/// A figure with its unit, following the rule above: a plain `บาท` amount
+/// is whole, anything else keeps two places.
+pub(crate) fn amount_with_unit(value: rust_decimal::Decimal, unit: &str) -> String {
+    if unit == "บาท" {
+        format!("{} บาท", baht_amount(value))
+    } else {
+        format!("{} {unit}", money(value))
+    }
 }
 
 fn season_year_label(year: Option<i32>) -> String {
@@ -2323,6 +2386,28 @@ mod tests {
     fn figures_have_two_decimals_and_thousands_separators() {
         assert_eq!(money(rust_decimal::Decimal::from(834_600)), "834,600.00");
         assert_eq!(money(rust_decimal::Decimal::new(-125, 1)), "-12.50");
+        assert_eq!(
+            baht_amount(rust_decimal::Decimal::from(1_422_000)),
+            "1,422,000"
+        );
+        assert_eq!(
+            baht_amount(rust_decimal::Decimal::new(83_460_050, 2)),
+            "834,601"
+        );
+        assert_eq!(baht_amount(rust_decimal::Decimal::new(-125, 1)), "-13");
+        assert_eq!(baht_amount(rust_decimal::Decimal::ZERO), "0");
+        assert_eq!(
+            amount_with_unit(rust_decimal::Decimal::new(4_066, 2), "บาท"),
+            "41 บาท"
+        );
+        assert_eq!(
+            amount_with_unit(rust_decimal::Decimal::new(4_066, 2), "บาท/กก."),
+            "40.66 บาท/กก."
+        );
+        assert_eq!(
+            amount_with_unit(rust_decimal::Decimal::from(18_000), "กก."),
+            "18,000.00 กก."
+        );
     }
 
     #[test]

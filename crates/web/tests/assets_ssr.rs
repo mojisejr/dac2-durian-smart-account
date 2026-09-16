@@ -159,5 +159,5 @@ fn selected_assets_reach_the_detailed_dashboard_calculation() {
         );
         html
     });
-    assert!(html.contains("831,275.00 บาท"));
+    assert!(html.contains("831,275 บาท"));
 }

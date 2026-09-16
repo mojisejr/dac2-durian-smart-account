@@ -253,9 +253,9 @@ pub fn AssetPageView(
                 <h2>"แยกที่มาของตัวเลข"</h2>
                 <dl class="asset-totals">
                     <div><dt>"ค่าใช้จ่ายประจำที่กรอกเอง"<small class="formal-term">"ต้นทุนคงที่"</small></dt><dd>{money_or_dash(data.manual_fixed_cost)}</dd></div>
-                    <div><dt>"ค่าใช้ของหลายปีที่เฉลี่ยลงฤดูนี้"<small class="formal-term">"ค่าเสื่อมราคาจากสินทรัพย์ที่เลือก"</small></dt><dd>{format!("{} บาท/ปี", money(selected_depreciation))}</dd></div>
+                    <div><dt>"ค่าใช้ของหลายปีที่เฉลี่ยลงฤดูนี้"<small class="formal-term">"ค่าเสื่อมราคาจากสินทรัพย์ที่เลือก"</small></dt><dd>{format!("{} บาท/ปี", baht_amount(selected_depreciation))}</dd></div>
                     <div><dt>"เงินก้อนที่กรอกไว้ในค่าใช้จ่ายประจำ"<small class="formal-term">"เงินลงทุนจากรายการเดิม"</small></dt><dd>{money_or_dash(data.manual_investment_base)}</dd></div>
-                    <div><dt>"เงินก้อนของของที่เลือกใช้ฤดูนี้"<small class="formal-term">"มูลค่าสินทรัพย์ที่เลือก"</small></dt><dd>{format!("{} บาท", money(selected_investment))}</dd></div>
+                    <div><dt>"เงินก้อนของของที่เลือกใช้ฤดูนี้"<small class="formal-term">"มูลค่าสินทรัพย์ที่เลือก"</small></dt><dd>{format!("{} บาท", baht_amount(selected_investment))}</dd></div>
                     <div><dt>"เงินก้อนตั้งต้นของสวน"<small class="formal-term">"เงินทุนเริ่มต้น"</small></dt><dd>{money_or_dash(data.starting_capital)}</dd></div>
                 </dl>
                 <p class="warning-copy">"ก่อนเลือกของชิ้นไหน ตรวจว่าคุณไม่ได้กรอกค่าเฉลี่ยรายปีหรือเงินก้อนของชิ้นเดียวกันไว้ในค่าใช้จ่ายประจำแล้ว ระบบจะไม่เดาหรือลบรายการเดิมให้"</p>
@@ -327,10 +327,10 @@ fn AssetCard(
                 <span class=if asset.selected && active { "status good" } else if asset.selected { "status warning" } else { "status muted" }>{status}</span>
             </div>
             <dl class="asset-facts">
-                <div><dt>"ซื้อมาหรือสร้าง"</dt><dd>{format!("{} บาท", money(facts.original_cost))}</dd></div>
+                <div><dt>"ซื้อมาหรือสร้าง"</dt><dd>{format!("{} บาท", baht_amount(facts.original_cost))}</dd></div>
                 <div><dt>"เริ่มใช้ปี พ.ศ."</dt><dd>{facts.start_year}</dd></div>
                 {allocation.as_ref().map(|allocation| view! {
-                    <div><dt>"เฉลี่ยลงฤดูนี้"<small class="formal-term">"ค่าเสื่อมราคา"</small></dt><dd>{format!("{} บาท/ปี", money(allocation.annual_depreciation))}</dd></div>
+                    <div><dt>"เฉลี่ยลงฤดูนี้"<small class="formal-term">"ค่าเสื่อมราคา"</small></dt><dd>{format!("{} บาท/ปี", baht_amount(allocation.annual_depreciation))}</dd></div>
                 })}
             </dl>
             {allocation.as_ref().filter(|allocation| allocation.residual_assumed_zero).map(|_| view! {
@@ -613,12 +613,12 @@ fn decimal_input(value: Option<rust_decimal::Decimal>) -> String {
         .unwrap_or_default()
 }
 
-fn money(value: rust_decimal::Decimal) -> String {
-    crate::plan_ui::money(value)
+fn baht_amount(value: rust_decimal::Decimal) -> String {
+    crate::plan_ui::baht_amount(value)
 }
 
 fn money_or_dash(value: Option<rust_decimal::Decimal>) -> String {
-    value.map_or_else(|| "—".into(), |value| format!("{} บาท", money(value)))
+    value.map_or_else(|| "—".into(), |value| format!("{} บาท", baht_amount(value)))
 }
 
 #[cfg(test)]
