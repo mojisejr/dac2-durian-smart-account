@@ -110,7 +110,38 @@ async fn login_rotates_session_logout_flushes_it_and_reset_ends_existing_session
             email: email.clone(),
         });
 
-    let registration_form = format!("email={email}&password={PASSWORD}");
+    // The two fields must agree and the password must reach six characters
+    // before anything is written; both refusals leave no account behind.
+    for refused in [
+        format!("email={email}&password={PASSWORD}&password_confirm={PASSWORD}x"),
+        format!("email={email}&password=12345&password_confirm=12345"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(form_request(
+                <web::auth::Register as ServerFn>::PATH,
+                &refused,
+            ))
+            .await
+            .expect("refused registration request completes");
+        assert_ne!(response.status(), StatusCode::OK);
+        let body = String::from_utf8(body_bytes(response).await).expect("error body is text");
+        assert!(
+            body.contains(web::auth::PASSWORDS_DIFFER)
+                || body.contains(web::auth::PASSWORD_TOO_SHORT),
+            "refusal names its rule: {body}"
+        );
+        assert!(
+            store::users::find_by_email(&pool, &email)
+                .await
+                .expect("account lookup succeeds")
+                .is_none(),
+            "a refused registration writes nothing"
+        );
+    }
+
+    let registration_form =
+        format!("email={email}&password={PASSWORD}&password_confirm={PASSWORD}");
     let registered = app
         .clone()
         .oneshot(form_request(

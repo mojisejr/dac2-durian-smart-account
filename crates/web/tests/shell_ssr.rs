@@ -129,6 +129,51 @@ fn the_root_address_is_the_entry_screen() {
     );
 }
 
+// Every password field carries a show/hide button beside it, rendered
+// hidden by default with its state on aria-pressed and a Thai label, and the
+// two screens that set a password ask for it twice with a six-character
+// floor. dac2-auth-form-001.
+#[test]
+fn password_fields_can_be_shown_and_are_confirmed_where_they_are_set() {
+    let register = render_app("/register");
+    for expected in [
+        "id=\"register-password\"",
+        "name=\"password_confirm\"",
+        "ยืนยันรหัสผ่าน",
+        "minlength=\"6\"",
+        "ใช้อย่างน้อย 6 ตัวอักษร",
+        "พิมพ์รหัสผ่านเดิมอีกครั้ง",
+    ] {
+        assert!(
+            register.contains(expected),
+            "missing {expected} in {register}"
+        );
+    }
+    assert_eq!(register.matches("aria-pressed=\"false\"").count(), 2);
+    assert_eq!(
+        register.matches("แสดงรหัสผ่าน").count(),
+        4,
+        "label and title on each of two buttons"
+    );
+    assert!(!register.contains("15 ตัวอักษร"));
+
+    let login = render_app("/login");
+    assert_eq!(login.matches("aria-pressed=\"false\"").count(), 1);
+    assert!(login.contains("type=\"password\""));
+    assert!(!login.contains("password_confirm"), "sign-in asks once");
+
+    let reset = render_app("/reset-password?token=x");
+    for expected in [
+        "name=\"new_password\"",
+        "name=\"new_password_confirm\"",
+        "ยืนยันรหัสผ่านใหม่",
+        "พิมพ์รหัสผ่านใหม่อีกครั้ง",
+    ] {
+        assert!(reset.contains(expected), "missing {expected} in {reset}");
+    }
+    assert_eq!(reset.matches("aria-pressed=\"false\"").count(), 2);
+}
+
 #[test]
 fn the_shell_names_the_application_and_its_mark() {
     let shell = render_shell("/");

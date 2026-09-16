@@ -4,6 +4,20 @@ pub const REGISTRATION_ACCEPTED: &str = "หากอีเมลนี้สม
 pub const RESEND_ACCEPTED: &str = "หากบัญชีนี้ยังรอยืนยัน ระบบได้ส่งลิงก์ยืนยันฉบับใหม่ไปให้แล้ว";
 pub const RESET_REQUEST_ACCEPTED: &str = "หากมีบัญชีที่ใช้อีเมลนี้ ระบบได้ส่งลิงก์ตั้งรหัสผ่านใหม่ไปให้แล้ว";
 pub const LOGIN_FAILED: &str = "อีเมลหรือรหัสผ่านไม่ถูกต้อง หรือบัญชียังไม่ได้ยืนยัน";
+pub const PASSWORD_TOO_SHORT: &str = "รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร";
+pub const PASSWORDS_DIFFER: &str = "รหัสผ่านทั้งสองช่องไม่ตรงกัน";
+
+/// The two screens that set a password ask for it twice. The comparison is a
+/// form rule, made here before the store is touched; the store keeps the one
+/// length rule. Nothing is written when the two fields differ.
+#[cfg(any(feature = "ssr", test))]
+fn confirmed(password: &str, confirm: &str) -> Result<(), ServerFnError> {
+    if password == confirm {
+        Ok(())
+    } else {
+        Err(ServerFnError::new(PASSWORDS_DIFFER))
+    }
+}
 
 #[cfg(feature = "ssr")]
 pub async fn authenticate_and_login(
@@ -26,7 +40,12 @@ pub async fn logout_session(
 }
 
 #[server]
-pub async fn register(email: String, password: String) -> Result<String, ServerFnError> {
+pub async fn register(
+    email: String,
+    password: String,
+    password_confirm: String,
+) -> Result<String, ServerFnError> {
+    confirmed(&password, &password_confirm)?;
     let auth_session = leptos_axum::extract::<store::AuthSession>().await?;
     let pool = auth_session.backend.pool();
 
@@ -48,9 +67,7 @@ pub async fn register(email: String, password: String) -> Result<String, ServerF
         }
         Err(store::StoreError::DuplicateEmail) => Ok(REGISTRATION_ACCEPTED.into()),
         Err(store::StoreError::InvalidEmail) => Err(ServerFnError::new("กรุณากรอกอีเมลให้ถูกต้อง")),
-        Err(store::StoreError::InvalidPassword) => {
-            Err(ServerFnError::new("รหัสผ่านต้องมีอย่างน้อย 15 ตัวอักษร"))
-        }
+        Err(store::StoreError::InvalidPassword) => Err(ServerFnError::new(PASSWORD_TOO_SHORT)),
         Err(_) => Err(public_server_error()),
     }
 }
@@ -160,13 +177,16 @@ pub async fn request_password_reset(email: String) -> Result<String, ServerFnErr
 }
 
 #[server]
-pub async fn reset_password(token: String, new_password: String) -> Result<String, ServerFnError> {
+pub async fn reset_password(
+    token: String,
+    new_password: String,
+    new_password_confirm: String,
+) -> Result<String, ServerFnError> {
+    confirmed(&new_password, &new_password_confirm)?;
     let auth_session = leptos_axum::extract::<store::AuthSession>().await?;
     match store::reset_tokens::consume(auth_session.backend.pool(), &token, &new_password).await {
         Ok(_) => Ok("ตั้งรหัสผ่านใหม่เรียบร้อยแล้ว กรุณาเข้าสู่ระบบอีกครั้ง".into()),
-        Err(store::StoreError::InvalidPassword) => {
-            Err(ServerFnError::new("รหัสผ่านต้องมีอย่างน้อย 15 ตัวอักษร"))
-        }
+        Err(store::StoreError::InvalidPassword) => Err(ServerFnError::new(PASSWORD_TOO_SHORT)),
         Err(store::StoreError::InvalidToken) => {
             Err(ServerFnError::new("ลิงก์ตั้งรหัสผ่านไม่ถูกต้อง หมดอายุ หรือถูกใช้ไปแล้ว"))
         }
@@ -247,6 +267,13 @@ mod tests {
         let unverified_account = LOGIN_FAILED;
         assert_eq!(unknown_account, wrong_password);
         assert_eq!(wrong_password, unverified_account);
+    }
+
+    #[test]
+    fn a_password_must_be_typed_the_same_twice() {
+        assert!(confirmed("กำไรดี", "กำไรดี").is_ok());
+        assert!(confirmed("กำไรดี", "กำไรด").is_err());
+        assert!(confirmed("123456", "").is_err());
     }
 
     #[test]
