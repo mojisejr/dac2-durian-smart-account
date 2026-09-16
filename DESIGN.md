@@ -1,6 +1,6 @@
 # DAC2 — Design
 
-**Status:** draft, revision 0.9
+**Status:** draft, revision 0.10
 **Home:** this file moves to the application repository root in slice 1. There is
 one copy of it, never two.
 
@@ -688,6 +688,110 @@ asked for twice. They stay editable, because a real orchard has reasons.
 One question per card, five full-width buttons from 1 to 5, thumb reachable.
 Progress shown as `ข้อ 4 จาก 12`. Answers save as they are given.
 
+### ลดหย่อนภาษี — deductions, one line each, per season
+
+Added in revision 0.10. Until now the tax estimate subtracted a fixed 60,000
+that no screen let the owner change. Now the owner writes down what they
+deduct and how much, one line at a time, and the estimate uses that. The
+lines belong to the season, so opening a past season shows what was deducted
+that year.
+
+**Hub row.** In `ดูและแก้ข้อมูลทั้งหมด`, after the cost sections:
+
+| Question | Formal term | State line |
+|---|---|---|
+| `ปีนี้มีอะไรลดหย่อนภาษีได้บ้าง` | `ค่าลดหย่อน · ภาษีเงินได้บุคคลธรรมดา` | `ยังไม่ได้กรอก · ภาษีคิดโดยยังไม่หักลดหย่อน` or `กรอกแล้ว 3 รายการ · รวม 160,000.00 บาท` |
+
+The row never counts against readiness; it is an optional section that
+unlocks a closer tax figure, and the hub says so in the section's own words,
+not with `ครบ` or `ยังไม่ครบ`.
+
+**The section.** A list, an add button, a running total, and one line saying
+what the section changes. No `ยืนยันว่าไม่มี`: everyone has at least the
+personal allowance, so the only two states are *not yet entered* and
+*entered*. The first suggestion the owner meets is the personal allowance.
+
+```
+ปีนี้มีอะไรลดหย่อนภาษีได้บ้าง
+ค่าลดหย่อน · ภาษีเงินได้บุคคลธรรมดา
+
+  กรอกทีละรายการ ชื่อกับจำนวนเงิน ระบบไม่ใส่ให้เอง
+  แม้แต่ค่าลดหย่อนส่วนตัว เพราะจำนวนขึ้นกับคุณและปีที่ยื่น
+  กรอกแล้วได้อะไร  ภาษีโดยประมาณจะหักรายการเหล่านี้ออกก่อนคิด
+
+  ค่าลดหย่อนส่วนตัว                  60,000.00 บาท   ⋮
+  ประกันสังคม                         9,000.00 บาท   ⋮
+  ประกันชีวิต                        91,000.00 บาท   ⋮
+  [ + เพิ่มรายการลดหย่อน ]
+  ─────────────────────────────────────
+  รวมลดหย่อน                        160,000.00 บาท
+```
+
+Tapping the add button or a row opens a bottom sheet with two guided fields:
+
+```
+ลดหย่อนจากอะไร                                     ✕
+─────────────────────────────────────────────
+ชื่อรายการ
+[ ประกัน                                   ]
+   ประกันสังคม
+   ประกันชีวิต
+   ประกันสุขภาพ
+เลือกจากรายการหรือพิมพ์เอง
+
+จำนวนเงินที่ลดหย่อนได้ปีนี้
+[                              ] บาท
+กรอกตามที่คุณมีสิทธิ์จริง เช่น ค่าลดหย่อนส่วนตัว 60,000
+ระบบไม่ตรวจเพดานให้ เพราะเพดานเปลี่ยนตามปีและสถานะของคุณ
+
+[ บันทึกรายการ ]            ลบรายการนี้
+```
+
+- **Name.** A text field with suggestions that filter as the owner types.
+  Choosing a suggestion fills the name only. Free text is always allowed.
+  The suggestions, which the owner may edit here:
+  `ค่าลดหย่อนส่วนตัว` · `คู่สมรส` · `บุตร` · `บิดามารดา` · `ประกันสังคม` ·
+  `ประกันชีวิต` · `ประกันสุขภาพ` · `กองทุน RMF` · `กองทุน SSF` ·
+  `กองทุนสำรองเลี้ยงชีพ` · `ดอกเบี้ยเงินกู้ที่อยู่อาศัย` · `เงินบริจาค`.
+- **Amount.** A number field, `inputmode="decimal"`, unit `บาท`, never
+  pre-filled. The hint gives one concrete example and says the application
+  checks no ceiling. Zero is accepted and kept; a blank is not a line.
+- **Validation.** A name that is not empty and an amount of zero or more.
+  Nothing else: no cap per line, no cap on the total, no rule about which
+  names are allowed. Invalid values keep what was typed and explain
+  underneath in `bad`.
+- **Empty state.** The explanatory lines above the list and the add button;
+  the total line is absent until there is a line.
+- **Closed season.** Lines render as text under the locked banner, with no
+  add button, no sheet, and no `⋮`.
+- **Next season.** `ทำแผนฤดูถัดไปจากฤดูนี้` copies the lines with their
+  amounts, because most deductions repeat; the owner edits them there.
+
+**What the tax screen shows.** The two method cards keep their six figures;
+the third figure changes from `หักส่วนตัวอีก · ค่าลดหย่อนส่วนตัว` to
+`หักลดหย่อนอีก · ค่าลดหย่อนรวม`, and above the cards one line reports the
+state of the section:
+
+- *Not yet entered:*
+  `ยังไม่ได้หักลดหย่อน ตัวเลขนี้จึงสูงกว่าภาษีจริง — [ กรอกลดหย่อน ]`
+  The figures are computed with zero deduction. This is the honest upper
+  bound, not a guess: rule 8 forbids a confident figure from a missing
+  input, and rule 10 forbids hiding the result behind an unrelated section,
+  so the screen shows the figure and says what is missing in the same
+  breath. The button is a 48-pixel target that opens the section.
+- *Entered:*
+  `หักลดหย่อนแล้ว 3 รายการ รวม 160,000.00 บาท — [ ดูหรือแก้ ]`
+- *Deductions exceed income after expense, under a method:* that method's
+  `เหลือที่ต้องคิดภาษี` shows `0.00 บาท` and its `ภาษีโดยประมาณ` shows
+  `0.00 บาท` with the caption `ลดหย่อนมากกว่าเงินได้หลังหักค่าใช้จ่าย จึงไม่มีภาษี`
+  beneath. Nothing is painted `good` or `bad`; a zero here is arithmetic,
+  not a verdict.
+
+Both methods subtract the same total. The disclaimer stays where it is.
+
+**What is removed.** The constant in the calculation and the read-only
+figure that showed it. No screen shows 60,000 unless the owner typed it.
+
 ### วิเคราะห์ — efficiency, checks, tax, scenario
 
 Segmented control at the top: `ประสิทธิภาพ` · `ตรวจสอบ` · `ภาษี` · `สถานการณ์`.
@@ -703,6 +807,9 @@ input that would fix it.
 **ภาษี** compares the two methods side by side without recommending one. The
 workbook's own disclaimer, that this is an estimate and not tax advice, sits on
 this screen where the figures are, at `caption`. It is not moved elsewhere.
+Since revision 0.10 the deductions come from the owner's own lines in
+`ลดหย่อนภาษี`, and the screen states whether any were entered; see that
+section for the two states.
 
 **สถานการณ์** does not begin as a grid. Two sliders, `ราคา` and `ผลผลิต`, and one
 large figure showing the profit that results. A 5×5 table is unreadable on a
@@ -1035,17 +1142,20 @@ reachable from both.
 - **คืออะไร** — ในการคำนวณภาษี เราหักค่าใช้จ่ายออกจากรายได้ก่อน แล้วค่อยคิดภาษีจาก
   ส่วนที่เหลือ วิธีแรกหักตามที่จ่ายจริง ซึ่งก็คือต้นทุนทั้งหมดที่กรอกไว้ในแอปนี้แล้ว
   วิธีที่สองไม่สนว่าจ่ายจริงเท่าไร หักเหมาเป็นสัดส่วนคงที่ของรายได้ จากนั้นทั้งสอง
-  วิธีหักค่าลดหย่อนส่วนตัวเท่ากัน แล้วคิดภาษีตามขั้นบันไดชุดเดียวกัน
+  วิธีหักค่าลดหย่อนที่คุณกรอกไว้ในส่วน ลดหย่อนภาษี เท่ากัน แล้วคิดภาษีตามขั้นบันได
+  ชุดเดียวกัน
 - **ใช้ยังไง** — ใช้ดูว่าตัวเลขประมาณการของสองวิธีต่างกันอย่างไรเท่านั้น ระบบไม่
   เลือกวิธีให้ เพราะวิธีที่ใช้ได้จริงขึ้นอยู่กับประเภทเงินได้ หลักฐาน และกฎหมายที่มีผล
   ในวันที่ยื่น
 - **ทำไมต้องมี** — ช่วยให้รู้ว่าควรเตรียมคำถามและหลักฐานอะไรไปคุยกับผู้ดูแลภาษี
-  โดยตัวเลขประมาณการไม่ได้ชี้ว่าจะเลือกวิธีใดวิธีหนึ่ง
-- **ไม่ใส่ได้ไหม** — ไม่ต้องกรอกเพิ่ม คำนวณจากรายได้และต้นทุนที่กรอกไว้แล้ว แต่ตัวเลข
-  นี้เป็นการประมาณจากข้อมูลในแอปเท่านั้น ไม่ได้รวมรายได้ทางอื่นและค่าลดหย่อนอื่นที่
-  คุณมี อัตราที่ใช้มาจากแบบคำนวณต้นฉบับและยังไม่ได้ยืนยันแหล่งกฎหมายกับวันที่มีผล
-  ล่าสุด นี่ไม่ใช่คำแนะนำทางภาษีและไม่ควรใช้เลือกวิธียื่น ก่อนใช้จริงให้ยืนยันกับผู้ดูแล
-  ภาษีของคุณ
+  โดยตัวเลขประมาณการไม่ได้ชี้ว่าจะเลือกวิธีใดวิธีหนึ่ง และรายการลดหย่อนที่กรอกไว้
+  คือรายการที่ควรเตรียมหลักฐานไปด้วย
+- **ไม่ใส่ได้ไหม** — คำนวณจากรายได้และต้นทุนที่กรอกไว้แล้ว ส่วนค่าลดหย่อน ถ้ายังไม่
+  กรอก ระบบจะคิดโดยไม่หักเลย ตัวเลขจึงสูงกว่าภาษีจริง กรอกแล้วตัวเลขจะลดลงตามที่
+  กรอก ตัวเลขนี้เป็นการประมาณจากข้อมูลในแอปเท่านั้น ไม่ได้รวมรายได้ทางอื่นที่คุณมี
+  และไม่ได้ตรวจเพดานของค่าลดหย่อนแต่ละรายการ อัตราที่ใช้มาจากแบบคำนวณต้นฉบับและ
+  ยังไม่ได้ยืนยันแหล่งกฎหมายกับวันที่มีผลล่าสุด นี่ไม่ใช่คำแนะนำทางภาษีและไม่ควรใช้
+  เลือกวิธียื่น ก่อนใช้จริงให้ยืนยันกับผู้ดูแลภาษีของคุณ
 
 ### เป้าหมาย KPI
 
@@ -1173,8 +1283,14 @@ reachable from both.
   duplicating it makes this more likely, not less.
 - Icon set is not chosen for the working screens. The entry screen's mark
   and mascot are chosen in **Identity and the entry screen**.
+- Whether a cross-year view of deductions belongs on the history page. Not
+  planned; opening the season is the way to look back, and the owner said
+  that is enough.
 - Whether the mascot should appear in mail, which would mean HTML mail;
   see **Mail** under **Identity and the entry screen**.
+
+Resolved since revision 0.9: tax deductions are the owner's own lines per
+season, never a constant; see **ลดหย่อนภาษี**.
 
 Resolved since revision 0.8: the application's name and entry screen;
 see **Identity and the entry screen**.
