@@ -31,7 +31,7 @@ services:
       - key: MAIL_TRANSPORT
         value: brevo-api
       - key: MAIL_FROM
-        value: DAC2 <nonthasak.l@gmail.com>
+        value: บัญชีตาไก๊ <nonthasak.l@gmail.com>
       # Raise for an in-person study day when participants share one address,
       # for example 60/3600; the default is 5/3600.
       - key: RATE_LIMIT_ACCOUNT

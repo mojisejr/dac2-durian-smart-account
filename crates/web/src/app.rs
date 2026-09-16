@@ -1,7 +1,7 @@
 use leptos::{form::ActionForm, prelude::*};
 use leptos_router::{
     components::{A, Route, Router, Routes},
-    hooks::use_query_map,
+    hooks::{use_location, use_query_map},
     path,
 };
 
@@ -18,54 +18,66 @@ use crate::plan_ui::{
 pub fn App() -> impl IntoView {
     view! {
         <Router>
-            <main>
-                // Rendered on every page and shown only when the shell marks
-                // the document as a pilot copy, so the same markup hydrates
-                // on localhost and on the study address alike.
-                <p class="pilot-notice" role="note">
-                    "นี่คือสำเนาทดลอง ข้อมูลที่กรอกใช้เพื่อการศึกษาและอาจถูกลบ"
-                    <span class="pilot-notice-term">" (pilot)"</span>
-                </p>
-                <header class="site-header">
-                    <A href="/">"DAC2 — Durian Smart Account"</A>
-                </header>
-                <Routes fallback=NotFound>
-                    <Route path=path!("") view=HomePage/>
-                    <Route path=path!("login") view=LoginPage/>
-                    <Route path=path!("register") view=RegisterPage/>
-                    <Route path=path!("verify-email") view=VerifyEmailPage/>
-                    <Route path=path!("forgot-password") view=ForgotPasswordPage/>
-                    <Route path=path!("reset-password") view=ResetPasswordPage/>
-                    <Route path=path!("demo") view=DemoPage/>
-                    <Route path=path!("history") view=SeasonHistoryPage/>
-                    <Route path=path!("plans") view=PlansPage/>
-                    <Route path=path!("plans/new") view=NewSeasonPage/>
-                    <Route path=path!("plans/:id") view=PlanHubPage/>
-                    <Route path=path!("plans/:id/quick/:step") view=QuickPlanRoute/>
-                    <Route path=path!("plans/:id/close") view=ActualClosePage/>
-                    <Route path=path!("plans/:id/close/review") view=ActualReviewPage/>
-                    <Route path=path!("plans/:id/comparison") view=ActualComparisonPage/>
-                    <Route path=path!("plans/:id/assets") view=AssetPage/>
-                    <Route path=path!("plans/:id/:section") view=PlanSectionRoute/>
-                </Routes>
-            </main>
+            <AppShell/>
         </Router>
     }
 }
 
+/// The entry screen carries the identity itself - the mascot, the wordmark,
+/// the one-line pilot notice - so the shared header and the strip above it
+/// step aside there and nowhere else.
+pub fn entry_path(path: &str) -> bool {
+    matches!(path.trim_end_matches('/'), "" | "/login")
+}
+
 #[component]
-fn HomePage() -> impl IntoView {
+fn AppShell() -> impl IntoView {
+    let location = use_location();
+    let entry = move || location.pathname.with(|path| entry_path(path));
     view! {
-        <section class="card">
-            <p class="eyebrow">"DAC2"</p>
-            <h1>"เห็นรายได้ ต้นทุน และกำไรของสวนในฤดูกาลเดียว"</h1>
-            <p>"เริ่มจากตัวเลขคร่าว ๆ 3 ค่า แล้วค่อยเพิ่มรายละเอียดเมื่อพร้อม ระบบจะบอกว่าข้อมูลแต่ละส่วนช่วยคำนวณอะไร"</p>
-            <div class="actions">
-                <A attr:class="button primary" href="/register">"เริ่มทำบัญชีสวน"</A>
-                <A attr:class="button secondary" href="/login">"เข้าสู่ระบบ"</A>
-                <A attr:class="button secondary" href="/demo">"ลองดูตัวอย่างโดยไม่บันทึก"</A>
-            </div>
-        </section>
+        <main class:entry-screen=entry>
+            // Rendered on every page and shown only when the shell marks
+            // the document as a pilot copy, so the same markup hydrates
+            // on localhost and on the study address alike.
+            <p class="pilot-notice" role="note">
+                "นี่คือสำเนาทดลอง ข้อมูลที่กรอกใช้เพื่อการศึกษาและอาจถูกลบ"
+                <span class="pilot-notice-term">" (pilot)"</span>
+            </p>
+            <header class="site-header">
+                <A href="/"><HatMark/>"ตาไก๊"</A>
+            </header>
+            <Routes fallback=NotFound>
+                <Route path=path!("") view=EntryPage/>
+                <Route path=path!("login") view=EntryPage/>
+                <Route path=path!("register") view=RegisterPage/>
+                <Route path=path!("verify-email") view=VerifyEmailPage/>
+                <Route path=path!("forgot-password") view=ForgotPasswordPage/>
+                <Route path=path!("reset-password") view=ResetPasswordPage/>
+                <Route path=path!("demo") view=DemoPage/>
+                <Route path=path!("history") view=SeasonHistoryPage/>
+                <Route path=path!("plans") view=PlansPage/>
+                <Route path=path!("plans/new") view=NewSeasonPage/>
+                <Route path=path!("plans/:id") view=PlanHubPage/>
+                <Route path=path!("plans/:id/quick/:step") view=QuickPlanRoute/>
+                <Route path=path!("plans/:id/close") view=ActualClosePage/>
+                <Route path=path!("plans/:id/close/review") view=ActualReviewPage/>
+                <Route path=path!("plans/:id/comparison") view=ActualComparisonPage/>
+                <Route path=path!("plans/:id/assets") view=AssetPage/>
+                <Route path=path!("plans/:id/:section") view=PlanSectionRoute/>
+            </Routes>
+        </main>
+    }
+}
+
+/// The straw hat ตาไก๊ wears, as one filled shape in the current text colour,
+/// so it follows `primary` in both themes. The favicon is the same hat on a
+/// cream disc in `public/takai-mark.svg`.
+#[component]
+fn HatMark() -> impl IntoView {
+    view! {
+        <svg class="hat-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+            <path fill="currentColor" d="M9.6 17.3 11.4 7.4C11.8 5.4 13.3 4 15.2 4h1.6c1.9 0 3.4 1.4 3.8 3.4l1.8 9.9c4.2.7 7.6 2 8.9 3.9.6.9.2 1.9-1 2.6C27.2 26.1 22 27.5 16 27.5S4.8 26.1 1.7 23.8c-1.2-.7-1.6-1.7-1-2.6 1.3-1.9 4.7-3.2 8.9-3.9z"/>
+        </svg>
     }
 }
 
@@ -109,26 +121,31 @@ fn RegisterPage() -> impl IntoView {
 }
 
 #[component]
-fn LoginPage() -> impl IntoView {
+fn EntryPage() -> impl IntoView {
     let action = ServerAction::<Login>::new();
     let query = use_query_map();
     let verified = move || query.with(|params| params.get("verified").as_deref() == Some("1"));
     view! {
-        <section class="card auth-card">
-            <p class="eyebrow">"ยินดีต้อนรับกลับ"</p>
-            <h1>"เข้าสู่ระบบ"</h1>
+        <section class="card auth-card entry-card">
+            <div class="mascot" aria-hidden="true">
+                <picture>
+                    <source srcset="/takai-bust.webp" type="image/webp"/>
+                    <img src="/takai-bust.png" width="256" height="256" alt=""/>
+                </picture>
+            </div>
+            <h1 class="wordmark">"ตาไก๊"</h1>
+            <p class="tagline">"คิดกำไรขาดทุนสวนทุเรียน ให้รู้ก่อนขาย"</p>
             <Show when=verified>
                 <p class="form-message">"ยืนยันอีเมลเรียบร้อยแล้ว เข้าสู่ระบบได้เลย"</p>
             </Show>
             <ActionForm action=action>
-                <FormField id="login-email" label="อีเมล" name="email" input_type="email" autocomplete="email" hint="ใช้อีเมลเดียวกับที่สมัครบัญชี"/>
+                <FormField id="login-email" label="อีเมล" name="email" input_type="email" autocomplete="email"/>
                 <FormField
                     id="login-password"
                     label="รหัสผ่าน"
                     name="password"
                     input_type="password"
                     autocomplete="current-password"
-                    hint="รหัสผ่านที่ตั้งไว้ตอนสมัคร"
                 />
                 <button class="primary" type="submit">"เข้าสู่ระบบ"</button>
             </ActionForm>
@@ -136,6 +153,8 @@ fn LoginPage() -> impl IntoView {
             <p class="alternate"><A href="/forgot-password">"ลืมรหัสผ่าน"</A></p>
             <p class="alternate">"ยังไม่มีบัญชี? " <A href="/register">"สมัครใช้งาน"</A></p>
         </section>
+        <p class="entry-pilot" role="note">"สำเนาทดลอง · ข้อมูลที่กรอกใช้เพื่อการศึกษาและอาจถูกลบ"</p>
+        <p class="byline">"จากชาว Durian Academy รุ่นที่ 2"</p>
     }
 }
 
@@ -218,10 +237,14 @@ fn FormField(
     name: &'static str,
     input_type: &'static str,
     autocomplete: &'static str,
-    hint: &'static str,
+    /// Persistent help for a question the owner may not understand. A field a
+    /// phone-fluent person already knows - a login email, a password - carries
+    /// none, as DESIGN.md rules.
+    #[prop(optional)]
+    hint: Option<&'static str>,
     #[prop(default = "1")] minlength: &'static str,
 ) -> impl IntoView {
-    let help_id = format!("{id}-help");
+    let help_id = hint.map(|_| format!("{id}-help"));
     view! {
         <label>
             <span>{label}</span>
@@ -235,7 +258,7 @@ fn FormField(
                 aria-describedby=help_id.clone()
                 required
             />
-            <small id=help_id class="field-hint">{hint}</small>
+            {hint.map(|hint| view! { <small id=help_id class="field-hint">{hint}</small> })}
         </label>
     }
 }
@@ -288,6 +311,9 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
             <head>
                 <meta charset="utf-8"/>
                 <meta name="viewport" content="width=device-width, initial-scale=1"/>
+                <title>"บัญชีตาไก๊ · Takai"</title>
+                <link rel="icon" href="/takai-mark.svg" type="image/svg+xml"/>
+                <link rel="apple-touch-icon" href="/takai-icon-180.png"/>
                 <link rel="stylesheet" href="/pkg/dac2.css"/>
                 <AutoReload options=options.clone()/>
                 <HydrationScripts options/>

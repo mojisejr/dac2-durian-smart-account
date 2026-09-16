@@ -78,7 +78,7 @@ async fn verification_and_reset_messages_reach_local_mailpit() {
             port: 1025,
             security: SmtpSecurity::Plain,
         },
-        from: "DAC2 <no-reply@dac2.local>".into(),
+        from: "บัญชีตาไก๊ <no-reply@dac2.local>".into(),
         base_url: "http://127.0.0.1:3000".into(),
     })
     .expect("a plaintext transport needs no relay lookup");

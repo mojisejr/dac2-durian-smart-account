@@ -1,4 +1,4 @@
-# DAC2 — Durian Smart Account
+# บัญชีตาไก๊ · Takai — durian orchard accounts (DAC2)
 
 A local-first Thai durian-orchard business planning calculator. The application
 is a Rust workspace: a pure calculation crate, a PostgreSQL store, and one
