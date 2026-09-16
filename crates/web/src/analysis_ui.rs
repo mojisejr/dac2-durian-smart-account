@@ -651,6 +651,21 @@ fn CheckRow(id: i64, check: CheckResult) -> impl IntoView {
 fn TaxPanel(id: i64, tax: calc::TaxAnalysis) -> impl IntoView {
     let actual = tax.actual_expense.clone();
     let flat = tax.flat_sixty_percent.clone();
+    let entered = tax.deduction_count > 0;
+    let state_line = if entered {
+        format!(
+            "หักลดหย่อนแล้ว {} รายการ รวม {} บาท",
+            tax.deduction_count,
+            crate::plan_ui::money(tax.deduction_total)
+        )
+    } else {
+        "ยังไม่ได้หักลดหย่อน ตัวเลขนี้จึงสูงกว่าภาษีจริง".to_owned()
+    };
+    let link_label = if entered {
+        "ดูหรือแก้"
+    } else {
+        "กรอกลดหย่อน"
+    };
 
     view! {
         <section class="card">
@@ -659,6 +674,10 @@ fn TaxPanel(id: i64, tax: calc::TaxAnalysis) -> impl IntoView {
                 <Explain explanation=explanations::TAX label="ถ้าต้องเสียภาษี น่าจะประมาณเท่าไร".into() plan_id=Some(id)/>
             </div>
             <p class="caption tax-disclaimer">{explanations::TAX_DISCLAIMER}</p>
+            <p class="tax-deduction-state" class:tax-deduction-missing=!entered>
+                <span>{state_line}</span>
+                <A attr:class="button secondary compact" href=format!("/plans/{id}/tax-deductions")>{link_label}</A>
+            </p>
             <div class="tax-methods">
                 <TaxMethod
                     title="หักค่าใช้จ่ายตามจริง"
@@ -675,14 +694,16 @@ fn TaxPanel(id: i64, tax: calc::TaxAnalysis) -> impl IntoView {
 
 #[component]
 fn TaxMethod(title: &'static str, method: TaxMethodAnalysis) -> impl IntoView {
+    let exceeded = method.deductions_exceed_income;
     view! {
         <div class="card tax-method">
             <div class="section-title"><h3>{title}</h3></div>
             <Figure label="ขายได้ทั้งฤดู" formal_term="รายได้" value=baht(method.income)/>
             <Figure label="หักค่าใช้จ่ายออก" formal_term="ค่าใช้จ่ายที่หักได้" value=baht(method.expense)/>
-            <Figure label="หักส่วนตัวอีก" formal_term="ค่าลดหย่อนส่วนตัว" value=baht(Some(method.personal_allowance))/>
+            <Figure label="หักลดหย่อนอีก" formal_term="ค่าลดหย่อนรวม" value=baht(Some(method.deductions))/>
             <Figure label="เหลือที่ต้องคิดภาษี" formal_term="เงินได้สุทธิ" value=baht(method.taxable_income)/>
             <Figure label="ภาษีโดยประมาณ" value=baht(method.estimated_tax)/>
+            {exceeded.then(|| view! { <p class="caption">"ลดหย่อนมากกว่าเงินได้หลังหักค่าใช้จ่าย จึงไม่มีภาษี"</p> })}
             <Figure label="คิดเป็นกี่เปอร์เซ็นต์ของที่ขายได้" formal_term="อัตราภาษีเฉลี่ย" value=percent(method.average_tax_rate)/>
         </div>
     }

@@ -375,6 +375,12 @@ a.figure-missing { align-items: center; color: var(--primary); display: inline-f
 .kpi-list { display: grid; gap: 0.2rem; }
 
 .tax-methods { display: grid; gap: 0.7rem; }
+/* The deductions state sits above the two method cards: what was deducted,
+   or that nothing was and the figure is therefore an upper bound. warn text
+   on surface clears 6:1 in both themes; nothing here is a verdict. */
+.tax-deduction-state { align-items: center; display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; justify-content: space-between; margin: 0 0 0.8rem; }
+.tax-deduction-state.tax-deduction-missing > span { color: var(--warn); }
+.tax-deduction-state .button.compact { min-height: 48px; padding-block: 0.4rem; }
 .tax-method { display: grid; gap: 0.1rem; }
 .tax-method h3 { font-size: 1rem; margin: 0; }
 .caption { color: var(--muted); font-size: 0.82rem; }

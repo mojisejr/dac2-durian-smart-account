@@ -53,7 +53,7 @@ pub fn analyze_with_assets(
     let business = breakeven::calculate(&revenue, &cost);
     let health = health::calculate(plan);
     let efficiency = efficiency::calculate(plan, &revenue, &cost);
-    let tax = tax::calculate(&revenue, &cost);
+    let tax = tax::calculate(&revenue, &cost, &plan.tax_deductions);
     let scenario = scenario::calculate(&revenue, &cost);
     let checks = checks::calculate(plan, &revenue, &cost, &business, &health);
 

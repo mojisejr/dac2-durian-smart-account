@@ -2,7 +2,8 @@ use rust_decimal::Decimal;
 
 use crate::{
     CashKind, CostSectionState, FixedCostLine, Grade, HealthAnswer, HealthQuestion, KpiTargets,
-    MarketPlan, Plan, PriceSource, ProductionPlan, VariableCostKind, VariableCostLine, YieldSource,
+    MarketPlan, Plan, PriceSource, ProductionPlan, TaxDeductionLine, VariableCostKind,
+    VariableCostLine, YieldSource,
 };
 
 pub const WORKBOOK_SHA256: &str =
@@ -120,6 +121,13 @@ pub fn workbook_sample() -> Plan {
             fixed("อื่นๆ 4", CashKind::Cash, 0, 0),
         ],
         unclassified_expenses: Vec::new(),
+        // The workbook assumed the personal allowance and nothing else. It
+        // is a line here, not a constant, so the sample states its own
+        // assumption the way an owner would.
+        tax_deductions: vec![TaxDeductionLine {
+            name: "ค่าลดหย่อนส่วนตัว".into(),
+            amount: Decimal::from(60_000),
+        }],
         health_answers: HealthQuestion::ALL
             .into_iter()
             .map(|question| HealthAnswer {

@@ -83,16 +83,24 @@ pub struct KpiResult {
 pub struct TaxMethodAnalysis {
     pub income: Option<Decimal>,
     pub expense: Option<Decimal>,
-    pub personal_allowance: Decimal,
+    /// The owner's deduction lines summed; zero until any is entered.
+    pub deductions: Decimal,
     pub taxable_income: Option<Decimal>,
     pub estimated_tax: Option<Decimal>,
     pub average_tax_rate: Option<Decimal>,
+    /// The deductions alone took taxable income below zero, so the zero tax
+    /// is arithmetic and the screen says why rather than painting a verdict.
+    pub deductions_exceed_income: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TaxAnalysis {
     pub actual_expense: TaxMethodAnalysis,
     pub flat_sixty_percent: TaxMethodAnalysis,
+    /// How many deduction lines the owner entered; zero means the estimate
+    /// deducted nothing and must say so.
+    pub deduction_count: usize,
+    pub deduction_total: Decimal,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

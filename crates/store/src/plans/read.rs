@@ -1,6 +1,6 @@
 use calc::{
     ActualOutcome, FixedCostLine, Grade, HealthAnswer, KpiTargets, MarketPlan, OutcomeMetrics,
-    Plan, ProductionPlan, QuickEstimate, UnclassifiedExpense, VariableCostLine,
+    Plan, ProductionPlan, QuickEstimate, TaxDeductionLine, UnclassifiedExpense, VariableCostLine,
 };
 use rust_decimal::Decimal;
 use sqlx::{PgConnection, Row};
@@ -167,6 +167,24 @@ pub async fn load(
         .collect::<Result<_, StoreError>>()?;
 
     let rows = sqlx::query(
+        "SELECT name, amount FROM tax_deduction_lines
+         WHERE plan_id = $1 AND owner_id = $2 ORDER BY position",
+    )
+    .bind(plan_id)
+    .bind(owner_id)
+    .fetch_all(&mut *connection)
+    .await?;
+    let tax_deductions = rows
+        .into_iter()
+        .map(|row| {
+            Ok(TaxDeductionLine {
+                name: row.try_get("name")?,
+                amount: row.try_get("amount")?,
+            })
+        })
+        .collect::<Result<_, StoreError>>()?;
+
+    let rows = sqlx::query(
         "SELECT question, score FROM health_answers
          WHERE plan_id = $1 AND owner_id = $2 ORDER BY position",
     )
@@ -296,6 +314,7 @@ pub async fn load(
             )?,
             fixed_costs,
             unclassified_expenses,
+            tax_deductions,
             health_answers,
             targets,
         },

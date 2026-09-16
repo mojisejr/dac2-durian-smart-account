@@ -53,6 +53,7 @@ pub async fn replace_sections(
         "DELETE FROM variable_cost_lines WHERE plan_id = $1 AND owner_id = $2",
         "DELETE FROM fixed_cost_lines WHERE plan_id = $1 AND owner_id = $2",
         "DELETE FROM unclassified_expenses WHERE plan_id = $1 AND owner_id = $2",
+        "DELETE FROM tax_deduction_lines WHERE plan_id = $1 AND owner_id = $2",
         "DELETE FROM health_answers WHERE plan_id = $1 AND owner_id = $2",
         "DELETE FROM kpi_targets WHERE plan_id = $1 AND owner_id = $2",
     ] {
@@ -171,6 +172,21 @@ pub async fn replace_sections(
         .bind(&expense.name)
         .bind(expense.amount)
         .bind(&expense.note)
+        .execute(&mut *connection)
+        .await?;
+    }
+
+    for (index, line) in plan.tax_deductions.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO tax_deduction_lines (
+                plan_id, owner_id, position, name, amount
+             ) VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(plan_id)
+        .bind(owner_id)
+        .bind(position(index)?)
+        .bind(&line.name)
+        .bind(line.amount)
         .execute(&mut *connection)
         .await?;
     }
