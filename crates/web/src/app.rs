@@ -44,7 +44,7 @@ fn AppShell() -> impl IntoView {
                 <span class="pilot-notice-term">" (pilot)"</span>
             </p>
             <header class="site-header">
-                <A href="/"><HatMark/>"ตาไก๊"</A>
+                <A href="/"><Mark/>"ตาไก๊"</A>
             </header>
             <Routes fallback=NotFound>
                 <Route path=path!("") view=EntryPage/>
@@ -69,15 +69,14 @@ fn AppShell() -> impl IntoView {
     }
 }
 
-/// The straw hat ตาไก๊ wears, as one filled shape in the current text colour,
-/// so it follows `primary` in both themes. The favicon is the same hat on a
-/// cream disc in `public/takai-mark.svg`.
+/// ตาไก๊ himself, hat to collar, in a 24px circle beside his name. The owner
+/// chose the face over the hat silhouette for every mark on 2026-09-17; the
+/// favicon and the home-screen icon are the same cut on a cream disc in
+/// `public/takai-icon-*.png`.
 #[component]
-fn HatMark() -> impl IntoView {
+fn Mark() -> impl IntoView {
     view! {
-        <svg class="hat-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-            <path fill="currentColor" d="M9.6 17.3 11.4 7.4C11.8 5.4 13.3 4 15.2 4h1.6c1.9 0 3.4 1.4 3.8 3.4l1.8 9.9c4.2.7 7.6 2 8.9 3.9.6.9.2 1.9-1 2.6C27.2 26.1 22 27.5 16 27.5S4.8 26.1 1.7 23.8c-1.2-.7-1.6-1.7-1-2.6 1.3-1.9 4.7-3.2 8.9-3.9z"/>
-        </svg>
+        <img class="takai-mark" src="/takai-mark-48.png" width="24" height="24" alt="" aria-hidden="true"/>
     }
 }
 
@@ -405,7 +404,8 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <meta charset="utf-8"/>
                 <meta name="viewport" content="width=device-width, initial-scale=1"/>
                 <title>"บัญชีตาไก๊ · Takai"</title>
-                <link rel="icon" href="/takai-mark.svg" type="image/svg+xml"/>
+                <link rel="icon" href="/takai-icon-32.png" sizes="32x32" type="image/png"/>
+                <link rel="icon" href="/takai-icon-64.png" sizes="64x64" type="image/png"/>
                 <link rel="apple-touch-icon" href="/takai-icon-180.png"/>
                 <link rel="stylesheet" href="/pkg/dac2.css"/>
                 <AutoReload options=options.clone()/>

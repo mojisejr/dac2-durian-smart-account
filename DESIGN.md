@@ -1,6 +1,6 @@
 # DAC2 — Design
 
-**Status:** draft, revision 0.11
+**Status:** draft, revision 0.12
 **Home:** this file moves to the application repository root in slice 1. There is
 one copy of it, never two.
 
@@ -99,6 +99,8 @@ White text on `primary`, `good`, and `bad` fills reaches 8.04:1, 7.46:1, and
 
 ### Rules
 
+- **Native controls take `primary`.** Radio, checkbox and range through
+  `accent-color`, never the browser's blue, in both themes.
 - **Colour is never the only signal.** Every good or bad state carries its word
   as well: `ถึงเป้า` or `ปรับปรุง`, `กำไร` or `ขาดทุน`. Roughly one Thai man in
   twelve cannot separate the greens from the reds. The source workbook already
@@ -133,9 +135,15 @@ the marks collide and the text stops being readable before it stops looking fine
 Nothing user-facing is set below 13. A number the owner must act on is never
 below `body`.
 
-**Two decimal places, everywhere a figure is shown.** `834,600.00 บาท`,
-`40.66 บาท/กก.`, `119.23%`. Rounding is presentation only: the calculation keeps
-full precision and a rounded figure is never fed into another calculation.
+**Amounts in whole baht; rates to two places.** `834,600 บาท`, `20,000 บาท/ปี`
+— an amount of money is written the way a grower says it, with no satang.
+`40.66 บาท/กก.`, `119.23%`, `3.00/5` and `18,000.00 กก.` keep two places,
+because a rate or a share loses its meaning without them. Rounding is
+presentation only: the calculation keeps full precision, a rounded figure is
+never fed into another calculation, and a displayed total may therefore differ
+from the sum of displayed lines by a baht. (Revision 0.12; until then every
+figure carried two places, and the owner decided against it after seeing
+`1,422,000.00 บาท` on a phone.)
 
 **Figures are tabular.** `font-variant-numeric: tabular-nums` everywhere a number
 appears in a column, so digits align down the page. Thousands separators always.
@@ -294,19 +302,19 @@ hosting service, and this document's file history. No user sees it.
 
 ### The mark
 
-A face is a blur at sixteen pixels. The favicon is therefore the **straw hat
-in silhouette**: the brim and crown of ตาไก๊'s hat as one filled shape,
-`public/takai-mark.svg`, painted `#0F5C3A` on a `#F7F6F2` disc. The disc is
-there because a browser's tab bar may be dark and does not theme a favicon;
-on it the dark green alone was faint. It is the same hat the mascot wears, so
-the tab and the screen say the same thing. A 180-pixel PNG for a phone's home
-screen is generated from the SVG. In the site header the same hat is drawn
-inline at 24 pixels in the current text colour, so it follows `primary` in
-both themes, with no disc.
+The mark is ตาไก๊ himself: the bust cut from hat brim to collar, filling a
+circle, `public/takai-icon-32.png`, `-64.png` and `-180.png` on a `#F7F6F2`
+disc for the browser tab and a phone's home screen, and `takai-mark-48.png`
+with no disc, drawn at 24 pixels in the site header beside his name.
 
-Drawn and checked at 16, 32 and 64 pixels on a light and a dark tab bar: it
-reads as a hat. The letter fallback (ต in Sarabun 700 on a green disc) was
-not needed and is not shipped.
+Until revision 0.12 the mark was the straw hat in silhouette, chosen because a
+face is a blur at sixteen pixels and the hat still reads as a hat there. The
+owner chose the face for every mark on 2026-09-17 knowing that, so the tab
+and the screen carry the same person rather than the same hat. Checked at
+180, 64, 32 and 16 pixels on a light and a dark tab bar: at 16 the hat and
+the green shirt are what remain, which is enough to find the tab; the face
+is readable from 32 up. The hat silhouette stays in Git history should the
+tab prove hard to find.
 
 ### The entry screen — `/`
 
@@ -503,6 +511,16 @@ When the plan is incomplete, the hero is replaced by what is missing and a
 button that goes straight there. A dashboard must never show a confident figure
 computed from absent inputs.
 
+**The six decisions are one line here.** The list `ตอนนี้ตอบได้ว่า` — six
+rows, each a question, its formal term, and what is still missing — belongs
+to the hub in full. The dashboard with a figure at the top, and the analysis
+page always, show one row instead: `ตอบได้ 4 จาก 6 คำถาม · ยังขาด: เงินก้อนที่ลงไป
+· ดูทั้งหมด`, linking to the hub, each missing fact named once. Three screens
+that open with the same six rows made the tab bar meaningless; this keeps
+each screen's own content within the first screen. While the dashboard's
+hero says `ยังบอกไม่ได้` the full list stays, because then the list is the
+way forward.
+
 ### กรอกข้อมูล — hub
 
 The top card states the nearest useful result and one recommended next action.
@@ -528,7 +546,7 @@ main work.
   เป้าหมาย KPI                  ›
 
 ────────────────────────────
-กำไรสุทธิโดยประมาณ  834,600.00 บาท
+กำไรสุทธิโดยประมาณ  834,600 บาท
 ```
 
 Until the owner sets a target, the KPI that needs it has no verdict to give.
@@ -536,7 +554,11 @@ Physical efficiency rows appear only when their exact owner-entered quantity
 and unit exist. Missing optional quantities stay quiet and never count against
 readiness.
 
-The hub edits year, name, and note while the season is open. Its management
+The season's year, name and note are edited once a year, so the hub does
+not open with a form for them. One row sits under the heading —
+`สวนมะขาม · ฤดูกาล 2569 · แก้` — and `แก้` opens the same three fields and
+their save button in place (a disclosure, not a new screen). A closed season
+shows the row with nothing to open. Its management
 area holds `ทำฤดูกาลถัดไปจากฤดูนี้` and
 `บันทึกผลจริงและปิดฤดูกาล`. Reset belongs only to the browser demonstration; a
 real season is never mistaken for disposable sample data.
@@ -702,7 +724,7 @@ that year.
 
 | Question | Formal term | State line |
 |---|---|---|
-| `ปีนี้มีอะไรลดหย่อนภาษีได้บ้าง` | `ค่าลดหย่อน · ภาษีเงินได้บุคคลธรรมดา` | `ยังไม่ได้กรอก · ภาษีคิดโดยยังไม่หักลดหย่อน` or `กรอกแล้ว 3 รายการ · รวม 160,000.00 บาท` |
+| `ปีนี้มีอะไรลดหย่อนภาษีได้บ้าง` | `ค่าลดหย่อน · ภาษีเงินได้บุคคลธรรมดา` | `ยังไม่ได้กรอก · ภาษีคิดโดยยังไม่หักลดหย่อน` or `กรอกแล้ว 3 รายการ · รวม 160,000 บาท` |
 
 The row never counts against readiness; it is an optional section that
 unlocks a closer tax figure, and the hub says so in the section's own words,
@@ -721,12 +743,12 @@ personal allowance, so the only two states are *not yet entered* and
   แม้แต่ค่าลดหย่อนส่วนตัว เพราะจำนวนขึ้นกับคุณและปีที่ยื่น
   กรอกแล้วได้อะไร  ภาษีโดยประมาณจะหักรายการเหล่านี้ออกก่อนคิด
 
-  ค่าลดหย่อนส่วนตัว                  60,000.00 บาท   ⋮
-  ประกันสังคม                         9,000.00 บาท   ⋮
-  ประกันชีวิต                        91,000.00 บาท   ⋮
+  ค่าลดหย่อนส่วนตัว                  60,000 บาท   ⋮
+  ประกันสังคม                         9,000 บาท   ⋮
+  ประกันชีวิต                        91,000 บาท   ⋮
   [ + เพิ่มรายการลดหย่อน ]
   ─────────────────────────────────────
-  รวมลดหย่อน                        160,000.00 บาท
+  รวมลดหย่อน                        160,000 บาท
 ```
 
 Tapping the add button or a row opens a bottom sheet with two guided fields:
@@ -782,10 +804,10 @@ state of the section:
   so the screen shows the figure and says what is missing in the same
   breath. The button is a 48-pixel target that opens the section.
 - *Entered:*
-  `หักลดหย่อนแล้ว 3 รายการ รวม 160,000.00 บาท — [ ดูหรือแก้ ]`
+  `หักลดหย่อนแล้ว 3 รายการ รวม 160,000 บาท — [ ดูหรือแก้ ]`
 - *Deductions exceed income after expense, under a method:* that method's
-  `เหลือที่ต้องคิดภาษี` shows `0.00 บาท` and its `ภาษีโดยประมาณ` shows
-  `0.00 บาท` with the caption `ลดหย่อนมากกว่าเงินได้หลังหักค่าใช้จ่าย จึงไม่มีภาษี`
+  `เหลือที่ต้องคิดภาษี` shows `0 บาท` and its `ภาษีโดยประมาณ` shows
+  `0 บาท` with the caption `ลดหย่อนมากกว่าเงินได้หลังหักค่าใช้จ่าย จึงไม่มีภาษี`
   beneath. Nothing is painted `good` or `bad`; a zero here is arithmetic,
   not a verdict.
 
@@ -996,7 +1018,7 @@ dependency is that yield comes before anything can be computed at all.
 
 ```
 เปิดแอป → หน้าแรก
-   กำไรสุทธิ 834,600.00 บาท  ⓘ
+   กำไรสุทธิ 834,600 บาท  ⓘ
    ต้นทุน/กก. 40.66  ⓘ   จุดคุ้มทุน 4,670.00 กก.  ⓘ
    ROI 119.23%  ⓘ         คืนทุน 0.78 ปี  ⓘ
    ตอบสนองตลาด 79.80%   ⚠ ปรับปรุง      ←── แตะ
@@ -1017,7 +1039,7 @@ dependency is that yield comes before anything can be computed at all.
    ราคา    ─────●──────────  −10%
    ผลผลิต  ──────────●─────    0%
         ↓
-   กำไรสุทธิ  669,013.00 บาท
+   กำไรสุทธิ  669,013 บาท
    เหนือจุดคุ้มทุน 15,280.00 กก.
         ↓
    ตอบได้ขณะยังถือสายอยู่
@@ -1330,23 +1352,31 @@ reachable from both.
 
 ## Open questions
 
-- Two decimal places on the dashboard hero costs width on a narrow phone:
-  `834,600.00 บาท` is eleven characters before the unit. The rule is the owner's
-  and stands; this is noted only so it can be revisited after it is seen on a
-  real device rather than argued about now.
 - Whether an offline mode is wanted. Orchard signal is not assumed to be good,
   and the calculation already runs locally, so the gap is only saving. Not
   planned; raised because the context suggests it.
 - Whether one owner ever compares two seasons side by side, which would change
   the dashboard from a single plan to a comparison. Closing a season and
   duplicating it makes this more likely, not less.
-- Icon set is not chosen for the working screens. The entry screen's mark
-  and mascot are chosen in **Identity and the entry screen**.
+- Icon set is not chosen for the working screens, and on 2026-09-17 the owner
+  decided not to add one until the comprehension study says whether people
+  fail to find the section cards. The mark is chosen in **Identity and the
+  entry screen**.
+- Verdict rows in the shape `value · target · one word` are the way to show a
+  KPI once its target exists (owner, 2026-09-17); they replace the figure
+  cards on the analysis page only when the owner has set that target, never
+  before, and never by colour alone.
 - Whether a cross-year view of deductions belongs on the history page. Not
   planned; opening the season is the way to look back, and the owner said
   that is enough.
 - Whether the mascot should appear in mail, which would mean HTML mail;
   see **Mail** under **Identity and the entry screen**.
+
+Resolved since revision 0.11: amounts are whole baht (**Type**); the mark is
+the mascot (**The mark**); the hub's season details are one row (**กรอกข้อมูล
+— hub**); the decision list is one line off the hub (**หน้าแรก — dashboard**);
+native controls take `primary` (**Colour rules**); the hero's width question
+above is closed by the whole-baht rule.
 
 Resolved since revision 0.10: a password can be shown while typing, is typed
 twice where it is set, and is six characters or more; see **Password fields**

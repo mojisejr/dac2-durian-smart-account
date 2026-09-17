@@ -15,7 +15,7 @@ use rust_decimal::Decimal;
 use crate::{
     explanations::{self, Explanation},
     plan_form::{Decision, DecisionReadiness, DecisionState, PlanForm, ReadinessTone},
-    plan_ui::{BottomNav, DecisionList, NavSection, money},
+    plan_ui::{BottomNav, DecisionList, NavSection, baht_amount, money},
     plans::PlanRecord,
 };
 
@@ -32,7 +32,10 @@ const SECTION_TITLES: [(&str, &str); 5] = [
 // ---------------------------------------------------------------- formatting
 
 fn baht(value: Option<Decimal>) -> String {
-    value.map_or_else(|| ABSENT.into(), |value| format!("{} บาท", money(value)))
+    value.map_or_else(
+        || ABSENT.into(),
+        |value| format!("{} บาท", baht_amount(value)),
+    )
 }
 
 fn with_unit(value: Option<Decimal>, unit: &str) -> String {
@@ -367,7 +370,9 @@ pub(crate) fn DashboardFigures(
             DecisionState::Optional { .. } => ().into_any(),
         }}
 
-        {id.map(|id| view! { <DecisionList plan_id=id decisions=decisions.clone()/> })}
+        // With a figure at the top the six rows shrink to one line; while
+        // the hero says "ยังบอกไม่ได้" the full list is the way forward.
+        {id.map(|id| view! { <DecisionList plan_id=id decisions=decisions.clone() compact=matches!(first_estimate, DecisionState::Ready)/> })}
 
         <section class="figure-grid">
             <div class="card figure-tile">
@@ -656,7 +661,7 @@ fn TaxPanel(id: i64, tax: calc::TaxAnalysis) -> impl IntoView {
         format!(
             "หักลดหย่อนแล้ว {} รายการ รวม {} บาท",
             tax.deduction_count,
-            crate::plan_ui::money(tax.deduction_total)
+            baht_amount(tax.deduction_total)
         )
     } else {
         "ยังไม่ได้หักลดหย่อน ตัวเลขนี้จึงสูงกว่าภาษีจริง".to_owned()
@@ -783,7 +788,7 @@ fn ScenarioPanel(scenario: calc::ScenarioAnalysis) -> impl IntoView {
 }
 
 fn money_or_absent(value: Option<Decimal>) -> String {
-    value.map_or_else(|| ABSENT.into(), money)
+    value.map_or_else(|| ABSENT.into(), baht_amount)
 }
 
 #[cfg(test)]
@@ -800,8 +805,9 @@ mod tests {
     }
 
     #[test]
-    fn money_carries_two_decimals_and_thousands_separators() {
-        assert_eq!(baht(Some(Decimal::new(83_460_012, 2))), "834,600.12 บาท");
+    fn an_amount_is_whole_baht_with_thousands_separators() {
+        assert_eq!(baht(Some(Decimal::new(83_460_012, 2))), "834,600 บาท");
+        assert_eq!(baht(Some(Decimal::new(83_460_050, 2))), "834,601 บาท");
     }
 
     #[test]

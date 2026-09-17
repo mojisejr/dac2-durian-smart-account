@@ -179,7 +179,7 @@ fn the_shell_names_the_application_and_its_mark() {
     let shell = render_shell("/");
     assert!(shell.contains("<title>บัญชีตาไก๊ · Takai</title>"), "{shell}");
     assert!(
-        shell.contains("rel=\"icon\" href=\"/takai-mark.svg\""),
+        shell.contains("rel=\"icon\" href=\"/takai-icon-32.png\""),
         "{shell}"
     );
     assert!(

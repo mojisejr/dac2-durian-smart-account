@@ -396,9 +396,9 @@ fn actual_review_names_the_irreversible_step_and_all_source_facts() {
     let html = render_actual("review", actual_record(false));
     assert!(html.contains("ตรวจทานก่อนปิดฤดูกาล"));
     assert!(html.contains("18,000.00 กก."));
-    assert!(html.contains("1,530,000.00 บาท"));
-    assert!(html.contains("990,000.00 บาท"));
-    assert!(html.contains("540,000.00 บาท"));
+    assert!(html.contains("1,530,000 บาท"));
+    assert!(html.contains("990,000 บาท"));
+    assert!(html.contains("540,000 บาท"));
     assert!(html.contains("ยืนยันผลจริงและปิดฤดูกาล"));
     assert!(html.contains("กลับไปแก้ผลจริง"));
 }
@@ -410,8 +410,8 @@ fn final_comparison_names_source_formula_direction_and_unavailable_rules() {
     assert!(html.contains("แหล่งประมาณการ: ประมาณการเร็ว"));
     assert!(html.contains("ผลต่าง = ผลจริง - ประมาณการ"));
     assert!(html.contains("ต่ำกว่าประมาณการ 2,000.00 กก."));
-    assert!(html.contains("สูงกว่าประมาณการ 90,000.00 บาท"));
-    assert!(html.contains("ต่ำกว่าประมาณการ 160,000.00 บาท"));
+    assert!(html.contains("สูงกว่าประมาณการ 90,000 บาท"));
+    assert!(html.contains("ต่ำกว่าประมาณการ 160,000 บาท"));
     assert!(html.contains("ผลผลิตน้อยกว่าคาด"));
 }
 
@@ -423,7 +423,7 @@ fn legacy_closed_season_never_renders_synthetic_zero_actuals() {
     );
     assert!(html.contains("ไม่มีผลจริงที่บันทึกไว้"));
     assert!(html.contains("ไม่เติมศูนย์หรือสร้างตัวเลขแทน"));
-    assert!(!html.contains("0.00 บาท"));
+    assert!(!html.contains("0 บาท"));
 }
 
 #[test]
@@ -549,6 +549,51 @@ fn all_seven_input_routes_render_closed_values_without_edit_controls() {
     }
 }
 
+// A closed season's numbers read like the open season's did after a blur:
+// thousands separated, never the raw stored string. dac2-ui-polish-001.
+#[test]
+fn a_closed_season_separates_thousands_in_its_read_only_values() {
+    let mut form = PlanForm::from_plan(&calc::workbook_sample());
+    form.production.yield_source = calc::YieldSource::Direct;
+    form.production.sellable_yield_kg = "18000".into();
+    let html = render("production", true, form);
+    assert!(
+        html.contains("<p class=\"readonly-value\">18,000 กก.</p>"),
+        "{html}"
+    );
+    assert!(!html.contains(">18000 กก.<"), "{html}");
+}
+
+// The season's year, name and note are one row under the heading with the
+// form behind a disclosure, not a card of three fields at the top of the
+// page; a closed season shows the row with nothing to open.
+#[test]
+fn the_hub_keeps_the_season_details_in_one_row() {
+    let open = render_hub(PlanForm::from_plan(&calc::workbook_sample()), false);
+    assert!(!open.contains("รายละเอียดฤดูกาล"), "{open}");
+    let row = open.find("class=\"season-row\"").expect("season row");
+    let mode = open.find("โหมดที่ใช้อยู่").expect("mode card");
+    assert!(row < mode, "the row precedes the mode card");
+    let summary = &open[row..mode];
+    assert!(
+        summary.contains("ตัวอย่างจากแบบคำนวณ · ฤดูกาล 2569"),
+        "{summary}"
+    );
+    assert!(summary.contains(">แก้<"), "{summary}");
+    assert!(
+        summary.contains("name=\"season_year\""),
+        "the form is still there, behind the disclosure"
+    );
+    assert!(summary.contains("บันทึกรายละเอียด"));
+
+    let closed = render_hub(PlanForm::from_plan(&calc::workbook_sample()), true);
+    assert!(closed.contains("class=\"season-row-static\""), "{closed}");
+    assert!(
+        !closed.contains("season_year"),
+        "no form on a closed season"
+    );
+}
+
 #[test]
 fn fixed_costs_explain_that_investment_is_optional_per_item() {
     let html = render(
@@ -615,9 +660,9 @@ fn quick_result_renders_only_figures_supported_by_three_inputs() {
 
     for expected in [
         "กำไรโดยประมาณ",
-        "700,000.00 บาท",
+        "700,000 บาท",
         "รายได้โดยประมาณ",
-        "1,600,000.00 บาท",
+        "1,600,000 บาท",
         "ต้นทุนต่อกิโลกรัม",
         "45.00 บาท/กก.",
         "ราคาขายคุ้มทุน",
@@ -998,7 +1043,7 @@ fn fixed_costs_list_manual_rows_and_included_asset_depreciation_as_two_groups() 
     assert!(assets.contains("ของที่ใช้หลายปี · ค่าเสื่อม"));
     assert!(assets.contains("ต้นทุนไม่ใช่เงินสด"));
     assert!(assets.contains("ระบบน้ำ"));
-    assert!(assets.contains("20,000.00 บาท/ปี"));
+    assert!(assets.contains("20,000 บาท/ปี"));
     assert!(assets.contains("href=\"/plans/42/assets\""));
     assert!(assets.contains("ไม่ต้องกรอกซ้ำที่นี่"));
     assert!(!assets.contains("<input"), "asset rows are read-only");
@@ -1024,11 +1069,11 @@ fn fixed_costs_total_equals_the_dashboard_fixed_cost() {
     let total = between(&html, "fixed-cost-total", "</div>");
     assert!(total.contains("รวมค่าใช้จ่ายประจำฤดูนี้"));
     assert!(total.contains("ต้นทุนคงที่รวม"));
-    assert!(total.contains("56,000.00 บาท/ปี"), "{total}");
+    assert!(total.contains("56,000 บาท/ปี"), "{total}");
 
     let html = render("fixed-costs", false, form);
     let total = between(&html, "fixed-cost-total", "</div>");
-    assert!(total.contains("36,000.00 บาท/ปี"), "{total}");
+    assert!(total.contains("36,000 บาท/ปี"), "{total}");
 }
 
 #[test]
@@ -1047,7 +1092,7 @@ fn fixed_costs_question_belongs_to_the_manual_group_and_confirming_makes_asset_o
     assert!(!assets.contains("fixed-cost-state"));
     let total = between(&unknown, "fixed-cost-total", "</div>");
     assert!(total.contains("ยังไม่รู้"), "{total}");
-    assert!(total.contains("ค่าเสื่อม 20,000.00 บาท/ปี รวมอยู่แล้ว แต่ยอดรวมยังไม่รู้"));
+    assert!(total.contains("ค่าเสื่อม 20,000 บาท/ปี รวมอยู่แล้ว แต่ยอดรวมยังไม่รู้"));
     assert!(
         unknown.contains("ยังคำนวณกำไรสุทธิไม่ได้"),
         "depreciation alone does not make the unknown section known"
@@ -1057,10 +1102,10 @@ fn fixed_costs_question_belongs_to_the_manual_group_and_confirming_makes_asset_o
     confirmed.fixed_cost_state = calc::CostSectionState::ConfirmedNone;
     let html = render_with_assets("fixed-costs", false, confirmed, vec![included_asset()]);
     let total = between(&html, "fixed-cost-total", "</div>");
-    assert!(total.contains("20,000.00 บาท/ปี"), "{total}");
+    assert!(total.contains("20,000 บาท/ปี"), "{total}");
     assert!(!total.contains("ยังไม่รู้"));
     assert!(
-        html.contains("กำไรสุทธิโดยประมาณ 1,580,000.00 บาท"),
+        html.contains("กำไรสุทธิโดยประมาณ 1,580,000 บาท"),
         "the live figure on the page counts the included asset: {html}"
     );
 
@@ -1195,7 +1240,7 @@ fn a_season_closed_with_unknown_costs_compares_what_it_froze_and_never_invents_a
     assert!(html.contains("แหล่งประมาณการ: แผนละเอียด"));
     assert!(html.contains("ต่ำกว่าประมาณการ 2,000.00 กก."));
     assert!(
-        html.contains("ต่ำกว่าประมาณการ 70,000.00 บาท"),
+        html.contains("ต่ำกว่าประมาณการ 70,000 บาท"),
         "revenue compares"
     );
     assert_eq!(
@@ -1248,7 +1293,7 @@ fn the_deductions_section_offers_names_prefills_nothing_and_locks_when_closed() 
         "ระบบไม่ตรวจเพดานให้",
         "ลบรายการนี้",
         "รวมลดหย่อน",
-        "60,000.00 บาท",
+        "60,000 บาท",
     ] {
         assert!(open.contains(expected), "missing {expected} in {open}");
     }

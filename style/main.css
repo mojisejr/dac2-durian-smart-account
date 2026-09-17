@@ -62,7 +62,7 @@ html[data-pilot="true"] .pilot-notice { background: color-mix(in srgb, var(--war
 
 .site-header { margin-bottom: 1.25rem; }
 .site-header a { align-items: center; color: var(--primary); display: inline-flex; font-weight: 700; gap: 0.4rem; min-height: 48px; text-decoration: none; }
-.hat-mark { display: block; height: 24px; width: 24px; }
+.takai-mark { border-radius: 50%; display: block; height: 24px; width: 24px; }
 
 /* The entry screen - the login form at "/" - carries the identity itself:
    the mascot, the wordmark, its own one-line pilot notice. The shared strip
@@ -108,6 +108,9 @@ a { color: var(--primary); }
 
 form { display: grid; gap: 1rem; margin: 0; }
 label { display: grid; gap: 0.35rem; font-weight: 650; }
+/* Native controls take the application's green, not the browser's blue -
+   radios, checkboxes and the scenario sliders alike, in both themes. */
+input, select, textarea, progress { accent-color: var(--primary); }
 input, select, textarea { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 0.55rem; color: var(--text); font: inherit; font-variant-numeric: tabular-nums; min-height: 56px; padding: 0.75rem 0.85rem; width: 100%; }
 textarea { line-height: 1.6; resize: vertical; }
 input:focus, select:focus, textarea:focus, button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid var(--warn); outline-offset: 2px; }
@@ -161,6 +164,15 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 .latest-status { color: var(--primary) !important; }
 .warning { color: var(--warn) !important; }
 .season-back { justify-self: start; }
+/* The season's year, name and note are edited once a year, so the hub
+   shows them as one row under the heading and opens the form on request. */
+.season-row { border-top: 0; padding-top: 0; }
+.season-row > summary { align-items: center; color: var(--muted); display: flex; flex-wrap: wrap; font-weight: 500; gap: 0.35rem 0.6rem; list-style: none; padding-block: 0.4rem; }
+.season-row > summary::-webkit-details-marker { display: none; }
+.season-row > summary .season-edit { color: var(--primary); font-weight: 700; text-decoration: underline; }
+.season-row[open] > summary .season-edit { text-decoration: none; }
+.season-row > form { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; margin-top: 0.6rem; padding: 1rem; }
+.season-row-static { color: var(--muted); margin: 0; }
 .season-metadata { display: grid; gap: 0.7rem; margin: 0; }
 .season-metadata div { border-top: 1px solid var(--border); display: grid; gap: 0.15rem; padding-top: 0.6rem; }
 .season-metadata div:first-child { border-top: 0; padding-top: 0; }
@@ -305,6 +317,13 @@ summary { cursor: pointer; font-weight: 650; min-height: 48px; padding-block: 0.
 .decision-rows > li:first-child { border-top: 0; }
 .decision-row { align-items: center; color: var(--text); display: flex; flex-wrap: wrap; gap: 0.35rem 0.75rem; justify-content: space-between; min-height: 48px; padding: 0.5rem 0; text-decoration: none; }
 .decision-question { display: grid; flex: 1 1 12rem; min-width: 0; }
+/* On the dashboard and the analysis page the six decisions are one line -
+   the count answered and what is still missing - linking to the hub, which
+   keeps the full list. */
+.decision-summary { align-items: center; color: var(--text); display: flex; flex-wrap: wrap; gap: 0.35rem 0.75rem; justify-content: space-between; min-height: 48px; text-decoration: none; }
+.decision-summary strong { flex: 0 0 auto; }
+.decision-summary .decision-missing { color: var(--warn); flex: 1 1 12rem; font-size: 0.92rem; min-width: 0; }
+.decision-summary .decision-open { color: var(--primary); flex: 0 0 auto; font-weight: 700; text-decoration: underline; }
 .comparison-preview { display: grid; gap: 0.5rem; }
 .comparison-preview-rows { display: grid; list-style: none; margin: 0; padding: 0; }
 .comparison-preview-row { align-items: center; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 0.35rem 0.75rem; justify-content: space-between; min-height: 48px; padding: 0.5rem 0; }
